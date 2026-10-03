@@ -108,7 +108,9 @@ impl Gpu {
             single_sample_pipelines: None,
             primary_pipelines: None,
             realtime_post: None,
+            realtime_linear_post: None,
             reconstruction_display: None,
+            reconstruction_linear: None,
         };
         unsafe {
             let ranges = [vk::PushConstantRange::default()

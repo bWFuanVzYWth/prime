@@ -6,6 +6,10 @@ module "reconstruct/rr_status.slang";
 public static const uint PRIME_RR_PRIMARY_PENDING = 1u;
 public static const uint PRIME_RR_REFLECTION_PENDING = 2u;
 public static const uint PRIME_RR_EXPLICIT_REFLECTION = 4u;
+public static const uint PRIME_RR_FOREGROUND = 8u; // Actual first query visibility, before PSR.
+public bool primeRrForeground(float packed) {
+    return (uint(round(saturate(packed) * 255.0)) & PRIME_RR_FOREGROUND) != 0;
+}
 public uint primeRrGuideStatus(float packed) {
     return uint(round(saturate(packed) * 255.0));
 }

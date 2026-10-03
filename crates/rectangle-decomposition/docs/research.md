@@ -71,7 +71,7 @@ cargo fmt -p rectangle_decomposition --check
 | `cargo run -p rectangle_decomposition --release --features profile --example worst_case_profile` | 轴区间、chord、匹配与分区的阶段耗时和规模 |
 | `cargo run -p rectangle_decomposition --release --example low_discrepancy_1000` | 一组含孔输入的平均／最大耗时，以及最慢样本的矩形数 |
 
-`worst_case` 是基准名称，不是全局最坏输入的数学证明。现有语料覆盖整面、条纹、棋盘格、稀疏／密集随机、多孔、最大弦、多标签和混合 LOD，分别覆盖 leaves 与预校验 image 入口。本项目尚未将分解算法接入 Minecraft 网格；这些 CPU 算法基准不能代表游戏性能。项目的渲染测量方法见 [CONTRIBUTING](../../../CONTRIBUTING.md)。数量指纹来自同源算法，不能替代独立最优性验证。
+`worst_case` 是基准名称，不是全局最坏输入的数学证明。现有语料覆盖整面、条纹、棋盘格、稀疏／密集随机、多孔、最大弦、多标签和混合 LOD，分别覆盖 leaves 与预校验 image 入口。本项目的 `prime_scene::surface` 已在完整材质与网格资格证明后消费本库，接入范围见[表面编译](../../../docs/surface-compiler.md)；这些独立 CPU 算法基准仍不能代表游戏性能。项目的渲染测量方法见 [CONTRIBUTING](../../../CONTRIBUTING.md)。数量指纹来自同源算法，不能替代独立最优性验证。
 
 热路径测量应在计时外构造输入、复用 scratch，并消费返回结果；构造、输出复制和多线程场景另行测量。对比版本使用相同工具链、编译选项和样本，轮换运行顺序，保留分布而非只报最小值。阶段计时用于定位，总收益以不带阶段计时的完整调用为准。
 

@@ -27,10 +27,12 @@ import "realtime/landing.slang";
 [[vk::binding(17, 0)]] ConstantBuffer<RrCamera> rrCamera;
 [[vk::binding(19, 0)]] [[vk::image_format("r8")]] RWTexture2D<float> guideUnresolved;
 [[vk::binding(20, 0)]] [[vk::image_format("rg16f")]] RWTexture2D<float2> specularMotion;
+[[vk::binding(21, 0)]] [[vk::image_format("r32f")]] RWTexture2D<float> visibleDepth;
+[[vk::binding(22, 0)]] [[vk::image_format("rg16f")]] RWTexture2D<float2> visibleMotion;
 [[vk::push_constant]] ConstantBuffer<PrimaryParameters> parameters;
 
 public struct TestEnvironment : IPrimaryEnvironment {
-    public float3 escape(float3 direction) {
+    public float3 escape(float3 direction, bool initialCameraMiss) {
         return float3(1.0);
     }
 };
@@ -38,11 +40,23 @@ public struct TestEnvironment : IPrimaryEnvironment {
 [shader("compute")][numthreads(8, 8, 1)] void main(uint3 id : SV_DispatchThreadID) {
     if (any(id.xy >= parameters.sampling.xy))
         return;
+    // Complete test readback initialization also when this specialization has FG disabled.
+    visibleDepth[id.xy] = 0.0;
+    visibleMotion[id.xy] = float2(0.0);
     TraceScene resources = {scene, textures, texels, instanceMaterials, staticTrianglePages};
-    PrimaryRrGuides guides = {linearDepth,     motionVectors,  normalRoughness,
-                              diffuseAlbedo,   specularAlbedo, specularHitDistance,
-                              guideUnresolved, specularMotion, transmissionEnergy,
-                              rrCamera};
+    PrimaryRrGuides guides = {linearDepth,
+                              motionVectors,
+                              normalRoughness,
+                              diffuseAlbedo,
+                              specularAlbedo,
+                              specularHitDistance,
+                              guideUnresolved,
+                              specularMotion,
+                              transmissionEnergy,
+                              rrCamera,
+                              visibleDepth,
+                              visibleMotion,
+                              (motionFeatures & 2u) != 0};
     TestEnvironment environment;
     primeTracePrimary(resources, environment, parameters, id.xy, guides);
     // Test-only synthetic K2 hit distance; this isolates the production post completion helper.

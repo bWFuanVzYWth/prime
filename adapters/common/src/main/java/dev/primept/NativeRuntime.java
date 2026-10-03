@@ -16,7 +16,8 @@ import java.util.List;
 final class NativeRuntime {
     static final List<String> WINDOWS_FILES =
             List.of("prime_engine.dll", "sl.interposer.dll", "sl.common.dll", "sl.dlss_d.dll",
-                    "nvngx_dlssd.dll");
+                    "nvngx_dlssd.dll", "sl.dlss_g.dll", "sl.pcl.dll", "sl.reflex.dll",
+                    "nvngx_dlssg.dll", "NvLowLatencyVk.dll");
     @FunctionalInterface
     interface Resource {
         InputStream open(String name) throws IOException;

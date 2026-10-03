@@ -1,119 +1,172 @@
 # Streamline Vulkan bridge
 
-`prime_streamline.cpp` builds as a Windows x86-64 C++17 static library, linked into
+`prime_streamline.cpp` builds as a Windows x86-64 C++17 static library linked into
 `prime_engine.dll`. Include `third_party/streamline/include` and
-`third_party/streamline/vulkan-headers/include`; no SL import library, NGX static
-library or Vulkan loader import library is required. The four production runtime
-DLLs are loaded only from the engine DLL's directory. OTA and downloaded plugin
-loading are disabled, preserving the checked-in SDK lock.
+`third_party/streamline/vulkan-headers/include`; SL, NGX and Vulkan import libraries
+are unnecessary. Runtime loading is restricted to the engine DLL's directory.
+OTA and downloaded plugins are disabled. The lock pins Streamline 2.14.1 and
+DLSS 310.9.1, with hashes and NVIDIA signatures checked by
+`scripts/fetch-streamline-sdk.ps1 -VerifyOnly`.
 
-The C ABI in `prime_streamline.h` owns one process-global Streamline context and
-viewport. Rust owns every tagged image and all command submission/completion.
-The bridge does not create or submit command buffers, wait for the GPU, or replace
-the host's Vulkan device. All bridge operations, including presentation, are
-serialized by one mutex. GPU execution remains asynchronous.
+Nine runtime DLLs are packaged: `sl.interposer.dll`, `sl.common.dll`,
+`sl.dlss_d.dll`, `nvngx_dlssd.dll`, `sl.dlss_g.dll`, `sl.pcl.dll`, `sl.reflex.dll`,
+`nvngx_dlssg.dll` and `NvLowLatencyVk.dll`, alongside `prime_engine.dll`.
 
-Before attachment, the host enables `VK_NVX_binary_import`,
-`VK_NVX_image_view_handle`, `VK_KHR_push_descriptor` and the core/KHR buffer device
-address capability. Vulkan 1.2 `timelineSemaphore`, `descriptorIndexing` and
-`bufferDeviceAddress`, plus core `shaderStorageImageExtendedFormats` for the
-RG16F/R16F storage-image guides and `shaderStorageImageWriteWithoutFormat` for
-Streamline's own clear shader, must be enabled. The Vulkan 1.2 host also enables
-`VK_KHR_synchronization2` and its `synchronization2` feature. The real SDK fixture
-demonstrates that NGX's same-layout barriers require its layout semantics to avoid
-two internal image layout errors; no internal image is modified by the bridge.
-The obsolete `VK_EXT_buffer_device_address`
-is excluded, matching Streamline's own conflict removal. The required instance
-capabilities (`get_physical_device_properties2`, external memory and semaphore
-capabilities) are core in Vulkan 1.1. RR requires no additional queues. Unsupported
-hardware and initialization failures are reported before RR resources are used.
+## Initialization and requirements
 
-`configure` queries the SDK's optimal input resolution for DLAA, Quality, Balanced,
-Performance or UltraPerformance. All six preset slots are explicitly F. It must
-run after GPU completion of previous evaluations; it explicitly frees the old RR
-feature before configuring a new extent, avoiding the SDK's resize path that
-otherwise retires the previous NGX feature after a fixed number of presents.
+Production initializes the process-owned SDK before Minecraft creates Vulkan
+instances, devices and Win32 surfaces. RR, FG, PCL and Reflex are requested at
+bootstrap; actual adapter support is checked later. LWJGL loads the interposer
+for creation, queue and presentation calls. This path requires Vulkan 1.3 and
+explicitly enables core `privateData` for SDK object tracking. Surface creation
+uses the real HWND through the proxy; FG swapchains require transfer-source and
+color-attachment usage. The loaded proxy remains alive through device destruction.
 
-ABI v2 `evaluate` consumes noisy linear HDR BT.709 RGBA16F, positive view-space depth
-R32F, dense primary and specular motion RG16F, world-space normal plus linear
-roughness RGBA16F, diffuse/specular albedo RGBA16F and output RGBA16F. Input guides
-match the queried input extent; output matches the requested display extent.
-Both motion fields store top-left previous-minus-current displacement in input
-pixels. The bridge supplies reciprocal render dimensions as Streamline's scale,
-which the plugin multiplies by that extent to give NGX unit scale. Specular motion
-is tagged as `kBufferTypeSpecularMotionVectors`, the DLSSD `GBuffer.SpecularMvec`
-input. The hit-distance R16F descriptor is retained for the engine's post input
-and can be absent; it is never tagged alongside the explicit specular-motion path.
-The ABI frame is 904 bytes and appends specular motion at image index 8. Matrices use
-Streamline's row-major row-vector convention and omit jitter. ABI jitter is the
-projection displacement in input pixel units: each component is the negative of
-the tracer's pixel-center sample offset. Rust performs this conversion once;
-the bridge forwards it unchanged to Streamline/NGX. Motion vectors include camera
-motion and exclude jitter. Unknown motion uses finite placeholders and the engine's
-raw fallback mask; the unused DLSSD `motionVectorsInvalidValue` constant does not
-establish per-pixel SDK history rejection.
+Proxy device creation initializes plugins and the additional FG queues. It must
+not be followed by a second `slSetVulkanInfo`: the pinned `sl_helpers_vk.h`
+declares that function for manual hooking only. The separate late-attachment
+path supports RR alone on an existing Vulkan 1.2 device, calls `slSetVulkanInfo`,
+and invokes common Present callbacks manually. It cannot supply FG's early
+creation and queue hooks.
 
-All image states enter and leave as GENERAL. Local tags are valid through the
-evaluate call and cause no extra volatile-tag copies. GPU resources remain alive
-until host completion, including after a returned evaluation failure. The pinned
-SDK wraps its input transitions in `ScopedTasks` and restores them on ordinary
-returns. Result `-100` identifies an SDK exception: the partial recording must not
-be submitted or sampled. Ordinary errors can use the unchanged noisy input for
-the current frame. Synchronous SDK error logs are also checked because this SDK's
-DLSS plugin does not propagate every NGX evaluation failure through `sl::Result`.
+Both RR paths require `VK_NVX_binary_import`, `VK_NVX_image_view_handle`,
+`VK_KHR_push_descriptor`, core/KHR buffer device address, Vulkan 1.2
+`timelineSemaphore`, `descriptorIndexing`, `bufferDeviceAddress`,
+`shaderStorageImageExtendedFormats` for RG16F/R16F guides, and
+`shaderStorageImageWriteWithoutFormat` for the SDK clear shader. Enable
+`synchronization2` through KHR on Vulkan 1.2 or core support on 1.3. Exclude the
+obsolete `VK_EXT_buffer_device_address`. Required instance properties and
+external-memory/semaphore capabilities are core in 1.1. RR alone needs no extra
+queue. Missing capabilities and initialization failures are explicit errors.
 
-The host routes each **real** `vkQueuePresentKHR` call through `prime_sl_present`.
-Only the attached queue invokes `sl.common`'s before/after-present callbacks,
-resolved with `slGetFeatureFunction`; the native loader performs the actual
-present exactly once. The callback signatures are pinned to Streamline 2.14.1.
-The bridge preserves the native VkResult, including suboptimal/out-of-date;
-it deliberately does not use this SDK's interposer wrapper, whose after-hook result
-overwrites the original present result. No fake presents advance bookkeeping.
-Present is required by the SDK even with direct evaluate tags.
+## RR inputs and history
 
-Run the production argument/dispatch contract tests without a GPU or window:
+`configure` queries the optimal input extent for DLAA, Quality, Balanced,
+Performance or UltraPerformance, with all six preset slots explicitly F. Previous
+evaluations must be complete. It frees the old RR feature before changing extent,
+avoiding the SDK's fixed-Present-count resize retirement path.
+
+The private bridge ABI remains version 2. `PrimeSlFrame` is 904 bytes, with nine
+48-byte image descriptors starting at byte 472. It consumes noisy linear HDR
+BT.709 RGBA16F, positive view-space R32F depth, primary/specular RG16F motion,
+world-space normal plus linear roughness RGBA16F, diffuse/specular albedo RGBA16F,
+and RGBA16F output. Input matches the queried extent; output matches display
+extent. Noisy alpha stores actual initial-camera foreground coverage and
+`enableAlphaUpscaling` is enabled. Required specular motion is tagged as
+`kBufferTypeSpecularMotionVectors`; optional R16F hit-distance is engine post
+input and is never tagged alongside that path.
+
+Motion is top-left previous-minus-current displacement in input pixels,
+including camera motion and excluding jitter. Reciprocal render dimensions
+produce NGX unit pixel scale. Matrices are row-major, multiply row vectors and
+exclude jitter. Jitter is projection displacement in input pixels, the negative
+of the tracer's pixel-center sample offset; Rust converts it once.
+
+Stable instances with exact ordered local positions use their last accepted
+3x4 placement and the same triangle/barycentric point. History advances after
+real queue acceptance, rather than recording or `encoder.execute`. New identities,
+changed geometry, raw captures, standard particle batches and local deformation
+remain motion-unknown, using finite placeholders and the engine's raw fallback
+mask. Moving optical interfaces remain unsupported. This does not establish
+that all moving content has been denoising-validated in the game.
+
+Descriptor memory is borrowed through `evaluate`; images and views remain alive
+through host GPU completion. Tagged resources enter and leave GENERAL. Tags are
+valid through evaluation and require no extra volatile-tag copy. SDK
+`ScopedTasks` restores input states on ordinary returns. Result `-100` means an
+SDK exception: do not submit or sample the partial recording. Ordinary errors
+can display unchanged noisy input for that frame. Synchronous SDK error logs
+are checked because not every NGX failure reaches `sl::Result`.
+
+## Frame generation and Present
+
+FG is opt-in, defaults off, and requires Realtime RR, a supported adapter and
+compatible actual swapchain metadata. Raw and Offline modes do not silently
+enable RR. The SDK default of one generated frame and UI recomposition is used.
+`PrimeSlFgFrame` is 216 bytes and references RR's camera constants.
+`slSetConstants` runs once per logical frame/viewport; differing RR/FG constants
+are rejected because the SDK rejects duplicate constants.
+
+FG tags four distinct GENERAL images: first-visible normalized device R32F
+depth, first-visible RG16F pixel motion, actual postprocessed HUD-less color,
+and R8_UNORM UI coverage. Visible guides come from the physical camera hit,
+independently of RR's virtual PSR terminal guides. HDR HUD-less color is linear
+FP16 scRGB; SDR HUD-less color is RGBA8 with SDR postprocessing and Present
+orientation. Actual backbuffer format may be RGBA8, BGRA8 or FP16: the SDK exposes
+separate color-buffer and HUD-less format fields. Missing support or too-small
+extent returns `+1` before new tags; SDK failures remain errors. SDK `eErrorIO`
+(also numerically 1) maps to `-101`, including errors after partial tags or during
+unsupported-extent retirement. Requested, capable and per-frame prepared state
+are distinct engine diagnostics.
+
+FG uses `eValidUntilPresent` and default `eBlockPresentingClientQueue` on the
+graphics/presenting queue. Ordered steady reuse relies on that SDK contract.
+Resize, quality/mode changes, HDR calibration changes, world reset and shutdown
+first wait for the SDK's published
+`lastPresentInputsProcessingCompletionFenceValue`. Its Vulkan fence is a timeline
+semaphore. Then FG turns off, its four tags are cleared and feature resources are
+freed. Host world completion alone does not prove the private Present consumer
+is finished. Failed SDK waits or uncertain submission retain the native owner
+and quarantine images. The engine never accesses or manages NGX private images.
+
+Host actions delimit simulation, Reflex pacing, render submission and actual
+Present. Interposed presentation invokes hooks once, including when FG is
+inactive: Java's ordinary KHR dispatch still uses the installed interposer.
+Active FG uses the native wrapper for PCL Present markers. Late RR attachment
+uses resolved common before/after callbacks around one driver call. No synthetic
+Present advances SDK bookkeeping.
+
+The pinned interposer overwrites the driver's aggregate result in after hooks.
+Both Java and native wrappers use a local single-swapchain `VkPresentInfoKHR`
+copy with scratch `pResults`, preserving the caller's descriptor. SDK errors
+retain priority; otherwise actual suboptimal/out-of-date/device-lost results
+survive. An unwritten result, including skipped Present without driver status,
+fails closed rather than inventing success. Actual FG Present, UI quality,
+pacing and resize remain manual game acceptance; no-window mocks do not prove
+these outcomes.
+
+## Verification and unresolved synchronization
+
+Run production argument/dispatch contracts without a GPU or window:
 
 ```powershell
 .\scripts\test-streamline-bridge.ps1
 ```
 
-These tests cover mode/preset selection, guide tagging and validation, error
-retention and cleanup, and present result preservation. They do not establish
-runtime image quality, GPU synchronization correctness or game performance.
+Tests cover RR mode/preset/alpha and guides, one-time shared constants, FG
+formats/tags/options, Reflex/PCL markers, public-fence timeout retention, tag
+clearing, unavailable extents, all seven SDK I/O failure boundaries, host shutdown
+and actual Present result precedence. They do not prove runtime quality or game
+performance.
 
-The separate real SDK test requires NVIDIA RTX and the Khronos validation layer,
-creates an isolated Vulkan 1.2 device with the RR feature prerequisites, and
-evaluates preset F from 960×540 to native 1920×1080 without a window:
+The real SDK fixture requires NVIDIA RTX and Khronos validation. It evaluates
+960×540 to native 1920×1080 Performance/F, then checks every RGB half after actual
+GPU completion. It creates no window or fake Present:
 
 ```powershell
+.\scripts\test-streamline-gpu.ps1 -Interposed -ApiVersion 1.3
 .\scripts\test-streamline-gpu.ps1
 .\scripts\test-streamline-gpu.ps1 -InitializationOnly
-# Negative regression reproducing the missing feature in the original host setup:
-.\scripts\test-streamline-gpu.ps1 -InitializationOnly -OmitWriteWithoutFormat -AbortOnValidationError
 ```
 
-The output is prefilled with NaNs; after GPU completion every RGB half must be
-finite and nonzero for the constant lit-plane fixture. Shader submission, readback
-and teardown statuses are checked, and any validation error fails the executable.
-Synchronization validation is enabled explicitly with `VkValidationFeaturesEXT`.
-The callback returns `VK_TRUE` for errors by default, matching the Minecraft host;
-`-ReportOnlyValidation` is a diagnostic comparison that returns `VK_FALSE` but
-still fails the test on any validation error. `-OmitSpecularDistance` tests the
-documented optional-input path. `synchronization2` is enabled by default via KHR
-on Vulkan 1.2 or as a core feature on 1.3; `-OmitSynchronization2` retains the
-negative layout regression.
-No fake Present is issued: this is a single-evaluation test, not a temporal or
-presentation lifecycle test. `-ApiVersion 1.3` adds the SDK's core `privateData`
-requirement for a separate API comparison. All logs and runtime hashes go to a
-new directory under `artifacts/streamline-gpu`.
+Synchronization validation uses the documented `VK_LAYER_VALIDATE_SYNC=1`
+setting in the interposed child process; manual hooking uses
+`VkValidationFeaturesEXT`. The interposer rejects layer-only
+`VK_EXT_validation_features` during driver-extension filtering. Errors always
+fail the executable. The default callback returns `VK_TRUE` for errors, matching
+the host; `-ReportOnlyValidation` returns `VK_FALSE` for comparison but still
+fails on every error. Other probes include `-OmitWriteWithoutFormat`,
+`-OmitSynchronization2` and the optional-input `-OmitSpecularDistance`.
+Logs, runtime hashes and configuration go to `artifacts/streamline-gpu` or a fresh
+`-Output` directory.
 
-The pinned SDK currently reproduces two WRITE_AFTER_WRITE synchronization errors
-while clearing its internal `nv.ngx.dlssd.resource` images, despite successful
-API results and finite, fully written RGB output. Without `synchronization2`,
-two more internal RG16F image layout errors appear. Vulkan 1.2 plus KHR sync2
-and Vulkan 1.3 plus core sync2 both eliminate those layout reports; neither fixes
-the clear-image synchronization errors. A direct NGX comparison with the same
-runtime reproduced all four errors without sync2, with both real and null Vulkan
-procedure callbacks. The strict test remains failing until the two remaining
-errors are resolved. Do not suppress errors or treat the successful readback
-as complete Vulkan validation.
+The locked runtime still reports **two WRITE_AFTER_WRITE errors** from private
+`nv.ngx.dlssd.resource` image layout transitions to `vkCmdClearColorImage`.
+Its barrier lacks CLEAR/TRANSFER_WRITE scope. Late manual attachment, the old
+signed 310.7.128 runtime, and early interposed creation reproduce the pair.
+The final interposed comparison has no other validation warnings, successful
+initialization/evaluate/submit/completion/cleanup and all 6,220,800 RGB halves
+finite and nonzero, but exits 6 and remains a strict failure. Vulkan 1.2 KHR sync2
+and Vulkan 1.3 core sync2 remove separate same-layout errors, not these hazards.
+Do not suppress reports or treat successful readback as complete validation.
+A validated SDK/driver or official integration correction remains required.

@@ -49,7 +49,7 @@ public float3 traceSample(TraceScene resources, AtmEnvironment environment,
             SurfaceHit hit = traceClosest(resources, origin, direction, sampler.bits1D(domain),
                                           coneWidth, coneSpread);
             if (!hit.found) {
-                float3 escaped = atmSky(environment, direction) * frame.up.w;
+                float3 escaped = atmSky(environment, direction, frame.up.w);
                 if (atmSunContains(environment, direction)) {
                     float weight = previousPdf == 0
                                            ? 1.0

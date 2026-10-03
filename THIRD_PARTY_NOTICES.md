@@ -37,8 +37,9 @@ and these notices and third-party license texts under `META-INF`.
 
 `third_party/streamline` and `third_party/dlss` contain the official NVIDIA
 Streamline v2.14.1 and DLSS v310.9.1 SDK subsets. Windows adapter JARs redistribute
-the production Streamline interposer, common and DLSS-D plugins and DLSS RR
-runtime. Source identities and exact file hashes are in
+the production Streamline interposer, common, DLSS-D, DLSS-G, PCL and Reflex
+plugins, the DLSS RR and frame-generation runtimes, and NVIDIA's Vulkan
+low-latency runtime. Source identities and exact file hashes are in
 `third_party/streamline/sdk-lock.json`; the SDKs retain their own terms in
 [Streamline license](licenses/NVIDIA-Streamline.txt),
 [Streamline third-party notices](licenses/NVIDIA-Streamline-Third-Party.md), and
@@ -63,6 +64,25 @@ resource ownership, prepared consumers and cache scheduling are changed.
 and `AstronomySettings` (copyright 2026 linlin), under the project's
 [LICENSE](LICENSE) and [LICENSE-EXCEPTIONS](LICENSE-EXCEPTIONS).
 
+`crates/prime-vulkan/assets/starmap/` incorporates the NASA SVS
+[Deep Star Maps 2020](https://svs.gsfc.nasa.gov/4851/) celestial 16K EXR as a
+preprocessed BC6H unsigned-float texture with 15 solid-angle-weighted mip levels.
+The asset retains the source image's attribution and
+[NASA media usage guidelines](https://www.nasa.gov/nasa-brand-center/images-and-media/),
+not the license of Prime-authored code. See the
+[NASA/ESA/Gaia credit and processing notice](licenses/NASA-DEEP-STAR-MAPS-2020-NOTICE.md).
+Source, encoder, compressed and decoded hashes are in the adjacent asset manifest.
+Its gzip parts total 166,381,090 bytes; upload and GPU storage total 178,957,008 bytes.
+They are compiled into the shared native engine, with no second copy in the JAR.
+
+The celestial projection/filter, automatic exposure, extended-sRGB HDR/UI
+composition and Windows display probe adapt legacy Prime's corresponding
+atmosphere and reconstruct modules and `HdrOutput`/`WindowsHdrDisplay`,
+copyright (c) 2026 linlin, under [LICENSE](LICENSE) and
+[LICENSE-EXCEPTIONS](LICENSE-EXCEPTIONS). Their resource bindings, recording,
+completion ownership and Minecraft-specific GLFW/SDL routes are adapted for
+Prime PT. This attribution does not replace the NASA image's separate notice.
+
 The epipolar shadow profile derives from Intel's Outdoor Light Scattering
 Sample, copyright 2017 Intel Corporation, Apache-2.0, reference commit
 `3b31b3b8c1aaad8580dc7249b3b79f6c0993d7a8`.
@@ -83,7 +103,9 @@ implementation from legacy Prime revision
 `ca364b25c4b4c7de5c8eae82115b401bf1932b3e`, copyright (c) 2026 linlin, under this
 project's [LICENSE](LICENSE) and [LICENSE-EXCEPTIONS](LICENSE-EXCEPTIONS), with
 the shared foundations attributed above. Module imports and resource boundaries
-are adapted; the low-order BSDF is shared by realtime and offline rendering.
+are adapted; the low-order BSDF remains as a historical reference API and the
+thick-wall SSS approximation shared by realtime and offline rendering. The current
+production Full OpenPBR supported domain is attributed separately below.
 The thin-wall Snell TIR endpoint explicitly returns full reflection and zero
 transmission. Refractive sampling removes a redundant incident-side sign factor
 from its initial reflection-candidate guard so exit reflection and TIR are not

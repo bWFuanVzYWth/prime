@@ -12,6 +12,7 @@ import "realtime/primary_guide_contract.slang";
 import "reconstruct/primary_psr.slang";
 import "reconstruct/rr_guides.slang";
 import "reconstruct/rr_status.slang";
+import "reconstruct/visible_guides.slang";
 
 public struct PrimaryRrGuides : IPrimaryGuides {
     public RWTexture2D<float> depth;
@@ -24,6 +25,9 @@ public struct PrimaryRrGuides : IPrimaryGuides {
     public RWTexture2D<float2> reflectionMotion;
     public Sampler3D<float4> energyTexture;
     public RrCamera previous;
+    public RWTexture2D<float> visibleDepth;
+    public RWTexture2D<float2> visibleMotion;
+    public bool frameGeneration;
 
     public bool enabled() {
         return true;
@@ -31,10 +35,33 @@ public struct PrimaryRrGuides : IPrimaryGuides {
     public float2 sampleOffset(ZSobol sampler) {
         return 0.5 + previous.jitter.xy;
     }
-    public void initialize(uint2 pixel) {
+    public void initialize(uint2 pixel, uint2 inputExtent) {
         distance[pixel] = 0.0;
         reflectionMotion[pixel] = float2(0.0);
         incomplete[pixel] = float(PRIME_RR_PRIMARY_PENDING) / 255.0;
+        if (frameGeneration) {
+            float2 sampleUv = (float2(pixel) + 0.5 + previous.jitter.xy) / float2(inputExtent);
+            float2 pixels;
+            primeRrMotionPixels(previous, sampleUv, primeRrCurrentDirection(previous, sampleUv),
+                                true, true, inputExtent, pixels);
+            visibleDepth[pixel] = 1.0;
+            visibleMotion[pixel] = pixels;
+        }
+    }
+
+    public void foreground(PrimaryParameters camera, uint2 pixel, float2 sampleUv, float3 position,
+                           float3 previousPosition, bool previousPositionKnown) {
+        incomplete[pixel] =
+                float(primeRrGuideStatus(incomplete[pixel]) | PRIME_RR_FOREGROUND) / 255.0;
+        if (frameGeneration) {
+            float2 pixels;
+            primeRrMotionPixels(previous, sampleUv, previousPosition, false, previousPositionKnown,
+                                camera.sampling.xy, pixels);
+            visibleDepth[pixel] = primeVisibleDeviceDepth(
+                    dot(position - camera.position.xyz, camera.forward.xyz));
+            // Unknown correspondence stays finite zero, never an SDK sentinel or PSR endpoint.
+            visibleMotion[pixel] = pixels;
+        }
     }
 
     public void reflectionPending(uint2 pixel) {
@@ -60,8 +87,8 @@ public struct PrimaryRrGuides : IPrimaryGuides {
 
     public void surface(PrimaryParameters camera, uint2 pixel, float2 sampleUv,
                         SurfacePoint surface, PrimePbrVertex material, float3 direction,
-                        float4 incident, float4 transmitted, bool staticGeometry,
-                        PrimePrimaryPsr psr) {
+                        float4 incident, float4 transmitted, float3 previousPosition,
+                        bool previousPositionKnown, PrimePrimaryPsr psr) {
         float3 position, shadingNormal;
         float3 cameraDirection = primeRrCurrentDirection(previous, sampleUv);
         if (!primePrimaryPsrSurface(psr, camera.position.xyz, cameraDirection, surface.position,
@@ -75,8 +102,10 @@ public struct PrimaryRrGuides : IPrimaryGuides {
             return;
         }
         float2 pixels;
-        if (!primeRrMotionPixels(previous, sampleUv, position, false,
-                                 primePrimaryPsrMotionKnown(psr, staticGeometry),
+        float3 oldPosition =
+                position + primePrimaryPsrDirection(psr, previousPosition - surface.position);
+        if (!primeRrMotionPixels(previous, sampleUv, oldPosition, false,
+                                 primePrimaryPsrMotionKnown(psr, previousPositionKnown),
                                  camera.sampling.xy, pixels)) {
             unresolved(pixel, psr.flags);
             return;

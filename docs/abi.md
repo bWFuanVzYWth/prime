@@ -1,6 +1,6 @@
-# FFM ABI v8
+# FFM ABI v9
 
-Java 适配器与 Rust 核心作为同一构建产物配套使用。公共 ABI 为8，Minecraft 源 schema 为7；版本用于边界拒绝，不承诺不同发布之间的二进制兼容。两版适配器共享同次构建的核心，JAR 和引擎不能混用。
+Java 适配器与 Rust 核心作为同一构建产物配套使用。公共 ABI 为9，Minecraft 源 schema 为7，设置文件 schema 为6；版本用于边界拒绝，不承诺不同发布之间的二进制兼容。两版适配器共享同次构建的核心，JAR 和引擎不能混用。
 
 ## 唯一结构契约与生成
 
@@ -10,7 +10,7 @@ Java 适配器与 Rust 核心作为同一构建产物配套使用。公共 ABI �
 
 固定输入以 `PrimeHeader { struct_size, abi_version }` 开始，两者精确匹配当前根结构。MC 根输入以 `PrimeMcIdentity` 开始，前两字段相同，另外携带 source/game version、resource generation、world epoch 和 batch。自然 padding 不传递语义，不要求清零，也不参与内容比较；显式 reserved 字段须为零。
 
-`prime_create(8)` 返回非零 handle，普通 status=0 成功、-1 失败；`prime_last_error` 返回 UTF-8 完整长度（不含 NUL），容量允许时补 NUL。除不使用 session 的真实 Present 转发外，所有 handle 调用都在创建它的 OS 线程执行。库名仍为 `prime_engine`。
+`prime_create(9)` 返回非零 handle，普通 status=0 成功、-1 失败；`prime_last_error` 返回 UTF-8 完整长度（不含 NUL），容量允许时补 NUL。除不使用 session 的真实 Present 转发外，所有 handle 调用都在创建它的 OS 线程执行。库名仍为 `prime_engine`。
 
 ## 输入、输出与所有权
 
@@ -28,10 +28,12 @@ Java 适配器与 Rust 核心作为同一构建产物配套使用。公共 ABI �
 | --- | --- | --- |
 | `PrimeReset` | 16 B | `prime_reset`；world epoch严格增加，清理世界几何/动态状态，保留当前常驻资源代和同一CPU池 |
 | `PrimeFrame` | 96 B | record/render；epoch、f64世界位置、forward/right/up、FOV、输出尺寸、sample index、实际太阳时角 |
-| `PrimeSettings` | 76 B | configure；具名渲染及调度控制，公共ABI header与设置文件schema分离 |
+| `PrimeSettings` | 96 B | configure；具名渲染、调度、星图、自动曝光、HDR 与帧生成控制 |
 | `PrimeVulkanHost` | 56 B | attach；instance/physical device/device/queue/timeline/family/实际启用capabilities |
 | `PrimeRecordTarget` | 40 B | record；活动command、目标image/view、实际提交serial |
 | `PrimePrepareResources` | 24 B | prepare_resources；活动command与真实提交serial，仅准备设备/全局资源 |
+| `PrimeDisplayOutput` | 24 B | 实际HDR surface启用状态、绝对峰值及系统参考白，reserved=0 |
+| `PrimeHdrTarget` | 64 B | 最终呈现的活动command、UI及输出image/view、serial和尺寸；UI为sampled RGBA8、HDR输出为storage RGBA16F，均为GENERAL |
 
 相机基须单位正交，位置、FOV和太阳时角须有限且在支持范围内。累积在相机、场景、尺寸变化或sample index=0时重置，其余样本计数由renderer维护。冻结期间帧仍须合法，但仅采用新宽高/序号，姿态、时角和光输运来自已显示快照。
 
@@ -115,7 +117,7 @@ Position 为 f32×3，UV 为 f32×2。局部原型和显式原始网格可输出
 
 ## 历史路由夹具
 
-旧 `prime_scene::protocol` byte readers及Java testFixtures仅供CPU参考/回放，其magic/op/version不是ABI v8导出。生产不再提供 `prime_submit`、SourcePage或op8/10/11字节入口。版本无关CompiledSection的owner/epoch/源顺序/完成水位仍由原生事务维护，源序号和CPU完成不等于GPU完成。
+旧 `prime_scene::protocol` byte readers及Java testFixtures仅供CPU参考/回放，其magic/op/version不是当前ABI导出。生产不再提供 `prime_submit`、SourcePage或op8/10/11字节入口。版本无关CompiledSection的owner/epoch/源顺序/完成水位仍由原生事务维护，源序号和CPU完成不等于GPU完成。
 
 ## 宿主 Vulkan 生产路径
 
@@ -130,6 +132,14 @@ flags 的 bit0 表示已在这台逻辑设备启用 `VK_EXT_opacity_micromap` �
 每帧调用 `prime_record(handle, &frame, &target)`，`PrimeRecordTarget` 具名携带 command、image、view 和 serial。command 是已开始录制、尚未结束的宿主 primary command buffer；目标为带 STORAGE 用途、GENERAL layout 的 RGBA8_UNORM 主颜色图像及其 view，尺寸必须等于 frame。serial 是将包含此 command 的实际提交完成值，同一 session 每个 serial 最多录制一次。宿主在同队列依次提交，并在所有命令完成后 signal timeline 到该 serial；Rust 自己的描述符槽与退休资源依赖此保证。
 
 `prime_record` 同步完成输入复制与命令录制，正常返回时 GPU 可以尚未执行；没有像素返回。只在所有描述符槽仍在途时等待最旧 serial，这是 GPU 资源复用的必要完成等待，不是向 MC 上游施加工作配额或主动背压。shader 在 GPU 上处理宿主输出行方向。`prime_gpu_time(handle)` 返回最近一个已收集的完成帧 GPU 纳秒数；宿主队列不支持时间戳或尚无结果时为 0；有能力的宿主常驻三个阶段时间戳，仅在完成证明后读取，不增加 GPU 等待。它不是当前 CPU 调用耗时或窗口平均。
+
+`prime_submission_accepted(handle,serial)` 只在包含对应世界命令的真实队列提交被接受后调用一次；匹配成功才推进相机和稳定实例的前帧身份。`encoder.execute`、CPU录制返回和`vkEndCommandBuffer`不构成接受证明。错误/重复serial和前一帧未接受时的下一次record会拒绝；此回调也不证明GPU完成。
+
+`prime_display_output` 在已接受的帧边界发布实际HDR标定；手/HUD绘制结束后，`prime_present_hdr` 将世界快照与真实UI覆盖合成到scRGB目标。同一serial只允许一次HDR录制，HDR描述符有独立完成槽，不能凭世界pass使用过该serial就重绑尚在途的HDR描述符。原版/标题画面的HDR转换由独立的 `prime_hdr_surface_create/record/destroy` owner完成，不创建PT资源；销毁前先提交全部录制工作，再取得真实timeline完成证明。
+
+帧生成开启时，在同一呈现提交调用 `prime_prepare_frame_generation`；HDR须先完成同serial的HDR合成。返回0表示已准备、1表示不可用或关闭、-1表示错误。参数声明实际交换链buffer数量和Vulkan格式，不能把SDR编码值标为线性HDR。首次可见depth/motion、无HUD图像和UI覆盖均为native自持资源；退用、重配和释放还须证明SDK公布的输入处理完成值，世界timeline不能替代它。
+
+`prime_streamline_bootstrap` 在宿主创建Vulkan loader/instance前安装进程interposer；`prime_streamline_frame` 的BEGIN_FRAME、RENDER_START、RENDER_END、SUSPEND、HOST_SHUTDOWN对应逻辑帧/PCL/Reflex与真实设备边界，不能使用额外RR evaluate次数推进帧号。实际 `prime_streamline_present` 可以在宿主呈现线程运行，由桥接序列化SDK访问。详细算法、颜色与完成合同见[显示](display.md)和[重建](reconstruction.md)。
 
 `prime_cpu_diagnostics(handle, output, capacity)` 在 owner 线程按需将最近一次 CPU 准备/录制快照格式化为 UTF-8。成功返回不含 NUL 的完整字节数；非零容量最多写入 `capacity-1` 字节并补 NUL，容量零时允许空指针查询长度；错误返回 `u64::MAX` 并设置 last error。输出指针只借用至调用返回。未发生准备/录制时明确输出 `available=false`，不使用零时间冒充已测量结果。
 
@@ -153,7 +163,7 @@ flags 的 bit0 表示已在这台逻辑设备启用 `VK_EXT_opacity_micromap` �
 
 ## 设置结构与文件 schema
 
-`prime_configure(handle,&settings)` 借用76 B `PrimeSettings`，header使用公共ABI v8。磁盘 `primept.properties` 仍为schema v5；旧v4或字段不完整按既有严格规则整份回退默认。ABI迁移未改玩家设置值，也不以旧72 B序列作为生产输入。
+`prime_configure(handle,&settings)` 借用96 B `PrimeSettings`，header使用公共ABI v9。磁盘 `primept.properties` 为schema v6；旧版本或字段不完整按既有严格规则整份回退默认，不以旧控制字节序列作为生产输入。
 
 | 字段 | 范围/语义 |
 | --- | --- |
@@ -167,6 +177,10 @@ flags 的 bit0 表示已在这台逻辑设备启用 `VK_EXT_opacity_micromap` �
 | opacity_micromap / ray_reconstruction | 0关、1请求启用，默认1，RR固定preset F |
 | reconstruction_quality | 0 DLAA、1 Quality、2 Balanced、3 Performance默认、4 UltraPerformance |
 | terrain_batches_per_frame | 1–128默认8，每批4×4×4 section |
+| stars | `[0,4]`，默认1；独立于sky强度 |
+| auto_exposure_compensation | `[0,1]`，默认0.6；0关闭，其余为旧算法的补偿强度，并非EV |
+| hdr / hdr_reference_white | 0/1请求；0自动参考白，否则1–10000 nit；实际启用需surface及标定支持 |
+| frame_generation | 0/1请求，默认0；实时RR、早期interposer及实际SDK支持全部成立才准备 |
 
 结构尺寸/版本、枚举、有限性及范围完整验证后应用。模式或实时RR布局改变前宿主先提交encoder，在外层帧边界切换；native依旧资源最后consumer退休。显示控制和格预算无需模式切换等待。冻结拒绝实时源变更入口，资源及显示边界见[渲染模式](renderers.md)。
 

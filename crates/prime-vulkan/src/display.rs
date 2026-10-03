@@ -2,8 +2,8 @@
 //! This is replaceable policy, not a stable math-library interface. Controls never
 //! invalidate scene-linear accumulation.
 
-/// Actual user-adjustable controls from legacy Prime. Exposure includes any future
-/// automatic exposure multiplier; the current renderer has no automatic exposure pass.
+/// Actual user-adjustable controls from legacy Prime. This is manual exposure;
+/// the final display shader applies the device-local automatic multiplier once.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PrimeDrtSettings {
     pub exposure_multiplier: f32,
@@ -24,7 +24,7 @@ impl Default for PrimeDrtSettings {
 impl PrimeDrtSettings {
     /// Prepare primeDRT's varying parameters once, outside the pixel loop. Headroom
     /// is a surface calibration input, not an independent artistic curve knob.
-    /// RGBA8 host presentation currently passes 1; this does not enable HDR presentation.
+    /// SDR uses one; an active calibrated HDR surface passes peak/reference-white.
     pub fn prepare(self, headroom: f32) -> Result<PrimeDrtParameters, String> {
         if !self.exposure_multiplier.is_finite()
             || self.exposure_multiplier <= 0.0

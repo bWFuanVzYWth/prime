@@ -23,16 +23,28 @@ import "reconstruct/rr_guides.slang";
 [[vk::binding(17, 0)]] ConstantBuffer<RrCamera> rrCamera;
 [[vk::binding(19, 0)]] [[vk::image_format("r8")]] RWTexture2D<float> guideUnresolved;
 [[vk::binding(20, 0)]] [[vk::image_format("rg16f")]] RWTexture2D<float2> specularMotion;
+[[vk::binding(21, 0)]] [[vk::image_format("r32f")]] RWTexture2D<float> visibleDepth;
+[[vk::binding(22, 0)]] [[vk::image_format("rg16f")]] RWTexture2D<float2> visibleMotion;
 [[vk::push_constant]] ConstantBuffer<PrimaryParameters> parameters;
 
 [shader("compute")][numthreads(8, 8, 1)] void main(uint3 id : SV_DispatchThreadID) {
     if (any(id.xy >= parameters.sampling.xy))
         return;
     TraceScene resources = {scene, textures, texels, instanceMaterials, staticTrianglePages};
-    PrimaryRrGuides guides = {linearDepth,     motionVectors,  normalRoughness,
-                              diffuseAlbedo,   specularAlbedo, specularHitDistance,
-                              guideUnresolved, specularMotion, transmissionEnergy,
-                              rrCamera};
-    PrimaryEnvironment environment = {atmosphereLighting(), parameters.right.w, parameters.up.w};
+    PrimaryRrGuides guides = {linearDepth,
+                              motionVectors,
+                              normalRoughness,
+                              diffuseAlbedo,
+                              specularAlbedo,
+                              specularHitDistance,
+                              guideUnresolved,
+                              specularMotion,
+                              transmissionEnergy,
+                              rrCamera,
+                              visibleDepth,
+                              visibleMotion,
+                              (motionFeatures & 2u) != 0};
+    PrimaryEnvironment environment = {atmosphereLighting(), parameters.right.w, parameters.up.w,
+                                      true};
     primeTracePrimary(resources, environment, parameters, id.xy, guides);
 }

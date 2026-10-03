@@ -21,9 +21,10 @@ public final class NativeBridge implements AutoCloseable {
     private static volatile MethodHandle vulkanPresent;
     private final Thread owner = Thread.currentThread();
     private final MethodHandle reset, textures, retireTextures, dynamic, instances,
-            renderDiagnostic, attachVulkan, configure, record, prepareResources, gpuTime,
-            cpuDiagnostics, planSections, acceptSections, prepareMcResources, acceptColors,
-            acceptBiomes, destroy, lastError;
+            renderDiagnostic, attachVulkan, configure, record, submissionAccepted, displayOutput,
+            presentHdr, prepareFrameGeneration, prepareResources, gpuTime, cpuDiagnostics,
+            planSections, acceptSections, prepareMcResources, acceptColors, acceptBiomes, destroy,
+            lastError;
     private final Arena fixedArena = Arena.ofConfined();
     private final MemorySegment frame = fixedArena.allocate(PrimeFrame.LAYOUT);
     private final MemorySegment host = fixedArena.allocate(PrimeVulkanHost.LAYOUT);
@@ -32,6 +33,8 @@ public final class NativeBridge implements AutoCloseable {
             settingsPacket.asByteBuffer().order(ByteOrder.LITTLE_ENDIAN);
     private final MemorySegment target = fixedArena.allocate(PrimeRecordTarget.LAYOUT);
     private final MemorySegment prepare = fixedArena.allocate(PrimePrepareResources.LAYOUT);
+    private final MemorySegment displayPacket = fixedArena.allocate(PrimeDisplayOutput.LAYOUT);
+    private final MemorySegment hdrTarget = fixedArena.allocate(PrimeHdrTarget.LAYOUT);
     private final MemorySegment resetInput = fixedArena.allocate(PrimeReset.LAYOUT);
     private final MemorySegment errorBuffer = fixedArena.allocate(4096);
     private final MemorySegment cpuBuffer = fixedArena.allocate(8192);
@@ -63,6 +66,10 @@ public final class NativeBridge implements AutoCloseable {
             configure = PrimeAbi.bind(lookup, "prime_configure");
             record
             = PrimeAbi.bind(lookup, "prime_record");
+            submissionAccepted = PrimeAbi.bind(lookup, "prime_submission_accepted");
+            displayOutput = PrimeAbi.bind(lookup, "prime_display_output");
+            presentHdr = PrimeAbi.bind(lookup, "prime_present_hdr");
+            prepareFrameGeneration = PrimeAbi.bind(lookup, "prime_prepare_frame_generation");
             prepareResources = PrimeAbi.bind(lookup, "prime_prepare_resources");
             gpuTime = PrimeAbi.bind(lookup, "prime_gpu_time");
             cpuDiagnostics = PrimeAbi.bind(lookup, "prime_cpu_diagnostics");
@@ -305,6 +312,60 @@ public final class NativeBridge implements AutoCloseable {
         PrimePrepareResources.command(prepare, command);
         PrimePrepareResources.serial(prepare, serial);
         call(prepareResources, "prime_prepare_resources", prepare);
+    }
+
+    /** Actual queue acceptance advances temporal identities; completion remains the timeline's job. */
+    public void submissionAccepted(long serial) {
+        checkOwner();
+        try {
+            int status = (int)submissionAccepted.invokeExact(handle, serial);
+            if (status != 0)
+                throw new IllegalStateException("prime_submission_accepted: " + error());
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+    public void displayOutput(boolean active, float peak, float systemWhite) {
+        header(PrimeDisplayOutput.header(displayPacket), PrimeDisplayOutput.SIZE);
+        PrimeDisplayOutput.active(displayPacket, active ? 1 : 0);
+        PrimeDisplayOutput.peak_nits(displayPacket, peak);
+        PrimeDisplayOutput.system_white_nits(displayPacket, systemWhite);
+        PrimeDisplayOutput.reserved(displayPacket, 0);
+        call(displayOutput, "prime_display_output", displayPacket);
+    }
+    public void presentHdr(long command, long uiImage, long uiView, long outputImage,
+                           long outputView, long serial, int width, int height) {
+        presentationTarget(command, uiImage, uiView, outputImage, outputView, serial, width,
+                           height);
+        call(presentHdr, "prime_present_hdr", hdrTarget);
+    }
+    public boolean prepareFrameGeneration(long command, long uiImage, long uiView, long outputImage,
+                                          long outputView, long serial, int width, int height,
+                                          int backBufferCount, int backBufferFormat) {
+        presentationTarget(command, uiImage, uiView, outputImage, outputView, serial, width,
+                           height);
+        try {
+            int status = (int)prepareFrameGeneration.invokeExact(handle, hdrTarget, backBufferCount,
+                                                                 backBufferFormat);
+            if (status < 0)
+                throw new IllegalStateException("prime_prepare_frame_generation: " + error());
+            return status == 0;
+        } catch (Throwable failure) {
+            throw rethrow(failure);
+        }
+    }
+    private void presentationTarget(long command, long uiImage, long uiView, long outputImage,
+                                    long outputView, long serial, int width, int height) {
+        checkOwner();
+        header(PrimeHdrTarget.header(hdrTarget), PrimeHdrTarget.SIZE);
+        PrimeHdrTarget.command(hdrTarget, command);
+        PrimeHdrTarget.ui_image(hdrTarget, uiImage);
+        PrimeHdrTarget.ui_view(hdrTarget, uiView);
+        PrimeHdrTarget.output_image(hdrTarget, outputImage);
+        PrimeHdrTarget.output_view(hdrTarget, outputView);
+        PrimeHdrTarget.serial(hdrTarget, serial);
+        PrimeHdrTarget.width(hdrTarget, width);
+        PrimeHdrTarget.height(hdrTarget, height);
     }
 
     public long lastGpuTimeNanos() {

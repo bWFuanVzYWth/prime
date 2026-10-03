@@ -120,6 +120,14 @@ impl StaticDirectory {
             self.dirty_records.push(0);
         }
     }
+    pub fn acceleration(&mut self, key: Cell, address: u64) {
+        let entry = self.entries.get(&key).expect("published static BLAS");
+        self.instances[entry.instance as usize].acceleration_structure_reference =
+            vk::AccelerationStructureReferenceKHR {
+                device_handle: address,
+            };
+        self.dirty_instances.push(entry.instance as usize);
+    }
     pub fn finish_upload(&mut self) {
         self.dirty_records.clear();
         self.dirty_instances.clear();

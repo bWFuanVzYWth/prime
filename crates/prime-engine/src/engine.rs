@@ -155,6 +155,7 @@ impl Engine {
                 active.bounces = transport.bounces;
                 active.sun = transport.sun;
                 active.sky = transport.sky;
+                active.stars = transport.stars;
                 active.seed = transport.seed;
                 active.astronomy = transport.astronomy;
             }
@@ -244,6 +245,16 @@ impl Engine {
             let _ = anchor;
             Err("this native library was built without the vulkan feature".into())
         }
+    }
+
+    #[cfg(feature = "vulkan")]
+    pub(crate) fn submission_accepted(&mut self, serial: u64) -> Result<(), String> {
+        poison_on_failure(&mut self.failed, || {
+            self.renderer
+                .as_mut()
+                .ok_or("Attach a Vulkan host before accepting a submission")?
+                .submission_accepted(serial)
+        })
     }
 
     #[cfg(feature = "vulkan")]

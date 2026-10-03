@@ -33,6 +33,7 @@ fn record_bytes(format: usize) -> u64 {
 }
 
 struct Cluster {
+    generation: u64,
     allocations: Vec<StaticAllocation>,
     acceleration: Acceleration,
     triangle_count: u64,
@@ -137,6 +138,10 @@ pub(super) struct Geometry {
     // Retire TLAS before any BLAS whose address it contains.
     pub top: TopLevel,
     clusters: BTreeMap<Cell, Cluster>,
+    compactions: crate::compaction::Compactions,
+    compaction_sources: Vec<(Acceleration, u64)>,
+    next_blas_generation: u64,
+    completed: u64,
     static_planner: TerrainPlanner,
     surface_compilers: Vec<SurfaceCompiler>,
     pub objects: Objects,
@@ -217,6 +222,10 @@ impl Geometry {
             triangle_count: 0,
             top: TopLevel::default(),
             clusters: BTreeMap::new(),
+            compactions: crate::compaction::Compactions::default(),
+            compaction_sources: Vec::new(),
+            next_blas_generation: 1,
+            completed: 0,
             static_planner: TerrainPlanner::new(TerrainLimits {
                 triangles_per_geometry: crate::surface::MAX_RECORDS,
                 geometry_records: OBJECT_BIT - 1,
@@ -271,6 +280,10 @@ impl Geometry {
         self.omm_work_counts = [0; 2];
         let serial = context.retirement_serial();
         self.builds.begin(completed, serial);
+        self.completed = completed;
+        if self.compactions.complete(completed) {
+            self.builds.reclaim_empty_pages();
+        }
         self.uploads.begin(completed, serial);
         self.resources.borrow_mut().begin(context, completed);
         self.light_grid.begin_frame(completed, serial);
@@ -285,7 +298,8 @@ impl Geometry {
         )
     }
     pub fn needs_update(&self, scene: SceneInput<'_>) -> bool {
-        self.omm_dirty
+        self.compactions.needs_update(self.completed)
+            || self.omm_dirty
             || self.source_changed(scene)
             || self.static_planner.has_pending()
             || self.resource_revision != self.resources.borrow().revision
@@ -478,6 +492,7 @@ impl Geometry {
             });
         self.top_dirty |= plan.placements_changed;
         if self.epoch != scene.epoch {
+            self.compactions.cancel_sources();
             self.directory = crate::static_directory::StaticDirectory::default();
             self.light_sources.clear();
             self.capabilities = [0; 3];
@@ -577,6 +592,8 @@ impl Geometry {
         }
         // Each wave completes CPU preparation synchronously. Its GPU resources retain
         // their real submission lifetime; wave size is not a live-allocation bound.
+        // Newly recorded queries stay pending until this update's completion proof.
+        self.compactions.resolve(self.completed)?;
         for batch in allocated_changes.chunks(32) {
             let mut uploads = Vec::new();
             let mut prepared = Vec::new();
@@ -692,6 +709,10 @@ impl Geometry {
                     );
                     counts.push(count * 2);
                 }
+                let generation = self.next_blas_generation;
+                self.next_blas_generation = generation
+                    .checked_add(1)
+                    .ok_or("Static BLAS generation exhausted")?;
                 prepared.push((
                     update.key,
                     allocations,
@@ -705,11 +726,17 @@ impl Geometry {
                     micromaps,
                     omm_textures,
                     omm_counts,
+                    generation,
                 ));
                 uploads.push(upload);
             }
+            let queries = crate::compaction::QueryPool::new(context, prepared.len())?;
+            let handles: Vec<_> = prepared
+                .iter()
+                .map(|(_, _, build, _, _, _, _)| build.acceleration().handle)
+                .collect();
             context.submit_named("dirty_clusters", |command| unsafe {
-                for ((_, allocations, _, _, _, _), upload) in prepared.iter().zip(&uploads) {
+                for ((_, allocations, _, _, _, _, _), upload) in prepared.iter().zip(&uploads) {
                     let mut offset = 0;
                     for &allocation in *allocations {
                         let stride = record_bytes(allocation.format);
@@ -730,8 +757,8 @@ impl Geometry {
                 }
                 let has_omm = prepared
                     .iter()
-                    .any(|(_, _, _, maps, _, _)| maps.iter().any(Option::is_some));
-                for (_, _, _, maps, _, _) in &prepared {
+                    .any(|(_, _, _, maps, _, _, _)| maps.iter().any(Option::is_some));
+                for (_, _, _, maps, _, _, _) in &prepared {
                     for map in maps.iter().flatten() {
                         map.record_copy(command);
                     }
@@ -740,15 +767,30 @@ impl Geometry {
                 if has_omm {
                     crate::omm::upload_barrier(context, command);
                 }
-                for (_, _, build, _, _, _) in &prepared {
+                for (_, _, build, _, _, _, _) in &prepared {
                     build.record_unbarriered(command);
                 }
                 Acceleration::read_barrier(context, command);
+                queries.record(command, &handles);
             })?;
+            self.compactions.record_batch(
+                queries,
+                prepared
+                    .iter()
+                    .map(
+                        |(key, _, build, _, _, _, generation)| crate::compaction::Source {
+                            cell: *key,
+                            generation: *generation,
+                            bytes: build.acceleration().storage_bytes(),
+                        },
+                    )
+                    .collect(),
+                context.retirement_serial(),
+            );
             for upload in uploads {
                 self.uploads.retire(upload);
             }
-            for (key, allocations, build, maps, omm_textures, omm_counts) in prepared {
+            for (key, allocations, build, maps, omm_textures, omm_counts, generation) in prepared {
                 let (update, plans, _) = batch.iter().find(|(u, _, _)| u.key == key).unwrap();
                 // Every material range keeps its source mesh's canonical emitter IDs.
                 // The shared owner uploads the emitter records once, independent of formats.
@@ -778,6 +820,7 @@ impl Geometry {
                     }
                 }
                 let cluster = Cluster {
+                        generation,
                         occlusion: OcclusionProof::new(update),
                         optical: update.geometries.iter().flat_map(|g| &g.members).any(|m| matches!(&m.triangles, MeshGeometry::Surfaces(mesh) if mesh.quads.iter().any(|q|q.optics.is_some()))),
                         cutout: update.geometries.iter().any(|g| g.flags == 1),
@@ -813,6 +856,9 @@ impl Geometry {
         }
         resources.collect();
         drop(allocated_changes);
+        let compacted = self.compact(context, cell_budget)?;
+        plan.placements_changed |= compacted;
+        self.top_dirty |= compacted;
         if !plan.placements_changed {
             self.omm_dirty = false;
             self.revision = scene.publication();
@@ -1012,6 +1058,12 @@ impl Geometry {
             )?;
             self.top_dirty = false;
             self.directory.finish_upload();
+            // Keep original sources owned until the replacement TLAS is recorded.
+            for (source, reclaimed) in self.compaction_sources.drain(..) {
+                source.retire(&mut self.builds);
+                self.compactions
+                    .published(context.retirement_serial(), reclaimed);
+            }
             cpu.tlas_rebuilds += 1;
             cpu.finish(Stage::Tlas, started);
         }
@@ -1020,6 +1072,64 @@ impl Geometry {
             .checked_add(self.objects.triangle_count)
             .ok_or("Triangle count overflow")?;
         Ok((changes.scene, changes.occlusion, bindings))
+    }
+
+    fn compact(&mut self, context: &Arc<Context>, budget: usize) -> Result<bool, String> {
+        let mut selected: Vec<(crate::compaction::Candidate, Acceleration)> = Vec::new();
+        let mut bytes = 0;
+        while let Some(candidate) = self.compactions.pop() {
+            let Some(cluster) = self
+                .clusters
+                .get(&candidate.source.cell)
+                .filter(|cluster| cluster.generation == candidate.source.generation)
+            else {
+                continue;
+            };
+            if !crate::compaction::admit(selected.len(), bytes, candidate.bytes, budget) {
+                self.compactions.defer(candidate);
+                break;
+            }
+            let target = match cluster
+                .acceleration
+                .compact_target(&mut self.builds, candidate.bytes)
+            {
+                Ok(target) => target,
+                Err(error) => {
+                    for (_, target) in selected {
+                        target.retire(&mut self.builds);
+                    }
+                    return Err(error);
+                }
+            };
+            bytes += candidate.bytes;
+            selected.push((candidate, target));
+        }
+        if selected.is_empty() {
+            return Ok(false);
+        }
+        let result = context.submit_named("blas_compaction", |command| {
+            for (candidate, target) in &selected {
+                self.clusters[&candidate.source.cell]
+                    .acceleration
+                    .record_compact_copy(command, target);
+            }
+            Acceleration::read_barrier(context, command);
+        });
+        if let Err(error) = result {
+            for (_, target) in selected {
+                target.retire(&mut self.builds);
+            }
+            return Err(error);
+        }
+        for (candidate, target) in selected {
+            let cluster = self.clusters.get_mut(&candidate.source.cell).unwrap();
+            self.directory
+                .acceleration(candidate.source.cell, target.address());
+            let source = std::mem::replace(&mut cluster.acceleration, target);
+            self.compaction_sources
+                .push((source, candidate.source.bytes - candidate.bytes));
+        }
+        Ok(true)
     }
 
     pub fn cpu_load(
@@ -1127,6 +1237,198 @@ mod tests {
                 })
                 .into(),
         }
+    }
+
+    #[test]
+    #[ignore = "windowless real BLAS compaction sizes, budgeted frozen maintenance and pixel equivalence"]
+    fn gpu_static_blas_compaction_preserves_pixels_slots_and_cache_dependencies() {
+        let mut scene = Scene {
+            revision: 1,
+            ..Default::default()
+        };
+        scene.textures.insert(
+            7,
+            prime_scene::scene::Texture {
+                width: 2,
+                height: 2,
+                pixels: vec![
+                    255, 255, 255, 0, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 0,
+                ]
+                .into(),
+                region: Some([0, 0, 2, 2]),
+                sampling: None,
+                material: None,
+            },
+        );
+        for (i, flags) in [0, 1].into_iter().enumerate() {
+            let mut source = mesh(i as f32 * 64., flags, [0.3, 0.7, 0.2, 1.]);
+            let triangles: Vec<_> = (0..12)
+                .flat_map(|y| {
+                    (0..12).flat_map(move |x| {
+                        let corners = [
+                            [x as f32 * 3. - 18., y as f32 * 3. - 18., 0.],
+                            [x as f32 * 3. - 15., y as f32 * 3. - 18., 0.],
+                            [x as f32 * 3. - 15., y as f32 * 3. - 15., 0.],
+                            [x as f32 * 3. - 18., y as f32 * 3. - 15., 0.],
+                        ];
+                        [[0, 1, 2], [2, 3, 0]].map(|indices| Triangle {
+                            positions: indices.map(|i| corners[i]),
+                            colors: [[0.3, 0.7, 0.2, 1.]; 3],
+                            uvs: indices.map(|i| [[0., 0.], [1., 0.], [1., 1.], [0., 1.]][i]),
+                            texture_id: if flags == 1 { 7 } else { 0 },
+                            flags,
+                        })
+                    })
+                })
+                .collect();
+            source.triangles = triangles.into();
+            scene.meshes.insert((i as u64 + 1, 0), source);
+            scene.ready_terrain.insert(cell([i as i32, 0, 0]));
+        }
+        let camera = Camera {
+            position: [32., 0., 96.],
+            forward: [0., 0., -1.],
+            right: [1., 0., 0.],
+            up: [0., 1., 0.],
+            vertical_fov_radians: 1.0,
+        };
+        let settings = crate::RenderSettings {
+            mode: crate::RenderMode::Realtime,
+            view: prime_scene::settings::DiagnosticView::NoisyColor,
+            ray_reconstruction: false,
+            stars: 0.0,
+            auto_exposure_compensation: 0.0,
+            ..Default::default()
+        };
+        let workers = Arc::new(prime_scene::workers::CpuWorkers::new(1).unwrap());
+        let mut renderer = Renderer::with_settings_and_workers(settings, workers.clone()).unwrap();
+        let expected = renderer.render(&scene, &camera, 96, 64, 0).unwrap();
+        let geometry = renderer.geometry.as_ref().unwrap();
+        assert!(
+            geometry.opacity_micromap,
+            "actual OMM capability is required, not skipped"
+        );
+        let cutout = &geometry.clusters[&cell([1, 0, 0])];
+        assert!(!cutout.micromaps.is_empty());
+        assert!(cutout.omm_counts[..2].iter().any(|count| *count > 0));
+        assert!(
+            cutout.omm_counts[3] > 0,
+            "actual shared micromap blocks, not special indices"
+        );
+        eprintln!(
+            "compacted cutout actual OMM binding counts={:?}",
+            cutout.omm_counts
+        );
+        let originals: Vec<_> = geometry
+            .clusters
+            .iter()
+            .map(|(&cell, cluster)| {
+                (
+                    cell,
+                    cluster.generation,
+                    cluster.acceleration.address(),
+                    cluster.acceleration.storage_bytes(),
+                    geometry.static_slot(cell),
+                )
+            })
+            .collect();
+        let revision = renderer.atmosphere_scene_revision;
+        renderer
+            .configure(crate::RenderSettings {
+                terrain_batches_per_frame: 1,
+                ..settings
+            })
+            .unwrap();
+        renderer.set_scene_frozen(true);
+        for count in 1..=2 {
+            let actual = renderer.render(&scene, &camera, 96, 64, 0).unwrap();
+            assert_eq!(
+                actual, expected,
+                "compaction changed coverage/geometry/material output"
+            );
+            let geometry = renderer.geometry.as_ref().unwrap();
+            geometry
+                .top
+                .assert_current_input(&geometry.directory.instances, &geometry.objects.instances);
+            assert_eq!(geometry.compactions.copies, count);
+            assert_eq!(geometry.rebuilt_clusters, 0);
+            assert!(!geometry.static_occlusion_changed);
+            assert_eq!(renderer.atmosphere_scene_revision, revision);
+            for &(cell, generation, _, _, slot) in &originals {
+                assert_eq!(geometry.clusters[&cell].generation, generation);
+                assert_eq!(geometry.static_slot(cell), slot);
+            }
+        }
+        renderer.render(&scene, &camera, 96, 64, 0).unwrap();
+        let geometry = renderer.geometry.as_ref().unwrap();
+        assert_eq!(geometry.compactions.completed, 2);
+        assert!(!geometry.needs_update((&scene).into()));
+        for &(cell, _, address, bytes, _) in &originals {
+            let target = &geometry.clusters[&cell].acceleration;
+            assert_ne!(target.address(), address);
+            assert!(target.storage_bytes() < bytes);
+            eprintln!(
+                "BLAS compact cell={cell:?} source={bytes} compacted={} arena_reserved={}",
+                target.storage_bytes(),
+                geometry.builds.reserved_bytes()
+            );
+        }
+        let mut offline = Renderer::with_settings_and_workers(
+            crate::RenderSettings {
+                mode: crate::RenderMode::Offline,
+                view: prime_scene::settings::DiagnosticView::Output,
+                ..settings
+            },
+            workers,
+        )
+        .unwrap();
+        offline.render(&scene, &camera, 32, 24, 0).unwrap();
+        offline.set_scene_frozen(true);
+        assert_eq!(offline.samples, 1);
+        offline.render(&scene, &camera, 32, 24, 1).unwrap();
+        assert_eq!(offline.geometry.as_ref().unwrap().compactions.copies, 2);
+        assert_eq!(
+            offline.samples, 2,
+            "AS address maintenance must preserve accumulation"
+        );
+        drop(offline);
+        // Replace then remove before the new query is consumed: stale results cannot
+        // compact another generation even if Vulkan reuses raw handles or page slots.
+        renderer.set_scene_frozen(false);
+        scene.revision += 1;
+        scene.meshes.get_mut(&(1, 0)).unwrap().revision += 1;
+        renderer.render(&scene, &camera, 96, 64, 0).unwrap();
+        let copies = renderer.geometry.as_ref().unwrap().compactions.copies;
+        scene.revision += 1;
+        scene.meshes.remove(&(1, 0));
+        renderer.render(&scene, &camera, 96, 64, 0).unwrap();
+        assert_eq!(
+            renderer.geometry.as_ref().unwrap().compactions.copies,
+            copies
+        );
+        scene.meshes.get_mut(&(2, 0)).unwrap().revision += 1;
+        scene.revision += 1;
+        renderer.render(&scene, &camera, 96, 64, 0).unwrap();
+        let pending_generation =
+            renderer.geometry.as_ref().unwrap().clusters[&cell([1, 0, 0])].generation;
+        scene.epoch += 1;
+        scene.revision += 1;
+        renderer.render(&scene, &camera, 96, 64, 0).unwrap();
+        let geometry = renderer.geometry.as_ref().unwrap();
+        assert_ne!(
+            geometry.clusters[&cell([1, 0, 0])].generation,
+            pending_generation
+        );
+        assert_eq!(
+            geometry.compactions.copies, copies,
+            "epoch must cancel old query candidates"
+        );
+        renderer.set_scene_frozen(true);
+        renderer.render(&scene, &camera, 96, 64, 0).unwrap();
+        assert_eq!(
+            renderer.geometry.as_ref().unwrap().compactions.copies,
+            copies + 1
+        );
     }
 
     #[test]
@@ -1518,7 +1820,8 @@ mod tests {
             previous = pixels;
             let geometry = renderer.geometry.as_ref().unwrap();
             if stage < 5 {
-                let blas = geometry.clusters[&cell([1, 0, 0])].acceleration.address();
+                // Compaction may replace BDA; the unchanged source build must survive.
+                let blas = geometry.clusters[&cell([1, 0, 0])].generation;
                 if let Some(retained) = retained {
                     assert_eq!(blas, retained);
                 }
@@ -1583,7 +1886,7 @@ mod tests {
         let geometry = renderer.geometry.as_ref().unwrap();
         let second = &geometry.clusters[&cell([1, 0, 0])];
         assert_ne!(first.records.page, second.allocations[0].records.page);
-        let retained_blas = second.acceleration.address();
+        let retained_blas = second.generation;
         let retained_material = geometry.materials[0].address(second.allocations[0].records);
         let mut fresh = Renderer::new().unwrap();
         assert_eq!(
@@ -1601,7 +1904,7 @@ mod tests {
         let geometry = renderer.geometry.as_ref().unwrap();
         assert_eq!(geometry.clusters[&cell([0, 0, 0])].allocations[0], first);
         let second = &geometry.clusters[&cell([1, 0, 0])];
-        assert_eq!(second.acceleration.address(), retained_blas);
+        assert_eq!(second.generation, retained_blas);
         assert_eq!(
             geometry.materials[0].address(second.allocations[0].records),
             retained_material
@@ -1935,7 +2238,7 @@ mod tests {
                 .low_24(),
             4
         );
-        let retained = geometry.clusters[&cell([1, 0, 0])].acceleration.address();
+        let retained = geometry.clusters[&cell([1, 0, 0])].generation;
         scene.meshes.remove(&(1, 1));
         scene.revision += 1;
         reference.dynamic.triangles = reference
@@ -1961,9 +2264,6 @@ mod tests {
             4
         );
         assert_eq!(geometry.rebuilt_clusters, 1);
-        assert_eq!(
-            geometry.clusters[&cell([1, 0, 0])].acceleration.address(),
-            retained
-        );
+        assert_eq!(geometry.clusters[&cell([1, 0, 0])].generation, retained);
     }
 }

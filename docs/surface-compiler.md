@@ -55,7 +55,7 @@ Single、Local 与 Global palette 的状态行都包含同一份接触、光学�
 
 玻璃必须来自实际玻璃类型标志、无未知 tint，并具有确定性的闭合轴对齐体积或共面薄片证明；复杂开放/随机模型保留源 coverage，计入 `hacks.optics`。同介质身份包括颜色族与光学参数；仅在两侧都是实体透射、无涂层/发光/tint 时消去相同介质边界，不因名字或平均颜色相同猜测。
 
-实时与离线路径共同使用 LitePBR opaque 与 solid/thin dielectric 的 sample/evaluate/PDF、Fresnel/TIR、单散射 GGX、方向能量标量闭合、Beer 吸收与 eta² 辐亮度权重；LabPBR 法线和粗糙度进入同一生产消费。首条射线从首个已知边界或介质中的 opaque 接触面确定入射介质；没有足够边界证明的复杂场景不保证初始介质正确。薄片用 1/16 m 有效厚度及双界面 Fresnel。NEE 的直线连接积累端点/路径长度、Fresnel 与薄片吸收，不解算折射焦散连接。foliage 底层接口已保留，MC 树叶未按旧 PBR preset 自动选择该拓扑。
+实时与离线路径共同消费 Full OpenPBR opaque 与 solid/thin dielectric 的支持子域；sample/evaluate/PDF、Fresnel/TIR、Beer 吸收与 eta² 辐亮度权重保持同一生产核，LabPBR 法线和粗糙度进入相同消费。精确 Fresnel、transmission 能量补偿及厚壁 SSS 的单独 Lite 退路见[材质契约](materials.md)。首条射线从首个已知边界或介质中的 opaque 接触面确定入射介质；没有足够边界证明的复杂场景不保证初始介质正确。薄片用 1/16 m 有效厚度及双界面 Fresnel。NEE 的直线连接积累端点/路径长度、Fresnel 与薄片吸收，不解算折射焦散连接。foliage 底层接口已保留，MC 树叶未按旧 PBR preset 自动选择该拓扑。
 
 未知 translucent 材料仍使用原 stochastic coverage；这与有证明的介质输运分别表示。大气阴影列存 opaque 深度，忽略透射边界，不存彩色透射；空气透视不在已知水/玻璃内重复叠加空气段。动态实例未接入光学介质，不能由静态夹具推断它已经支持。
 
@@ -67,7 +67,7 @@ Java 转录真实 sprite 身份、atlas bounds、帧尺寸、原始帧序列/时
 
 26.2/26.3 的宿主 shader 对编码域 RGBA 四个通道插值并写入 UNORM8；Rust 按源 tick/时长生成相同的千分位进度，GPU 插值后按 UNORM8 舍入。着色按主像素射线锥估计 mip，层内最近点、层间线性；coverage 与灯支持域固定 mip0，因此不会随查询类型改变几何覆盖。射线锥不包含粗糙反弹的扩散，此过滤是明确的近似，不声称与光栅导数逐像素相同。动画按源帧传入的 game time 推进，离线冻结不更新。
 
-有效 `format=lab-pbr/1.3` 包的 `_n/_s` 原图由 Java 读取，在 Rust 生成规范 mip 和辅助动画。连续通道层内/层间线性过滤；normal 分布保持 GGX 平均长度，specular 的分类 G/B 在生产固定当前帧 mip0 点样。非金属 authored SSS 由 LitePBR opaque 消费：optical thin 或 cutout SSS 使用有色双半球薄层，其余使用白色 diffuse transmission，介质身份不变。thick 分支是低阶近似，不执行体积 random walk；foliage 不套用旧树叶预设。AO/porosity 只保留，不直接乘着色；height 保留逐帧 min 解码，旧 voxel displacement 几何管线不移植。旧材质预设不参与默认值或分类。
+有效 `format=lab-pbr/1.3` 包的 `_n/_s` 原图由 Java 读取，在 Rust 生成规范 mip 和辅助动画。连续通道层内/层间线性过滤；normal 分布保持 GGX 平均长度，specular 的分类 G/B 在生产固定当前帧 mip0 点样。非金属 authored SSS 中，optical thin 或 cutout SSS 使用 Full thin-material 的有色双半球反射/透射；其余 thick 分支单独保留历史 Lite 白色 diffuse transmission，介质身份不变。thick 分支是低阶近似，不执行体积 random walk；foliage 不套用旧树叶预设。AO/porosity 只保留，不直接乘着色；height 保留逐帧 min 解码，旧 voxel displacement 几何管线不移植。旧材质预设不参与默认值或分类。
 
 游戏发光使用实际 block/quad emission 的较大值，按旧校准 `1.5 * (level/15)^2` 变为线性 BT.709 RGB，再乘采样点的解码纹理×tint。岩浆进入相同路径。光源从最终面提取，每个物理 patch 只计一次；复合面 proposal 覆盖两侧/层的功率上界，实际采样按选侧/coverage 计算发光，涂层挡住的底层不泄漏。
 

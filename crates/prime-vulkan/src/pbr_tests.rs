@@ -873,65 +873,231 @@ fn pbr_spirv_bindings_match_full_production_and_lite_reference() {
             .into_iter()
             .collect()
     }
-    assert_eq!(
-        bindings(
-            include_bytes!(concat!(env!("OUT_DIR"), "/path_trace.spv")),
-            0
-        ),
-        [0, 2, 3, 4, 5, 7, 8, 9],
-        "offline production descriptor contract"
+    fn specializations(code: &[u8]) -> Vec<(u32, u32)> {
+        use std::collections::BTreeMap;
+        let words: Vec<_> = code
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|&word| u32::from_le_bytes(word))
+            .collect();
+        let mut ids = BTreeMap::new();
+        let mut defaults = BTreeMap::new();
+        let mut offset = 5;
+        while offset < words.len() {
+            let count = (words[offset] >> 16) as usize;
+            assert!(count > 0 && offset + count <= words.len());
+            match words[offset] & 0xffff {
+                71 if count == 4 && words[offset + 2] == 1 => {
+                    ids.insert(words[offset + 1], words[offset + 3]);
+                }
+                50 if count == 4 => {
+                    defaults.insert(words[offset + 2], words[offset + 3]);
+                }
+                _ => {}
+            }
+            offset += count;
+        }
+        let mut result: Vec<_> = ids
+            .into_iter()
+            .map(|(target, id)| (id, defaults[&target]))
+            .collect();
+        result.sort_unstable();
+        result
+    }
+    // The complete scene/layout declarations remain present in unspecialized SPIR-V.
+    // Raw K1/K2/Offline use motion ID3=0 (the default as well as the production selection),
+    // so no previous-pose transform consumer is enabled. Actual compiled loadSurface already
+    // loads only its current members; no driver/physical traffic reduction is asserted here.
+    type StageContract = (
+        &'static str,
+        &'static [u8],
+        &'static [u32],
+        &'static [u32],
+        &'static [(u32, u32)],
     );
-    type StageContract = (&'static str, &'static [u8], &'static [u32], &'static [u32]);
-    let stages: [StageContract; 7] = [
+    const PRIMARY_IDS: &[(u32, u32)] = &[(0, 2), (2, 1), (3, 0)];
+    const TRANSPORT_IDS: &[(u32, u32)] = &[(0, 2), (1, 1), (2, 1), (3, 0)];
+    let stages: [StageContract; 23] = [
+        (
+            "Offline",
+            include_bytes!(concat!(env!("OUT_DIR"), "/path_trace.spv")),
+            &[0, 2, 3, 4, 5, 7, 8, 9],
+            &[0, 1, 2, 3, 4, 5, 6],
+            &[(0, 2), (1, 1), (2, 1), (3, 0), (4, 0)],
+        ),
         (
             "K1 raw",
             include_bytes!(concat!(env!("OUT_DIR"), "/realtime_primary.spv")),
             &[0, 2, 3, 7, 8],
-            &[0, 1, 2],
+            &[0, 1, 2, 5, 6],
+            PRIMARY_IDS,
         ),
         (
             "K1 RR",
             include_bytes!(concat!(env!("OUT_DIR"), "/realtime_primary_rr.spv")),
-            &[0, 2, 3, 7, 8, 9, 11, 12, 13, 14, 15, 16, 17, 19, 20],
-            &[0, 1, 2],
+            &[0, 2, 3, 7, 8, 9, 11, 12, 13, 14, 15, 16, 17, 19, 20, 21, 22],
+            &[0, 1, 2, 5, 6],
+            PRIMARY_IDS,
         ),
         (
             "K2 raw",
             include_bytes!(concat!(env!("OUT_DIR"), "/realtime_transport.spv")),
             &[0, 2, 3, 7, 8, 9],
-            &[0, 1, 2],
+            &[0, 1, 2, 5, 6],
+            TRANSPORT_IDS,
         ),
         (
             "K2 RR",
             include_bytes!(concat!(env!("OUT_DIR"), "/realtime_transport_rr.spv")),
             &[0, 2, 3, 7, 8, 9, 16],
-            &[0, 1, 2],
+            &[0, 1, 2, 5, 6],
+            TRANSPORT_IDS,
         ),
         (
             "post raw",
             include_bytes!(concat!(env!("OUT_DIR"), "/realtime.spv")),
             &[4],
             &[0, 3, 4],
+            &[],
         ),
         (
             "post RR input",
             include_bytes!(concat!(env!("OUT_DIR"), "/realtime_rr.spv")),
             &[10, 11, 16, 17, 19, 20],
             &[0, 3, 4],
+            &[],
         ),
         (
             "RR display",
             include_bytes!(concat!(env!("OUT_DIR"), "/rr_display.spv")),
             &[4, 10, 11, 13, 18, 19],
             &[],
+            &[],
+        ),
+        (
+            "post raw linear",
+            include_bytes!(concat!(env!("OUT_DIR"), "/realtime_linear.spv")),
+            &[4],
+            &[0, 3, 4],
+            &[],
+        ),
+        (
+            "RR linear",
+            include_bytes!(concat!(env!("OUT_DIR"), "/rr_linear.spv")),
+            &[4, 10, 18, 19],
+            &[],
+            &[],
+        ),
+        (
+            "linear display",
+            include_bytes!(concat!(env!("OUT_DIR"), "/display_from_linear.spv")),
+            &[0, 1, 2, 3],
+            &[],
+            &[],
+        ),
+        (
+            "stars",
+            include_bytes!(concat!(env!("OUT_DIR"), "/stars.spv")),
+            &[0, 1, 2, 3],
+            &[],
+            &[],
+        ),
+        (
+            "exposure histogram",
+            include_bytes!(concat!(env!("OUT_DIR"), "/exposure_histogram.spv")),
+            &[0, 1],
+            &[],
+            &[],
+        ),
+        (
+            "exposure update",
+            include_bytes!(concat!(env!("OUT_DIR"), "/exposure_update.spv")),
+            &[1, 2],
+            &[],
+            &[],
+        ),
+        (
+            "HDR present",
+            include_bytes!(concat!(env!("OUT_DIR"), "/hdr_present.spv")),
+            &[0, 1, 2, 3, 4, 5],
+            &[],
+            &[],
+        ),
+        (
+            "FG present",
+            include_bytes!(concat!(env!("OUT_DIR"), "/frame_generation_present.spv")),
+            &[0, 1, 2, 3],
+            &[],
+            &[],
+        ),
+        (
+            "atmosphere prepare",
+            include_bytes!(concat!(env!("OUT_DIR"), "/atmosphere_prepare.spv")),
+            &[],
+            &[0],
+            &[],
+        ),
+        (
+            "atmosphere sky",
+            include_bytes!(concat!(env!("OUT_DIR"), "/atmosphere_sky_update.spv")),
+            &[0, 1, 2, 3, 4, 5],
+            &[0],
+            &[],
+        ),
+        (
+            "atmosphere transmittance",
+            include_bytes!(concat!(
+                env!("OUT_DIR"),
+                "/atmosphere_transmittance_update.spv"
+            )),
+            &[0],
+            &[0],
+            &[],
+        ),
+        (
+            "atmosphere aerial",
+            include_bytes!(concat!(env!("OUT_DIR"), "/atmosphere_aerial_update.spv")),
+            &[0, 1, 2, 4, 5],
+            &[0],
+            &[],
+        ),
+        (
+            "atmosphere aerial transmittance",
+            include_bytes!(concat!(
+                env!("OUT_DIR"),
+                "/atmosphere_aerial_transmittance_update.spv"
+            )),
+            &[5],
+            &[0],
+            &[],
+        ),
+        (
+            "atmosphere shadow demand",
+            include_bytes!(concat!(env!("OUT_DIR"), "/atmosphere_shadow_demand.spv")),
+            &[],
+            &[0],
+            &[],
+        ),
+        (
+            "atmosphere shadow resolve",
+            include_bytes!(concat!(env!("OUT_DIR"), "/atmosphere_shadow_resolve.spv")),
+            &[],
+            &[0],
+            &[(0, 2), (2, 1)],
         ),
     ];
-    for (stage, code, scene, atmosphere) in stages {
+    for (stage, code, scene, atmosphere, ids) in stages {
         assert_eq!(bindings(code, 0), scene, "{stage}: scene/output contract");
         assert_eq!(
             bindings(code, 1),
             atmosphere,
             "{stage}: atmosphere contract"
+        );
+        assert_eq!(
+            specializations(code),
+            ids,
+            "{stage}: specialization IDs/defaults contract"
         );
     }
     assert_eq!(

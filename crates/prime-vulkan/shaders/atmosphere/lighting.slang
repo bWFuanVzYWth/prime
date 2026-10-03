@@ -2,10 +2,14 @@
 module "atmosphere/lighting.slang";
 __exported import "atmosphere/view_types.slang";
 import "atmosphere/constants.slang";
+import "atmosphere/starmap.slang";
 public struct AtmLighting {
     public StructuredBuffer<AtmFrame> frames;
     public Sampler2D<float4> sky;
     public Sampler2D<float4> transmittance;
+    public Sampler2D<float4> stars;
+    public float4
+            starControls; // observer latitude, season radians, absolute radiance scale, reserved
 };
 public float atmPreparedElevation(float e, AtmChart c) {
     float x = clamp(e, c.bounds.x, c.bounds.y);
@@ -21,7 +25,7 @@ public float atmPreparedElevation(float e, AtmChart c) {
     return clamp(y, 0.0, 1.0);
 }
 
-public float3 atmSky(AtmLighting environment, float3 ray) {
+public float3 atmSkyWithoutStars(AtmLighting environment, float3 ray) {
     AtmFrame f = environment.frames[0];
     float horizontal = length(ray.xz) * f.geometry.w;
     float cp = horizontal > 1e-10 ? clamp(dot(ray.xz, f.sun.xz) / horizontal, -1.0, 1.0) : 1.0;
@@ -41,6 +45,25 @@ public float3 atmDistantTransmittance(AtmLighting environment, float3 direction)
     return environment.transmittance
             .SampleLevel(float2((coordinate * 8192.0 + 0.5) / 8193.0, 0.5), 0)
             .rgb;
+}
+
+public float3 atmStars(AtmLighting environment, float3 direction) {
+    if (!(environment.starControls.z > 0.0))
+        return float3(0.0);
+    float3 transmittance = atmDistantTransmittance(environment, direction);
+    if (all(transmittance <= float3(0.0)))
+        return float3(0.0);
+    PrimeCelestialFrame frame = primeCelestialFrame(
+            environment.frames[0].sun.xyz, environment.starControls.x, environment.starControls.y);
+    return environment.stars.SampleLevel(primeStarmapUv(frame, direction), 0).rgb *
+           environment.starControls.z * transmittance;
+}
+public float3 atmSky(AtmLighting environment, float3 direction, float skyIntensity) {
+    return atmSkyWithoutStars(environment, direction) * skyIntensity +
+           atmStars(environment, direction);
+}
+public float3 atmSky(AtmLighting environment, float3 direction) {
+    return atmSky(environment, direction, 1.0);
 }
 
 public float atmSunSolidAngle() {

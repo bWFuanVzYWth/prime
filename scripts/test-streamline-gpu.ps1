@@ -8,6 +8,7 @@ param(
     [switch]$ReportOnlyValidation,
     [switch]$OmitSpecularDistance,
     [switch]$OmitSynchronization2,
+    [switch]$Interposed,
     [string]$Output
 )
 
@@ -25,7 +26,8 @@ if ((Test-Path -LiteralPath $Output) -and (Get-ChildItem -LiteralPath $Output -F
 }
 New-Item -ItemType Directory -Path $Output -Force | Out-Null
 & (Join-Path $PSScriptRoot 'fetch-streamline-sdk.ps1') -VerifyOnly
-foreach ($name in @('sl.interposer.dll', 'sl.common.dll', 'sl.dlss_d.dll', 'nvngx_dlssd.dll')) {
+foreach ($name in @('sl.interposer.dll', 'sl.common.dll', 'sl.dlss_d.dll', 'nvngx_dlssd.dll',
+                    'sl.dlss_g.dll', 'sl.pcl.dll', 'sl.reflex.dll', 'nvngx_dlssg.dll', 'NvLowLatencyVk.dll')) {
     Copy-Item -LiteralPath (Join-Path $repoRoot "third_party/streamline/bin/x64/$name") -Destination $Output
 }
 $executable = Join-Path $Output 'prime_streamline_gpu_test.exe'
@@ -42,6 +44,7 @@ if ($AbortOnValidationError) { $arguments += '--abort-on-validation-error' }
 if ($ReportOnlyValidation) { $arguments += '--report-only-validation' }
 if ($OmitSpecularDistance) { $arguments += '--omit-specular-distance' }
 if ($OmitSynchronization2) { $arguments += '--omit-synchronization2' }
+if ($Interposed) { $arguments += '--interposed' }
 $metadata = [ordered]@{
     started_utc = [DateTime]::UtcNow.ToString('o')
     api_version = $ApiVersion
@@ -51,7 +54,10 @@ $metadata = [ordered]@{
     omit_specular_distance = [bool]$OmitSpecularDistance
     validation = $true
     synchronization_validation = $true
+    synchronization_method = if ($Interposed) { 'VK_LAYER_VALIDATE_SYNC=1 (Khronos layer setting)' } else { 'VkValidationFeaturesEXT' }
+    effective_api_version = if ($Interposed) { '1.3 (SDK interposer minimum)' } else { $ApiVersion }
     synchronization2 = !$OmitSynchronization2
+    interposed = [bool]$Interposed
     compiler = (& $Compiler --version | Out-String).Trim()
     executable_sha256 = (Get-FileHash -LiteralPath $executable).Hash
     sdk_lock_sha256 = (Get-FileHash -LiteralPath (Join-Path $repoRoot 'third_party/streamline/sdk-lock.json')).Hash

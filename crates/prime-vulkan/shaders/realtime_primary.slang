@@ -18,6 +18,7 @@ import "realtime/primary_environment.slang";
     if (any(id.xy >= parameters.sampling.xy))
         return;
     TraceScene resources = {scene, textures, texels, instanceMaterials, staticTrianglePages};
-    PrimaryEnvironment environment = {atmosphereLighting(), parameters.right.w, parameters.up.w};
+    PrimaryEnvironment environment = {atmosphereLighting(), parameters.right.w, parameters.up.w,
+                                      false};
     primeTracePrimary(resources, environment, parameters, id.xy, NoPrimaryGuides());
 }

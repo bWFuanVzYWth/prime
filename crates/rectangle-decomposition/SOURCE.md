@@ -8,13 +8,13 @@
 - 包名与公开 API 保留 `rectangle_decomposition`，新 workspace 目录名为 `crates/rectangle-decomposition`。
 - `src/`、`tests/`、`benches/`、`examples/`、README 和算法文档按来源复制；本次不修改分解算法和输出语义。唯一源码集成改动是在 lib.rs 明确 `#![forbid(unsafe_code)]`，保留原 workspace 禁止 unsafe 的边界。
 - 开发依赖沿用 workspace 声明的 Criterion 0.8.2、test-case 3.3.1 兼容范围；实际解析版本以新 workspace 的 Cargo.lock 为准。生产库没有第三方依赖和 GPU 依赖。
-- 文档整理时修正 `docs/research.md` 指向原 workspace 性能指南的失效链接，改为本项目开发指南，并说明当前尚未接入 Minecraft 网格；没有修改算法源码、测试或 API。
+- 文档整理时修正 `docs/research.md` 指向原 workspace 性能指南的失效链接，改为本项目开发指南。后续由 `prime_scene::surface` 接入受约束的规则表面编译；分解算法源码、测试与公开 API 保留上述来源。
 - crate README 已改为当前 workspace 的介绍与可用 path 依赖示例。原 README 中关于 `2c9d1ac` 拆分和 `334d078e6db2f0aa85898437714161190c4d50f2` Git 依赖的说明属于体素引擎更早的导入历史；本项目的直接来源仍是上列 `9c80d226...` 工作树。
 
 论文和算法出处见 [docs/references.md](docs/references.md)。在导入时检查的来源 crate 与 workspace 根目录中未发现独立 LICENSE/COPYING 文件，来源 Cargo.toml 也没有 license 字段。保留已有声明，不据此推定或新增许可证。
 
-本库只接收 64×64 平面上经过验证、对齐且不重叠的带标签 sparse quad。调用方负责按平面、方向和完整合并语义分组；材质、UV、透明度、tint、发光或其他表面属性不一致时不能仅按 block ID 合并。本次只把算法作为可独立调用和测试的 workspace 成员，不将任意 Minecraft quad 强行映射为矩形输入。
+本库只接收 64×64 平面上经过验证、对齐且不重叠的带标签 sparse quad。调用方负责按平面、方向和完整合并语义分组；材质、UV、透明度、tint、发光或其他表面属性不一致时不能仅按 block ID 合并。当前 `prime_scene::surface` 对可证明的规则网格面调用本库，其余面保留独立几何，不将任意 Minecraft quad 强行映射为矩形输入。资格与完整语义见[表面编译](../../docs/surface-compiler.md)。
 
-当前 workspace 仅登记成员，没有无消费者的依赖别名或转发 API。消费者可显式使用 README 的本地 path 依赖；需要 `{ workspace = true }` 用法时再登记根依赖。
+根 workspace 登记本库成员，`prime_scene` 通过自身 Cargo.toml 的本地 path 依赖消费本库；根依赖表无需重复别名。库仍可独立调用与测试，不依赖 Minecraft、GPU 或渲染资源。独立消费者也可使用 README 的本地 path 依赖。
 
 可复用 `SparseOptimalScratch64` 为较大的内联对象，调用方需遵循原 [scratch 合同](docs/scratch.md)，并在任务循环外准备足够的 worker 栈；不能把每次创建 scratch 隐藏进渲染线程热路径。

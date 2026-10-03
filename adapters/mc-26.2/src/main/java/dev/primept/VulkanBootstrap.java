@@ -24,6 +24,7 @@ import org.lwjgl.vulkan.VkPhysicalDeviceRayQueryFeaturesKHR;
 import org.lwjgl.vulkan.VkPhysicalDeviceOpacityMicromapFeaturesEXT;
 import org.lwjgl.vulkan.VkPhysicalDeviceVulkan12Features;
 import org.lwjgl.vulkan.VkPhysicalDeviceSynchronization2Features;
+import org.lwjgl.vulkan.VkPhysicalDevicePrivateDataFeatures;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -58,6 +59,12 @@ public final class VulkanBootstrap {
     private static final VulkanFeature SYNCHRONIZATION_2_FEATURE =
             new VulkanFeature(VulkanBackend.SYNC2_FEATURES_STRUCT, "synchronization2",
                               VkPhysicalDeviceSynchronization2Features.SYNCHRONIZATION2);
+
+    // The early SDK interposer promotes its instance to 1.3 and creates a private-data slot.
+    private static final VulkanFeature STREAMLINE_PRIVATE_DATA = new VulkanFeature(
+            new VulkanPNextStruct(VK13.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIVATE_DATA_FEATURES,
+                                  VkPhysicalDevicePrivateDataFeatures.SIZEOF),
+            "privateData", VkPhysicalDevicePrivateDataFeatures.PRIVATEDATA);
 
     // Core Vulkan 1.2 replaces SL's legacy EXT_buffer_device_address requirement.
     // Enabling that extension with VkPhysicalDeviceVulkan12Features would violate Vulkan.
@@ -97,6 +104,19 @@ public final class VulkanBootstrap {
         int apiVersion = physical.vkPhysicalDeviceProperties().apiVersion();
         if (apiVersion < VK12.VK_API_VERSION_1_2)
             missing.add("Vulkan 1.2");
+        if (StreamlineBootstrap.installed()) {
+            try (MemoryStack stack = MemoryStack.stackPush()) {
+                var privateData = VkPhysicalDevicePrivateDataFeatures.calloc(stack).sType$Default();
+                var probe =
+                        VkPhysicalDeviceFeatures2.calloc(stack).sType$Default().pNext(privateData);
+                VK12.vkGetPhysicalDeviceFeatures2(physical.vkPhysicalDevice(), probe);
+                if (apiVersion < VK13.VK_API_VERSION_1_3 || !privateData.privateData())
+                    throw new IllegalStateException(
+                            "The installed Streamline interposer requires Vulkan 1.3 privateData");
+            }
+            // The process SDK needs this even when this adapter cannot run PT or RR.
+            features.add(STREAMLINE_PRIVATE_DATA);
+        }
         for (String extension : EXTENSIONS)
             if (!physical.hasDeviceExtension(extension))
                 missing.add(extension);
@@ -193,6 +213,8 @@ public final class VulkanBootstrap {
                 features.contains(SYNCHRONIZATION_2_FEATURE);
         boolean streamline = previous.streamline && extensions.containsAll(STREAMLINE_EXTENSIONS) &&
                              features.containsAll(STREAMLINE_FEATURES);
+        streamline &=
+                !StreamlineBootstrap.installed() || features.contains(STREAMLINE_PRIVATE_DATA);
         status = new Status(previous.physical, device.address(), true, opacityMicromap, streamline,
                             "");
         LOGGER.info(

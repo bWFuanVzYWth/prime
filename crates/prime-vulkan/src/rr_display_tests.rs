@@ -81,7 +81,9 @@ fn pipeline(context: &Arc<Context>) -> Pipeline {
         single_sample_pipelines: None,
         primary_pipelines: None,
         realtime_post: None,
+        realtime_linear_post: None,
         reconstruction_display: None,
+        reconstruction_linear: None,
     };
     unsafe {
         let bindings = [4, 10, 11, 13, 18, 19].map(|binding| {

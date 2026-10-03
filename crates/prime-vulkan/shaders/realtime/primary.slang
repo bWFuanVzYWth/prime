@@ -143,10 +143,13 @@ PrimePrimaryGuideSeed primePrimaryLighting<Guides, Environment>(
         if (!hit.found) {
             if (!guideDetached && !guideDone)
                 guides.environment(parameters, pixel, sampleUv, direction, psr);
-            radiance += throughput * environment.escape(direction);
+            radiance += throughput * environment.escape(direction, bounce == 0);
             return primePrimaryFinishInactive(parameters, index, guideDetached, companion, radiance,
                                               primaryDistance);
         }
+        if (bounce == 0)
+            guides.foreground(parameters, pixel, sampleUv, hit.surface.position,
+                              hit.previousPosition, hit.previousPositionKnown);
         SurfacePoint surface = hit.surface;
         float segmentDistance = length(surface.position - origin);
         coneWidth += coneSpread * segmentDistance;
@@ -176,7 +179,7 @@ PrimePrimaryGuideSeed primePrimaryLighting<Guides, Environment>(
         if (!primePbrVertexIsDiscreteOnly(material, incident, transmitted)) {
             if (!guideDetached && !guideDone)
                 guides.surface(parameters, pixel, sampleUv, surface, material, direction, incident,
-                               transmitted, hit.staticGeometry, psr);
+                               transmitted, hit.previousPosition, hit.previousPositionKnown, psr);
             if (!lightingValid)
                 return primePrimaryFinishInactive(parameters, index, guideDetached, companion,
                                                   radiance, primaryDistance);
@@ -346,7 +349,7 @@ void primePrimaryGuideWalk<Guides>(TraceScene resources, PrimaryParameters param
                          : hit.transmitted;
         if (!primePbrVertexIsDiscreteOnly(material, incident, transmitted)) {
             guides.surface(parameters, pixel, sampleUv, surface, material, seed.direction, incident,
-                           transmitted, hit.staticGeometry, seed.psr);
+                           transmitted, hit.previousPosition, hit.previousPositionKnown, seed.psr);
             return;
         }
         if (!primePathHasContinuation(bounce, parameters.config.y))
@@ -375,7 +378,7 @@ public void primeTracePrimary<Guides, Environment>(TraceScene resources, Environ
                                          (screen.x * parameters.forward.w * parameters.position.w) -
                                  parameters.up.xyz * (screen.y * parameters.position.w));
     uint index = pixel.y * parameters.sampling.x + pixel.x;
-    guides.initialize(pixel);
+    guides.initialize(pixel, parameters.sampling.xy);
     if (parameters.config.z != 0)
         parameters.diagnosticAddress[index] = float4(0, 0, 0, 3.402823466e38f);
     PrimePrimaryGuideSeed seed = primePrimaryLighting(resources, environment, parameters, pixel,

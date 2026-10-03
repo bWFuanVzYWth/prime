@@ -24,7 +24,7 @@ struct Params {
 [numthreads(64, 1, 1)] void main(uint3 id : SV_DispatchThreadID) {
     if (id.x >= params.count)
         return;
-    AtmEnvironment environment = {frames, sky, transmittance, aerialS, aerialT};
+    AtmEnvironment environment = {frames, sky, transmittance, aerialS, aerialT, sky, float4(0)};
     if (params.mode == 8 || params.mode == 9) {
         float2 uv = (float2(id.x % 1920, id.x / 1920) + 0.5) / float2(1920, 1080);
         float3 ray = normalize(float3(uv.x * 3.0 - 1.5, uv.y * 2.0 - 1.0, -1.0));

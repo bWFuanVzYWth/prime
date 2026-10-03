@@ -47,7 +47,7 @@ impl Lease {
 }
 
 pub(crate) struct Arena {
-    pages: Vec<Page>,
+    pages: Vec<Option<Page>>,
     retired: VecDeque<(u64, Lease)>,
     serial: u64,
     host: bool,
@@ -71,7 +71,7 @@ impl Arena {
             .is_some_and(|(value, _)| *value <= completed)
         {
             let (_, lease) = self.retired.pop_front().unwrap();
-            let page = &mut self.pages[lease.page];
+            let page = self.pages[lease.page].as_mut().unwrap();
             page.slots.release(lease.first, lease.units);
             page.live -= lease.units;
             self.next = lease.page;
@@ -93,7 +93,9 @@ impl Arena {
         .map_err(|_| "Arena page exceeds address capacity")?;
         let mut found = None;
         for i in (self.next..self.pages.len()).chain(0..self.next) {
-            let page = &mut self.pages[i];
+            let Some(page) = &mut self.pages[i] else {
+                continue;
+            };
             if page.slots.limit_value() - page.live >= units
                 && let Ok(first) = page.slots.allocate(units)
             {
@@ -133,16 +135,23 @@ impl Arena {
             )?);
             let mut slots = Slots::with_limit(capacity);
             let first = slots.allocate(units)?;
-            let index = self.pages.len();
-            self.pages.push(Page {
+            let page = Some(Page {
                 buffer,
                 slots,
                 live: 0,
             });
+            let index = if let Some(index) = self.pages.iter().position(Option::is_none) {
+                self.pages[index] = page;
+                index
+            } else {
+                let index = self.pages.len();
+                self.pages.push(page);
+                index
+            };
             (index, first)
         };
         self.next = index;
-        let page = &mut self.pages[index];
+        let page = self.pages[index].as_mut().unwrap();
         page.live += units;
         let base = page.buffer.address();
         let offset = (base + u64::from(first) * UNIT).div_ceil(alignment) * alignment - base;
@@ -158,19 +167,118 @@ impl Arena {
     pub fn retire(&mut self, lease: Lease) {
         self.retired.push_back((self.serial, lease));
     }
+    /// Completion has already released every range. Keep one idle page for future
+    /// work; sparse page identities remain valid for all other live leases.
+    pub fn reclaim_empty_pages(&mut self) {
+        let mut idle = false;
+        for page in &mut self.pages {
+            if page
+                .as_ref()
+                .is_some_and(|page| page.live == 0 && Rc::strong_count(&page.buffer) == 1)
+            {
+                if idle {
+                    *page = None;
+                } else {
+                    idle = true;
+                }
+            }
+        }
+        while self.pages.last().is_some_and(Option::is_none) {
+            self.pages.pop();
+        }
+        if self.next >= self.pages.len() {
+            self.next = 0;
+        }
+    }
     #[cfg(test)]
     pub fn page_count(&self) -> usize {
-        self.pages.len()
+        self.pages.iter().flatten().count()
+    }
+    #[cfg(test)]
+    pub fn retired_count(&self) -> usize {
+        self.retired.len()
     }
     #[cfg(test)]
     pub fn reserved_bytes(&self) -> u64 {
-        self.pages.iter().map(|page| page.buffer.size).sum()
+        self.pages
+            .iter()
+            .flatten()
+            .map(|page| page.buffer.size)
+            .sum()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[ignore = "requires Vulkan allocation; sparse page collection, last-use proof and cancellation"]
+    fn gpu_empty_pages_preserve_in_flight_leases_and_reuse_sparse_identities() {
+        let context = Context::new().unwrap();
+        let mut arena = Arena::new(&context, false);
+        arena.begin(0, 7);
+        let a = arena.allocate(&context, 40 * 1024 * 1024, 256).unwrap();
+        let b = arena.allocate(&context, a.size, 256).unwrap();
+        let c = arena.allocate(&context, a.size, 256).unwrap();
+        let d = arena.allocate(&context, a.size, 256).unwrap();
+        let stable = (d.page, d.buffer.buffer, d.offset, d.address());
+        let held = b.buffer.clone();
+        arena.retire(a);
+        arena.begin(7, 8);
+        arena.retire(b);
+        arena.begin(7, 9);
+        arena.retire(c);
+        arena.reclaim_empty_pages();
+        assert_eq!(
+            arena.page_count(),
+            4,
+            "in-flight ranges keep their physical pages"
+        );
+        arena.begin(8, 9);
+        arena.reclaim_empty_pages();
+        assert_eq!(
+            arena.page_count(),
+            4,
+            "external buffer owners also prevent collection"
+        );
+        drop(held);
+        arena.reclaim_empty_pages();
+        assert_eq!(arena.page_count(), 3);
+        assert!(arena.pages[1].is_none());
+        assert_eq!((d.page, d.buffer.buffer, d.offset, d.address()), stable);
+        let idle = arena.allocate(&context, d.size, 256).unwrap();
+        let hole = arena.allocate(&context, d.size, 256).unwrap();
+        assert_eq!(idle.page, 0);
+        assert_eq!(hole.page, 1);
+        // Unsubmitted allocations can use the same conservative serial/cancel proof.
+        arena.retire(idle);
+        arena.retire(hole);
+        arena.begin(8, 10);
+        arena.reclaim_empty_pages();
+        assert_eq!(arena.page_count(), 4);
+        arena.begin(9, 10);
+        arena.reclaim_empty_pages();
+        assert_eq!(arena.page_count(), 2);
+        assert_eq!((d.page, d.buffer.buffer, d.offset, d.address()), stable);
+        arena.retire(d);
+        arena.begin(9, 11);
+        arena.reclaim_empty_pages();
+        assert_eq!(arena.page_count(), 2);
+        arena.begin(10, 11);
+        arena.reclaim_empty_pages();
+        assert_eq!(
+            arena.page_count(),
+            1,
+            "one idle page remains for later work"
+        );
+        assert_eq!(arena.pages.len(), 1);
+        assert_eq!(
+            context
+                .live_allocations
+                .load(std::sync::atomic::Ordering::Relaxed),
+            1
+        );
+    }
     #[test]
     #[ignore = "requires Vulkan host-visible memory; checks exclusive mapped writes and failure reuse"]
     fn gpu_mapped_writes_preserve_neighbor_leases_and_recover_unsubmitted_failures() {

@@ -14,6 +14,14 @@ use std::{
 // Each handle and its Vulkan queue live exclusively on the creating OS thread. Only
 // the monotonic identity counter is shared; no scene or GPU state crosses threads.
 static NEXT_HANDLE: AtomicU64 = AtomicU64::new(1);
+fn allocate_handle() -> Result<u64, String> {
+    #[allow(deprecated)]
+    NEXT_HANDLE
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+            value.checked_add(1)
+        })
+        .map_err(|_| "handle identity exhausted".into())
+}
 
 /// Routes a real Vulkan present; its VkResult is returned unchanged.
 /// # Safety
@@ -33,7 +41,151 @@ pub unsafe extern "C" fn prime_streamline_present(queue: u64, present_info: u64)
 }
 thread_local! {
     static SESSIONS: RefCell<BTreeMap<u64, Engine>> = const { RefCell::new(BTreeMap::new()) };
+    #[cfg(feature = "vulkan")]
+    static HDR_SURFACES: RefCell<BTreeMap<u64, prime_vulkan::HdrSurface>> = const { RefCell::new(BTreeMap::new()) };
     static ERROR: RefCell<String> = const { RefCell::new(String::new()) };
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn prime_streamline_bootstrap() -> i32 {
+    boundary(-1, || {
+        #[cfg(feature = "vulkan")]
+        {
+            prime_vulkan::streamline_bootstrap()?;
+            Ok(0)
+        }
+        #[cfg(not(feature = "vulkan"))]
+        {
+            Err("Native library built without Vulkan".into())
+        }
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn prime_streamline_frame(action: u32, enabled: u32) -> i32 {
+    boundary(-1, || {
+        if action > PRIME_STREAMLINE_HOST_SHUTDOWN || enabled > 1 {
+            return Err("Invalid Streamline logical frame controls".into());
+        }
+        #[cfg(feature = "vulkan")]
+        {
+            prime_vulkan::streamline_frame(action, enabled != 0)?;
+            Ok(0)
+        }
+        #[cfg(not(feature = "vulkan"))]
+        {
+            Err("Native library built without Vulkan".into())
+        }
+    })
+}
+
+/// # Safety
+/// The host handles/features/queue/timeline remain live through explicit surface shutdown.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn prime_hdr_surface_create(host: *const PrimeVulkanHost) -> u64 {
+    boundary(0, || {
+        let host = unsafe { input(host)? };
+        validate_vulkan_host(host)?;
+        #[cfg(feature = "vulkan")]
+        {
+            let owner = unsafe {
+                prime_vulkan::HdrSurface::new(
+                    host.instance,
+                    host.physical_device,
+                    host.device,
+                    host.queue,
+                    host.queue_family,
+                    host.timeline,
+                )?
+            };
+            let id = allocate_handle()?;
+            HDR_SURFACES.with(|owners| {
+                owners
+                    .try_borrow_mut()
+                    .map_err(|_| "reentrant HDR surface creation")?
+                    .insert(id, owner)
+                    .map_or(Ok(()), |_| Err("Duplicate HDR surface identity"))
+            })?;
+            Ok(id)
+        }
+        #[cfg(not(feature = "vulkan"))]
+        {
+            Err("Native library built without Vulkan".into())
+        }
+    })
+}
+
+/// # Safety
+/// Target and display metadata satisfy the same borrowed image/calibration contracts as
+/// prime_present_hdr/prime_display_output. Record once in each host submission.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn prime_hdr_surface_record(
+    handle: u64,
+    target: *const PrimeHdrTarget,
+    display: *const PrimeDisplayOutput,
+) -> i32 {
+    boundary(-1, || {
+        let target = unsafe { input(target)? };
+        let display = unsafe { input(display)? };
+        if display.active != 1
+            || display.reserved != 0
+            || target.ui_image == 0
+            || target.output_image == 0
+        {
+            return Err("Invalid HDR surface metadata".into());
+        }
+        #[cfg(feature = "vulkan")]
+        {
+            HDR_SURFACES.with(|owners| unsafe {
+                owners
+                    .try_borrow_mut()
+                    .map_err(|_| "reentrant HDR surface call")?
+                    .get_mut(&handle)
+                    .ok_or("Invalid HDR surface handle or thread")?
+                    .record(
+                        target.command,
+                        target.ui_view,
+                        target.output_view,
+                        target.serial,
+                        [target.width, target.height],
+                        display.peak_nits,
+                        display.system_white_nits,
+                    )
+            })?;
+            Ok(0)
+        }
+        #[cfg(not(feature = "vulkan"))]
+        {
+            let _ = handle;
+            Err("Native library built without Vulkan".into())
+        }
+    })
+}
+
+/// Host submits pending work before calling; destruction requires real completion.
+#[unsafe(no_mangle)]
+pub extern "C" fn prime_hdr_surface_destroy(handle: u64) -> i32 {
+    boundary(-1, || {
+        #[cfg(feature = "vulkan")]
+        {
+            HDR_SURFACES.with(|owners| {
+                let mut owners = owners
+                    .try_borrow_mut()
+                    .map_err(|_| "reentrant HDR surface destruction")?;
+                owners
+                    .get_mut(&handle)
+                    .ok_or("Invalid HDR surface handle or thread")?
+                    .shutdown()?;
+                owners.remove(&handle);
+                Ok(0)
+            })
+        }
+        #[cfg(not(feature = "vulkan"))]
+        {
+            let _ = handle;
+            Err("Native library built without Vulkan".into())
+        }
+    })
 }
 
 pub(crate) fn boundary<T>(fallback: T, work: impl FnOnce() -> Result<T, String>) -> T {
@@ -91,11 +243,7 @@ pub extern "C" fn prime_create(version: u32) -> u64 {
                 "ABI mismatch: expected {ABI_VERSION}, received {version}"
             ));
         }
-        // fetch_update is supported by our stable MSRV; newer nightlies rename it.
-        #[allow(deprecated)]
-        let handle = NEXT_HANDLE
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| v.checked_add(1))
-            .map_err(|_| "handle identity exhausted")?;
+        let handle = allocate_handle()?;
         SESSIONS.with(|sessions| {
             let mut sessions = sessions
                 .try_borrow_mut()
@@ -321,6 +469,149 @@ pub unsafe extern "C" fn prime_record(
     })
 }
 
+/// # Safety
+/// The attached host queue has accepted the matching recorded command buffer and serial.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn prime_submission_accepted(handle: u64, serial: u64) -> i32 {
+    boundary(-1, || {
+        #[cfg(feature = "vulkan")]
+        {
+            session(handle, |s| s.submission_accepted(serial))?;
+            Ok(0)
+        }
+        #[cfg(not(feature = "vulkan"))]
+        {
+            let _ = (handle, serial);
+            Err("Native library built without Vulkan".into())
+        }
+    })
+}
+
+/// # Safety
+/// Display metadata describes the actual selected surface at an accepted frame boundary.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn prime_display_output(
+    handle: u64,
+    display: *const PrimeDisplayOutput,
+) -> i32 {
+    boundary(-1, || {
+        let display = unsafe { input(display)? };
+        if display.active > 1 || display.reserved != 0 {
+            return Err("Invalid display output state".into());
+        }
+        #[cfg(feature = "vulkan")]
+        {
+            session(handle, |s| {
+                s.renderer
+                    .as_mut()
+                    .ok_or("Attach a Vulkan host before configuring display")?
+                    .display_output(
+                        display.active != 0,
+                        display.peak_nits,
+                        display.system_white_nits,
+                    )
+            })?;
+            Ok(0)
+        }
+        #[cfg(not(feature = "vulkan"))]
+        {
+            let _ = handle;
+            Err("Native library built without Vulkan".into())
+        }
+    })
+}
+
+/// # Safety
+/// Borrowed images/command satisfy PrimeHdrTarget's layout, device and completion contract.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn prime_present_hdr(handle: u64, target: *const PrimeHdrTarget) -> i32 {
+    boundary(-1, || {
+        let target = unsafe { input(target)? };
+        if [
+            target.command,
+            target.ui_image,
+            target.ui_view,
+            target.output_image,
+            target.output_view,
+            target.serial,
+        ]
+        .contains(&0)
+        {
+            return Err("Invalid HDR presentation handles".into());
+        }
+        #[cfg(feature = "vulkan")]
+        {
+            session(handle, |s| unsafe {
+                s.renderer
+                    .as_mut()
+                    .ok_or("Attach a Vulkan host before HDR presentation")?
+                    .present_hdr(
+                        target.command,
+                        target.ui_view,
+                        target.output_view,
+                        target.serial,
+                        [target.width, target.height],
+                    )
+            })?;
+            Ok(0)
+        }
+        #[cfg(not(feature = "vulkan"))]
+        {
+            let _ = handle;
+            Err("Native library built without Vulkan".into())
+        }
+    })
+}
+
+/// # Safety
+/// The target has the same ownership/layout contract as prime_present_hdr and the
+/// SDK's published input-consumer completion is also required before release.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn prime_prepare_frame_generation(
+    handle: u64,
+    target: *const PrimeHdrTarget,
+    back_buffer_count: u32,
+    back_buffer_format: u32,
+) -> i32 {
+    boundary(-1, || {
+        let target = unsafe { input(target)? };
+        if [
+            target.command,
+            target.ui_image,
+            target.ui_view,
+            target.output_image,
+            target.output_view,
+            target.serial,
+        ]
+        .contains(&0)
+        {
+            return Err("Invalid frame generation presentation handles".into());
+        }
+        #[cfg(feature = "vulkan")]
+        {
+            let prepared = session(handle, |s| unsafe {
+                s.renderer
+                    .as_mut()
+                    .ok_or("Attach a Vulkan host before frame generation")?
+                    .prepare_frame_generation(
+                        target.command,
+                        target.ui_view,
+                        target.serial,
+                        [target.width, target.height],
+                        back_buffer_count,
+                        back_buffer_format,
+                    )
+            })?;
+            Ok(i32::from(!prepared))
+        }
+        #[cfg(not(feature = "vulkan"))]
+        {
+            let _ = (handle, back_buffer_count, back_buffer_format);
+            Err("Native library built without Vulkan".into())
+        }
+    })
+}
+
 /// Last completed host PT timestamp duration in ns; zero when profiling is unavailable.
 #[unsafe(no_mangle)]
 pub extern "C" fn prime_gpu_time(handle: u64) -> u64 {
@@ -425,6 +716,15 @@ const _: PrimeAttachVulkanFn = prime_attach_vulkan;
 const _: PrimeConfigureFn = prime_configure;
 const _: PrimePrepareResourcesFn = prime_prepare_resources;
 const _: PrimeRecordFn = prime_record;
+const _: PrimeSubmissionAcceptedFn = prime_submission_accepted;
+const _: PrimeDisplayOutputFn = prime_display_output;
+const _: PrimePresentHdrFn = prime_present_hdr;
+const _: PrimePrepareFrameGenerationFn = prime_prepare_frame_generation;
+const _: PrimeHdrSurfaceCreateFn = prime_hdr_surface_create;
+const _: PrimeHdrSurfaceRecordFn = prime_hdr_surface_record;
+const _: PrimeHdrSurfaceDestroyFn = prime_hdr_surface_destroy;
+const _: PrimeStreamlineBootstrapFn = prime_streamline_bootstrap;
+const _: PrimeStreamlineFrameFn = prime_streamline_frame;
 const _: PrimeGpuTimeFn = prime_gpu_time;
 const _: PrimeCpuDiagnosticsFn = prime_cpu_diagnostics;
 const _: PrimeDestroyFn = prime_destroy;
@@ -563,6 +863,11 @@ mod abi_tests {
             ray_reconstruction: 1,
             reconstruction_quality: 3,
             terrain_batches_per_frame: 8,
+            stars: 1.0,
+            auto_exposure_compensation: 0.6,
+            hdr: 0,
+            hdr_reference_white: 0,
+            frame_generation: 0,
         };
         assert_eq!(unsafe { prime_configure(handle, &valid) }, 0);
         assert_eq!(unsafe { prime_configure(handle, std::ptr::null()) }, -1);

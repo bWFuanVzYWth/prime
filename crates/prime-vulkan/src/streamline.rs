@@ -35,6 +35,36 @@ struct Resource {
     reserved: u32,
 }
 
+impl Resource {
+    fn owned(image: &Image, extent: [u32; 2], format: vk::Format) -> Self {
+        Self {
+            image: image.image.as_raw(),
+            view: image.view.as_raw(),
+            memory: image.memory.as_raw(),
+            width: extent[0],
+            height: extent[1],
+            format: format.as_raw() as u32,
+            layout: vk::ImageLayout::GENERAL.as_raw() as u32,
+            usage: (vk::ImageUsageFlags::STORAGE
+                | vk::ImageUsageFlags::SAMPLED
+                | vk::ImageUsageFlags::TRANSFER_SRC
+                | vk::ImageUsageFlags::TRANSFER_DST)
+                .as_raw(),
+            reserved: 0,
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+#[repr(C)]
+struct FgFrame {
+    constants: *const Frame,
+    command: u64,
+    images: [Resource; 4],
+    back_buffers: u32,
+    back_buffer_format: u32,
+}
+
 #[repr(C)]
 #[derive(Clone)]
 pub(super) struct Frame {
@@ -98,6 +128,11 @@ impl Frame {
 #[cfg(target_os = "windows")]
 unsafe extern "C" {
     fn prime_sl_abi_version() -> u32;
+    fn prime_sl_bootstrap() -> i32;
+    fn prime_sl_frame(action: u32, enabled: u32) -> i32;
+    fn prime_sl_fg_supported(context: *mut c_void) -> u32;
+    fn prime_sl_fg_prepare(context: *mut c_void, frame: *const FgFrame) -> i32;
+    fn prime_sl_fg_suspend(context: *mut c_void) -> i32;
     fn prime_sl_create(init: *const Init, output: *mut *mut c_void) -> i32;
     fn prime_sl_configure(
         context: *mut c_void,
@@ -110,6 +145,29 @@ unsafe extern "C" {
     fn prime_sl_destroy(context: *mut c_void) -> i32;
     fn prime_sl_last_error() -> *const c_char;
     fn prime_sl_present(queue: u64, present_info: u64) -> i32;
+}
+
+pub(crate) fn bootstrap() -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        check(unsafe { prime_sl_bootstrap() })
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Err("Streamline process bootstrap currently supports Windows x86_64".into())
+    }
+}
+
+pub(crate) fn frame(action: u32, enabled: bool) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        check(unsafe { prime_sl_frame(action, u32::from(enabled)) })
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (action, enabled);
+        Ok(())
+    }
 }
 
 /// # Safety
@@ -151,6 +209,90 @@ fn check(result: i32) -> Result<(), String> {
 }
 
 impl Runtime {
+    pub fn frame_generation_supported(&self) -> bool {
+        #[cfg(target_os = "windows")]
+        {
+            unsafe { prime_sl_fg_supported(self.handle) != 0 }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            false
+        }
+    }
+
+    pub fn suspend_frame_generation(&mut self) -> Result<(), String> {
+        #[cfg(target_os = "windows")]
+        {
+            check(unsafe { prime_sl_fg_suspend(self.handle) })
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            Ok(())
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn prepare_frame_generation(
+        &mut self,
+        command: vk::CommandBuffer,
+        constants: &Frame,
+        visible: &[Image; 2],
+        hudless: &Image,
+        ui_alpha: &Image,
+        input: [u32; 2],
+        output: [u32; 2],
+        back_buffers: u32,
+        back_buffer_format: vk::Format,
+    ) -> Result<bool, String> {
+        #[cfg(target_os = "windows")]
+        {
+            if !self.frame_generation_supported() {
+                return Ok(false);
+            }
+            let frame = FgFrame {
+                constants,
+                command: command.as_raw(),
+                images: [
+                    Resource::owned(&visible[0], input, vk::Format::R32_SFLOAT),
+                    Resource::owned(&visible[1], input, vk::Format::R16G16_SFLOAT),
+                    Resource::owned(
+                        hudless,
+                        output,
+                        if back_buffer_format == vk::Format::R16G16B16A16_SFLOAT {
+                            vk::Format::R16G16B16A16_SFLOAT
+                        } else {
+                            vk::Format::R8G8B8A8_UNORM
+                        },
+                    ),
+                    Resource::owned(ui_alpha, output, vk::Format::R8_UNORM),
+                ],
+                back_buffers,
+                back_buffer_format: back_buffer_format.as_raw() as u32,
+            };
+            let result = unsafe { prime_sl_fg_prepare(self.handle, &frame) };
+            if result == 1 {
+                return Ok(false);
+            }
+            check(result)?;
+            Ok(true)
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = (
+                command,
+                constants,
+                visible,
+                hudless,
+                ui_alpha,
+                input,
+                output,
+                back_buffers,
+                back_buffer_format,
+            );
+            Ok(false)
+        }
+    }
+
     pub fn new(context: &Context) -> Result<Self, String> {
         #[cfg(target_os = "windows")]
         {

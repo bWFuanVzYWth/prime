@@ -28,7 +28,7 @@ struct TestParameters {
 // Only the environment radiance and final guide sink are replaced. The production query,
 // material classification, delta sampling, roulette, shared traversal and seed paths all run.
 public struct TestEnvironment : IPrimaryEnvironment {
-    public float3 escape(float3 direction) {
+    public float3 escape(float3 direction, bool initialCameraMiss) {
         return float3(1.0);
     }
 };
@@ -39,10 +39,12 @@ public struct TestGuides : IPrimaryGuides {
     public float2 sampleOffset(ZSobol sampler) {
         return float2(0.5);
     }
-    public void initialize(uint2 pixel) {
+    public void initialize(uint2 pixel, uint2 inputExtent) {
         for (uint plane = 0; plane < 8; ++plane)
             outputs[pixel.x * 8 + plane] = float4(0.0);
     }
+    public void foreground(PrimaryParameters camera, uint2 pixel, float2 sampleUv, float3 position,
+                           float3 previousPosition, bool previousPositionKnown) {}
     public void interfaceSpecular(uint2 pixel, PrimePbrVertex material, float3 view,
                                   float4 incident, float4 transmitted) {
         outputs[pixel.x * 8 + 5].z += 1.0;
@@ -50,8 +52,8 @@ public struct TestGuides : IPrimaryGuides {
     public void reflectionPending(uint2 pixel) {}
     public void surface(PrimaryParameters camera, uint2 pixel, float2 sampleUv,
                         SurfacePoint surface, PrimePbrVertex material, float3 direction,
-                        float4 incident, float4 transmitted, bool staticGeometry,
-                        PrimePrimaryPsr psr) {
+                        float4 incident, float4 transmitted, float3 previousPosition,
+                        bool previousPositionKnown, PrimePrimaryPsr psr) {
         uint base = pixel.x * 8;
         if ((psr.flags & PRIME_PRIMARY_GUIDE_REFLECTION) != 0) {
             outputs[base + 6].w += 1.0;
@@ -62,8 +64,9 @@ public struct TestGuides : IPrimaryGuides {
                                             surface.position, surface.normal, material.normal,
                                             virtualPosition, virtualNormal);
         outputs[base] = float4(surface.position, 1.0);
-        outputs[base + 1] = float4(virtualPosition,
-                                   primePrimaryPsrMotionKnown(psr, staticGeometry) ? 1.0 : 0.0);
+        outputs[base + 1] =
+                float4(virtualPosition,
+                       primePrimaryPsrMotionKnown(psr, previousPositionKnown) ? 1.0 : 0.0);
         outputs[base + 2] = float4(virtualNormal, asfloat(psr.flags));
         outputs[base + 5].w += 1.0;
         outputs[base + 6].yz = float2(valid ? 1.0 : 0.0, material.roughness);

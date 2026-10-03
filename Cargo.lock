@@ -558,6 +558,7 @@ version = "0.1.0"
 dependencies = [
  "ash",
  "cc",
+ "flate2",
  "mimalloc",
  "prime_scene",
  "safetensors",

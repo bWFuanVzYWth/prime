@@ -1,6 +1,6 @@
 # 宿主 Vulkan 流水线
 
-生产路径直接借用 Minecraft 26.2 / 26.3 的 Vulkan 设备、图像和提交队列。正常帧不回读像素、不经 Java 再上传、不复制整帧 GPU 输出、不为 PT 单独增加队列提交。两版各自适配宿主，共用同一 Rust 引擎。
+生产路径直接借用 Minecraft 26.2 / 26.3 的 Vulkan 设备、图像和提交队列。正常帧不回读像素、不经 Java 再上传，不为 PT 单独增加队列提交。自动曝光、HDR及帧生成按需增加GPU图像和全图处理；这些实际成本由[显示契约](display.md)维护。两版各自适配宿主，共用同一 Rust 引擎。
 
 ## 宿主与设备创建
 
@@ -19,7 +19,9 @@
 
 Vulkan 1.2 已包含所需的 SPIR-V 1.4、descriptor indexing 和 buffer device address 扩展依赖；特性位仍需显式启用。依据为 [ray query 扩展依赖](https://docs.vulkan.org/refpages/latest/refpages/source/VK_KHR_ray_query.html) 和 [acceleration structure 扩展依赖](https://docs.vulkan.org/refpages/latest/refpages/source/VK_KHR_acceleration_structure.html)。BDA 使用宿主已有的 Vulkan 1.2 feature struct，避免重复添加同类 pNext 结构。
 
-仅在宿主 `vkCreateDevice` 成功返回后记录该具体 `VkDevice` 与 `VkPhysicalDevice` 句柄。Java 调用 `VulkanBootstrap.requireEnabled(actualDevice)` 后才能把宿主句柄传给 Rust。物理设备支持查询不能替代逻辑设备启用确认。缺少能力时原版设备可正常创建，PT 显式报告不可用。
+启用 Prime 启动能力时，LWJGL 在 Vulkan 创建前使用 Streamline interposer；该路径要求实际 Vulkan 1.3 和显式 `privateData`。SDK在创建device时就使用 private-data slot，故其协商不依当前选择的世界后端或 RR 开关。RR 另显式启用 synchronization2 与 SDK清图所需 `shaderStorageImageWriteWithoutFormat`，这些设备能力与同步验证开关分别管理，详见[重建合同](reconstruction.md)。
+
+仅在宿主 `vkCreateDevice` 成功返回后记录该具体 `VkDevice` 与 `VkPhysicalDevice` 句柄。Java 调用 `VulkanBootstrap.requireEnabled(actualDevice)` 后才能把宿主句柄传给 Rust。物理设备支持查询不能替代逻辑设备启用确认。缺少 PT 光追能力时原版设备可正常创建，PT 显式报告不可用；已安装 interposer 时若不满足 Vulkan 1.3/privateData 前提，设备协商直接拒绝继续，不能靠切换世界渲染器解除进程级要求。
 
 宿主所用的 timelineSemaphore 是26.2原版 REQUIRED_DEVICE_FEATURES；实际 createDevice 会将该特性设为 true 后传给 vkCreateDevice。主 target 的 STORAGE 用途只对实际 Vulkan 且上述协商成功的设备添加，避免改变回退 OpenGL 的原版资源创建。
 
@@ -48,17 +50,22 @@ flowchart LR
     C --> D[借用宿主命令缓冲]
     D --> K1[实时K1: delta前缀与主guide]
     K1 --> K2[实时K2: landing与主要输运]
-    K2 --> P[post: 合成HDR与aerial]
-    P --> R[raw: tonemap与编码]
-    P --> RR[Streamline RR与显示]
-    D --> O[离线: 原通用积分与逐样本累积显示]
-    R --> F[imageStore直接写主颜色图像]
-    RR --> F
-    O --> F
-    F --> G[宿主绘制手部与HUD并提交]
+    K2 --> P[post: 线性合成与aerial]
+    P --> R[raw或RR selector]
+    P --> RR[Streamline RR]
+    RR --> R
+    D --> O[离线积分与逐样本累积]
+    R --> E[可选星图/曝光与SDR/HDR显示]
+    O --> E
+    E --> F[imageStore写主RGBA8颜色]
+    F --> G[宿主手部与HUD]
+    G --> H[可选HDR呈现与FG输入]
+    H --> I[真实提交与Present]
 ```
 
-Java 给主颜色 target 增加 storage 用途，同时将该用途映射为 `VK_IMAGE_USAGE_STORAGE_BIT`；保留原有 attachment、sampling 和 transfer 用途。shader通过storage image descriptor写入宿主RGBA8图像；raw实时在两个PT kernel之后用窄post合成和显示，RR在合成HDR后增加SDK重建与显示，离线保留原累积存储与逐样本调度。纹理语义、GPU 诊断与冻结规则见 [渲染模式](renderers.md)，RR 的能力协商、实际 Present 和完成证明见 [重建契约](reconstruction.md)。主图像不是交换链图像；最终呈现与手部/HUD 继续由 Minecraft 管理。
+Java 给主颜色 target 增加 storage 用途，同时将该用途映射为 `VK_IMAGE_USAGE_STORAGE_BIT`；保留原有 attachment、sampling 和 transfer 用途。shader通过storage image descriptor写入宿主RGBA8图像；raw实时在两个PT kernel之后合成，RR增加SDK重建与显示，离线保留原累积存储与逐样本调度。自动曝光、HDR或RR星图需要线性显示时，先保存FP32输入，再执行星图/测光/primeDRT；Offline直接消费累积BDA，省去线性图复制。全关闭时保留直接SDR显示。HDR/FG开启时保存世界SDR基线，世界alpha为0，宿主手/HUD仍按实际source-over绘制，最终覆盖用于合成与SDK UI mask。主图像不是交换链图像。
+
+实际HDR surface由版本适配器选择RGBA16F与`EXTENDED_SRGB_LINEAR_EXT`，只在Windows能力和绝对亮度标定有效时选择。最终手/HUD之后在当前encoder录制HDR合成；原版/标题页面使用独立轻量owner转换SDR UI，不加载PT资产。SDR FG使用同方向RGBA8无HUD图像；HDR FG使用实际scRGB FP16，无HUD颜色与UI覆盖共用最终合成，不把编码HDR误标为线性。交换链尺寸、数量与格式传入native，实际Present继续由宿主管理。
 
 实时K1/K2各dispatch一次，依赖明确的landing交接；K1完成该交点的coverage、纹理解析、Beer、cone与发光，K2从NEE/continuation开始，后续才重新求交。它们没有逐bounce队列、压缩排序或第三个guide光追kernel。post不访问TLAS、材质或BSDF。K1/K2/post的push分别为128B/80B/112B，shader只声明实际资源；兼容的Vulkan pipeline layout不意味着每段消费同一完整Frame。K1按surface/optical能力去重为四个场景变体，K2保留六个；Offline的单样本/多样本两组六变体不变。
 
@@ -74,6 +81,8 @@ K1→K2屏障发布hot写入，K2→post屏障覆盖tail及之前的prefix/guide
 
 Java 从 `VulkanCommandEncoder.allocateAndBeginTransientCommandBuffer()` 获得已开始的命令缓冲，Rust 只记录命令，随后 Java 结束并调用 `encoder.execute(commandBuffer)`。该接口将先结束此前原版命令缓冲，再按顺序加入同一提交构建器；最终提交交给宿主。不能让 Rust 抢先单独 `vkQueueSubmit`，否则可能越过仍未提交的原版图像操作。
 
+两版的 `VulkanCommandEncoderMixin` 在真实 `Submission.close` 成功后通知 `prime_submission_accepted`，推进相机与物体历史；`execute`不提交GPU。录制成功只保存pending状态，错误/重复serial不推进。队列调用失败不能当作取消或完成，owner隔离并阻止重用。世界录制、最终HDR和FG准备分别有独立可变描述符完成槽；同serial不会成为重复HDR录制的重绑许可。
+
 设备相同、队列相同的主路径不需要 Win32 外部内存、跨 API ready/released 二元信号量或 external queue ownership 转移。宿主 graphics queue 的提交仍必须满足 Vulkan 的外部同步要求；把一部分提交移到工作线程需要新的、明确的队列同步设计。
 
 宿主 encoder 有提交 timeline 和在途命令池管理。原生资源必须跟随实际完成值退休，不能仅凭“已经过两帧”推断 GPU 完成。描述符、相机/参数存储、上传暂存区和被替换的 BLAS/TLAS 都受同样约束：
@@ -86,6 +95,8 @@ Java 从 `VulkanCommandEncoder.allocateAndBeginTransientCommandBuffer()` 获得�
 
 稳定帧不应调用 `vkDeviceWaitIdle`、`vkQueueWaitIdle` 或逐帧 fence 等待来换取资源复用的简单性。资源变更的暂时同步开销需单独测量、明确披露，不能包含在“零额外提交”的稳定帧结论中而不加说明。
 
+帧生成由宿主Vulkan创建前安装的Streamline interposer接管真实交换链/Present钩子，逻辑帧标记与Reflex也来自实际宿主帧。正常帧保留同graphics queue与SDK默认的presenting-queue阻塞合同；取消、重配、HDR/尺寸变化及关闭还要等待SDK公开的输入处理完成fence/value。世界timeline可以早于这个消费者，不能据它提前释放FG输入；证明失败时隔离SDK与全部相关GPU owner。
+
 ## 尚存的 CPU 成本
 
 消除图像回读只解决输出传递。当前 Java 按 Rust 请求发送压缩 section 和烘焙资源字段；`prime_minecraft` 负责版本适配、源比较与同步编译，发布版本无关的逐段结果。翻译层仍等64个不同位置的段齐备后上传一个整格静态BLAS；空段算就绪，无源不算。CPU 保留逐段缓存供后续整格替换。相同压缩来源不重编译，资源或邻接变化则重新计算相关段。临时默认值与减少的兼容语义见 [原型清单](../PROTOTYPE_HACKS.md)，不能以减少语义的吞吐代表完整实现。
@@ -96,7 +107,7 @@ Java 从 `VulkanCommandEncoder.allocateAndBeginTransientCommandBuffer()` 获得�
 
 Rust 验证完整变化批次后更新源状态，局部原型共享持久 BLAS；同一原型的纯姿态更新不反复修改引用计数。实例出生、消失和运动不重建其他对象的 BLAS。快路径必须建立在正式资源契约和当前真实回调结果上，不能仅凭对象类型或连续几帧不变推定可缓存。
 
-原始回退仍需完整捕获与源字节比较；内容变化时完整解码与分桶，只有原点变化时复用解码几何再重分桶。native 展开写入独占的可复用工作区，成功后交换发布，无每帧 Vec→Arc 内容复制。静态来源只传播受影响的格；实例使用持久身份/槽和字段变化，纯 pose 不写材质，纯 tint/UV/纹理覆盖不重建 TLAS，opaque/alpha 标记变化仍重建。每个完成槽的实例输入保留漏过世代的变化并集，合并后局部写入。数量、活动性、BLAS 引用与实例标志不变的动态纯姿态采用 TLAS UPDATE，成员、几何与静态变化仍 BUILD；anchor 改变仍需重算全部放置。空间规则见 [空间合批](spatial-batching.md)。
+原始回退仍需完整捕获与源字节比较；内容变化时完整解码与分桶，只有原点变化时复用解码几何再重分桶。native 展开写入独占的可复用工作区，成功后交换发布，无每帧 Vec→Arc 内容复制。静态来源只传播受影响的格；实例使用持久身份/槽和字段变化，raw/Offline纯pose不写材质，RR另局部更新已接受的前姿态及一次停动后的settle；纯tint/UV/纹理覆盖不重建TLAS。每个完成槽的实例输入保留漏过世代的变化并集，合并后局部写入。数量、活动性、BLAS引用与实例标志不变的动态纯姿态采用TLAS UPDATE，成员、几何与静态变化仍BUILD；anchor改变仍需重算全部放置。空间规则见[空间合批](spatial-batching.md)，运动对应边界见[重建](reconstruction.md)。
 
 变化的动态几何在 GPU 准备阶段直接打包到已证明完成的独占上传槽，省去完整 packed `Vec` 与其后的 staging memcpy；并行作业只写各自范围且返回前 join。材质增量仍保留较小的复用字节区，和几何一起上传。源捕获、Rust 解码及 GPU transfer 的成本仍存在；这一优化的边界是后端打包到 staging 的一次传递。
 

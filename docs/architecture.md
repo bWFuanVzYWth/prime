@@ -121,7 +121,7 @@ TLAS custom index 的低 23 位仅索引簇/实例元数据，不再编码全局
 
 静态簇按 32 个一波打包，所有波在同一调用内完成，不在波之间提交或等待。owner 分配独占的常驻映射上传区间，工作池直接初始化其中按实际字段分组的quad记录，省去整批临时字节数组及其复制；BLAS 顶点复用记录中的位置和共享索引，省去独立位置数组。记录格式在每个 geometry 范围内一致，各格式池页和索引独立，可在同一 BLAS 中共存。`CpuWorkers` 是当前 session 创建并向 renderer/源编译显式共享的 Rayon 池，小批直接串行；打包 worker 只借用互不重叠的 `MaybeUninit<u8>` 输出切片，不持有 Vulkan 对象或句柄。表面编译在同步池中按单元分区并复用各分区 scratch。映射区间必须没有在途 GPU 消费者，所有成功记录的字节均已初始化，失败输出不提交。GPU 创建、缓存发布与录制仍由 owner 执行，所有线程在提交前 join。上传区间之后按真正的复制完成证明回收，CPU 写入完成不代表 GPU 完成。
 
-AS storage 和构建 scratch 从设备页子分配，常规页 32 MiB；静态与纹理 staging 从常驻映射上传页分配，常规页 4 MiB。单个大请求可使用大页。storage 跟随 AS 最后使用，scratch/上传跟随实际构建/复制提交完成；CPU 录制返回仅入退休集合，完成值确认后才可重新分配区间。对象上传和 TLAS 输入另按已完成槽复用。页保留峰值容量供复用，owner 退休时释放；波大小不约束全部 GPU 在途存活量。实际 Vulkan 分配计数仍检查设备上限，不包括宿主自己的分配。
+AS storage 和构建 scratch 从设备页子分配，常规页 32 MiB；静态与纹理 staging 从常驻映射上传页分配，常规页 4 MiB。单个大请求可使用大页。storage 跟随 AS 最后使用，scratch/上传跟随实际构建/复制提交完成；CPU 录制返回仅入退休集合，完成值确认后才可重新分配区间。对象上传和 TLAS 输入另按已完成槽复用。AS storage 的无活跃区间且无在途引用页在完成证明后归还，保留一个闲页及稳定稀疏槽；其他池保留峰值容量，owner 退休时释放；波大小不约束全部 GPU 在途存活量。实际 Vulkan 分配计数仍检查设备上限，不包括宿主自己的分配。
 
 变化的对象/回退桶几何同样直接打包到已完成槽的独占映射范围，不保留整批几何字节副本；少量变化对象材质仍使用复用的连续工作区。几何和材质范围布局确定后一次录制上传，打包失败不录制该几何/材质上传批次。灯页描述、世界 alias、稀疏目录和头按容量增长复用设备 buffer，暂存使用上传页；本次所有表与范围在同一读→写→消费依赖中发布。目录的逻辑 hash mask 来自当前成员数，不能以保留的 buffer 高水位容量代替逻辑长度。
 
@@ -131,7 +131,7 @@ AS storage 和构建 scratch 从设备页子分配，常规页 32 MiB；静态�
 
 实例输入由 `InstanceInput` 与独立 `InstanceCursor` 证明所有者和本批变化，游标缺口或 owner 更换显式完整同步。`Placements` 持续维护身份到紧凑槽、单元成员与原型反向引用；删除最多移动一个尾部槽。普通变化只访问 touched 身份及真实原型依赖；pose 只重算仿射/包围盒与空间归属，颜色/UV/纹理覆盖不重算 pose。材质与 TLAS 失效分开，alpha 标记变化单独影响实例属性。
 
-GPU 执行器只写变化的 48 字节对象元数据，纯 pose 不上传材质。各完成槽以复用的稀疏索引和位标记保留 TLAS 输入世代及尚未应用的变化并集，不逐次分配树节点或扫描全体索引；只有该槽完成后才合并写入变化的 64 字节实例记录；首次分配、增长或静态实例数量改变完整写入。数量、活动性、BLAS 引用、custom index/mask 和 flags 不变的动态纯 pose 采用 TLAS UPDATE，成员、几何与静态变化保留 BUILD；纯 tint/UV/纹理覆盖变化不 BUILD，影响 opaque/alpha 标记的变化仍 BUILD。anchor 改变仍影响全部放置，真实 raw 快照也仍需完整观察与分桶，不能把局部上传外推为全帧 O(变化数)。
+GPU 执行器只写变化的96字节对象元数据，包含48字节材质/身份字段与48字节前帧仿射；RR 刚性 pose 变化及接受后的 settle 更新局部前态，原型材质/三角形不因纯 pose 重传。前态对应以稳定 instance ID、实际已接受姿态及相同原型位置为依据；未知 raw/形变不伪装有效运动。各完成槽以复用的稀疏索引和位标记保留 TLAS 输入世代及尚未应用的变化并集，不逐次分配树节点或扫描全体索引；只有该槽完成后才合并写入变化的 64 字节实例记录；首次分配、增长或静态实例数量改变完整写入。数量、活动性、BLAS 引用、custom index/mask 和 flags 不变的动态纯 pose 采用 TLAS UPDATE，成员、几何与静态变化保留 BUILD；纯 tint/UV/纹理覆盖变化不 BUILD，影响 opaque/alpha 标记的变化仍 BUILD。anchor 改变仍影响全部放置，真实 raw 快照也仍需完整观察与分桶，不能把局部上传外推为全帧 O(变化数)。
 
 Buffer 完成绑定、AS 完成创建后由资源所有者保存对应设备地址；当前资源没有重绑或内部搬迁，读取地址不再逐实例调用驱动。新建或替换资源取得新地址，销毁后不保留可用地址引用。帧槽选择复用本次已查询的真实 timeline 完成值，槽不足时再执行已有的有界等待，不能以缓存的完成值推断尚未完成的提交。
 
@@ -139,11 +139,11 @@ Buffer 完成绑定、AS 完成创建后由资源所有者保存对应设备地�
 
 Opaque 几何由硬件直接接受命中；cutout 和 alpha 覆盖执行候选命中检查，实例覆盖参与有效材质选择。太阳遮挡使用 accept-first-hit 查询，遵循同一 alpha 语义。Ray Query 仍使用硬件光追，不存在 CPU 三角形遍历路径。
 
-实时模式直接产生噪声/深度/法线 GPU 图像，显示 pass 再写宿主；离线累积位于所选 renderer 自己的显存 buffer，直接向宿主 RGBA8 storage image 写最终颜色。模式资源互斥，场景核心共用，详见 [设置与渲染模式](renderers.md)。主图像保持宿主的 GENERAL layout，前后 barrier 衔接原版图像访问与手/HUD。生产路径没有 CPU 回读 buffer 或整帧复制。独立 `prime_render` 诊断接口仍可同步回读 PNG，Java 桥保留该诊断绑定，但游戏合成不调用它。
+实时模式产生噪声/深度/法线和可选 RR GPU 图像；离线累积位于所选 renderer 自己的显存 buffer。手动 SDR 路径直接写宿主 RGBA8，线性显示路径另外执行星图/曝光与 SDR/HDR 显示；HUD 后 HDR/FG 生成实际呈现或 HUDless/覆盖输入，见[显示合同](display.md)。模式资源互斥，场景核心共用，详见 [设置与渲染模式](renderers.md)。主图像保持宿主的 GENERAL layout，前后 barrier 衔接原版图像访问与手/HUD。生产路径没有 CPU 像素读回；可选线性显示与 HDR/FG 的完整图像读写具有明确成本，离线曝光从累积 BDA 读取而不复制完整输入。独立 `prime_render` 诊断接口仍可同步回读 PNG，Java 桥保留该诊断绑定，但游戏合成不调用它。
 
 主颜色图像的 storage 用途必须在每次分配前声明，包括首次创建及窗口尺寸变化后的重建。26.2/26.3 的 `MainTarget` 构造路径与继承的 `RenderTarget.resize/createBuffers` 分别适配，只修改主颜色附件，深度及离屏 target 保持原用途。能力取决于宿主设备已完成的协商；选择原版渲染器时也保留共享主图像的此项能力，以支持随后切回 Prime。图像和 view 的关闭、延迟销毁继续由宿主负责。
 
-Java 使用宿主 transient command buffer，将 native 录制结果交还 `encoder.execute`，最终由 Minecraft 在既有提交中执行。Rust 借用宿主 timeline，三个描述符槽只在原 serial 完成后复用；槽耗尽仅因真实 GPU 使用等待最旧提交，不对 MC 源工作主动限流。小型帧参数使用命令内 push constants，宿主 image view 的 descriptor 每帧重写；场景或累积资源变化会清掉描述符缓存，避免句柄复用误判。稳定路径无逐帧完成等待、无 PT 专用队列提交。
+Java 使用宿主 transient command buffer，将 native 录制结果交还 `encoder.execute`，最终由 Minecraft 在既有提交中执行。Rust 借用宿主 timeline，三个描述符槽只在原 serial 完成后复用；槽耗尽仅因真实 GPU 使用等待最旧提交，不对 MC 源工作主动限流。小型帧参数使用命令内 push constants，宿主 image view 的 descriptor 每帧重写；场景或累积资源变化会清掉描述符缓存，避免句柄复用误判。稳定路径无逐帧完成等待、无 PT 专用队列提交。真正接受提交的 `Submission.close` 后才提交 RR 相机与实例时间历史；HDR/FG 呈现描述符具有独立完成槽，SDK Present 消费者另依公开完成 fence 在切换/释放边界退休。
 
 世界输出由选定所有者决定，不以首帧完成为条件同时维持两个后端。PT 接管时原版世界 FrameGraph、网格上传与其地形调度已退出；动态源准备与后续手部/HUD 继续使用宿主流程。首帧 GPU 完成回调用于诊断，不能作为资源回收以外的“两个后端可共存”许可。当前未实现完整世界深度等价。详细数据流见 [pipeline.md](pipeline.md)。
 
@@ -166,4 +166,4 @@ Java 使用宿主 transient command buffer，将 native 录制结果交还 `enco
 
 地形范围由 Rust 在宿主实际可用来源内选择，动态源仍依赖宿主准备过程。地形原型使用真实烘焙 quad；标准 multipart、流体形状和实际 tint 已接入；opaque 自定义模型、特殊偏移和其他未覆盖规则按 [独立清单](../PROTOTYPE_HACKS.md) 暂用默认值。动态仍接收常规模型、方块实体、物品、自定义几何的支持布局及 quad 粒子；moving/falling block、leash、文字、glint、outline 等特殊路径不作普通表面支持承诺。
 
-cutout 使用固定 0.1 阈值；未解释的 alpha 材质仍按源 alpha 随机覆盖，接受后使用实际 opaque 闭包。非金属 authored SSS 的薄材质使用 Full 有色双半球混合，厚壁扩展保留 LitePBR 白色漫透射近似，介质身份不变；分支条件见[材质契约](materials.md)。标准水与具有拓扑证明的静态玻璃使用 Full dielectric 的粗糙反射/透射和 Beer 吸收；光学边界、正反侧与覆盖层由规范表面直接表示，命中、阴影和灯采样共享选择规则。支持子域不包含任意 coat/fuzz/thin-film 等组合；foliage 底层 API 已保留，旧 PBR presets 不移植。复杂开放玻璃、动态介质与折射焦散尚未覆盖。实时模式逐帧推进样本序号且没有历史累积；离线冻结场景后纯累积，退出冻结时重建捕获 epoch。动态重投影、降噪、完整动态纹理和 HDR 仍待实现。未完成事项见 [HACK.md](../HACK.md)。
+cutout 使用固定 0.1 阈值；未解释的 alpha 材质仍按源 alpha 随机覆盖，接受后使用实际 opaque 闭包。非金属 authored SSS 的薄材质使用 Full 有色双半球混合，厚壁扩展保留 LitePBR 白色漫透射近似，介质身份不变；分支条件见[材质契约](materials.md)。标准水与具有拓扑证明的静态玻璃使用 Full dielectric 的粗糙反射/透射和 Beer 吸收；光学边界、正反侧与覆盖层由规范表面直接表示，命中、阴影和灯采样共享选择规则。支持子域不包含任意 coat/fuzz/thin-film 等组合；foliage 底层 API 已保留，旧 PBR presets 不移植。复杂开放玻璃、动态介质与折射焦散尚未覆盖。实时模式逐帧推进样本序号且没有历史累积；离线冻结场景后纯累积，退出冻结时重建捕获 epoch。实时 RR、刚性实例前态、星图/自动曝光/scRGB HDR 与 Streamline FG 已接入；未知形变、运动光学接口、动态介质/发光与完整源兼容仍有边界，实际游戏和窗口效果尚须验收。未完成事项见 [HACK.md](../HACK.md)。

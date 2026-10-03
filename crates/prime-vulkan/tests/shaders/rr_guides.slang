@@ -1,6 +1,9 @@
 #language slang 2026
 module rr_guides_test;
 import "reconstruct/rr_guides.slang";
+import "reconstruct/rr_status.slang";
+import "math/rigid_motion.slang";
+import "reconstruct/visible_guides.slang";
 import "math/color.slang";
 import "../../shaders/pbr.slang";
 import "service/bsdf/contract/albedo.slang";
@@ -8,6 +11,19 @@ import "bsdf/full/math/microfacet_energy.slang";
 
 StructuredBuffer<float4> inputs;
 RWStructuredBuffer<float4> outputs;
+
+public float3 rrCpuRigid(float3 v0, float3 v1, float3 v2, float2 bary, float4 row0, float4 row1,
+                         float4 row2) {
+    return primeRigidPreviousPosition(v0, v1, v2, bary, float3x4(row0, row1, row2));
+}
+
+public bool rrCpuForeground(float packed) {
+    return primeRrForeground(packed);
+}
+
+public float rrCpuDeviceDepth(float viewZ) {
+    return primeVisibleDeviceDepth(viewZ);
+}
 
 public float2 rrCpuMotion(float4 target, float2 sampleUv, float4 previousPosition,
                           float4 previousForward, float3 previousRight, float3 previousUp,
@@ -86,21 +102,26 @@ public PrimeDenoiseAlbedos rrCpuAlbedos(float3 base, float3 optical, float rough
 
 [shader("compute")][numthreads(1, 1, 1)] void main(uint3 id : SV_DispatchThreadID) {
     float4 a = inputs[id.x];
-    outputs[5 * id.x] = float4(rrCpuMotion(a, float2(0.5), float4(0, 0, 0, 1), float4(0, 0, 1, 1),
+    outputs[7 * id.x] = float4(rrCpuMotion(a, float2(0.5), float4(0, 0, 0, 1), float4(0, 0, 1, 1),
                                            float3(1, 0, 0), float3(0, 1, 0), true, true),
                                0, 0);
-    outputs[5 * id.x + 1] = float4(rrCpuColor(a.xyz, a.w != 0), 1);
+    outputs[7 * id.x + 1] = float4(rrCpuColor(a.xyz, a.w != 0), 1);
     PrimeDenoiseAlbedos albedo =
             rrCpuAlbedos(a.xyz, float3(0.5, 4.0 / 255.0, 0), 0.5, false, false, 1);
-    outputs[5 * id.x + 2] = float4(albedo.diffuse + albedo.specular, 1);
-    outputs[5 * id.x + 3] =
+    outputs[7 * id.x + 2] = float4(albedo.diffuse + albedo.specular, 1);
+    outputs[7 * id.x + 3] =
             float4(rrCpuPixelMotion(a, float2(0.5), float4(0, 0, 0, 1), float4(0, 0, 1, 1),
                                     float3(1, 0, 0), float3(0, 1, 0), true, true, uint2(960, 540)),
                    1);
-    outputs[5 * id.x + 4] =
+    outputs[7 * id.x + 4] =
             float4(rrCpuDistanceMotion(float2(0.5), a.z, a.w, float4(0, 0, 0, 1),
                                        float4(0, 0, 1, 1), float3(1, 0, 0), float3(0, 1, 0),
                                        float4(0, 0, 0, 1), float4(0, 0, 1, 1), float3(1, 0, 0),
                                        float3(0, 1, 0), true, uint2(960, 540)),
                    1);
+    outputs[7 * id.x + 5] =
+            float4(rrCpuRigid(a.xyz, float3(1, 0, 0), float3(0, 1, 0), a.xy, float4(1, 0, 0, 0),
+                              float4(0, 1, 0, 0), float4(0, 0, 1, 0)),
+                   1);
+    outputs[7 * id.x + 6] = float4(rrCpuForeground(a.w) ? 1.0 : 0.0, rrCpuDeviceDepth(a.z), 0, 0);
 }

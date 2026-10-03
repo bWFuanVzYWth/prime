@@ -257,6 +257,10 @@ public final class SettingsCpuSmoke {
                                                       net.minecraft.client.OptionInstance<Integer>>)
                                            field(PrimeSettingsScreen.class, "controls")
                                                    .get(screen);
+                    for (var control : RenderSettings.Control.values())
+                        check(controls.get(control).get() == settings.value(control),
+                              "Each translated control preserves the actual configured bound: " +
+                                      control);
                     var terrainBatches =
                             controls.get(RenderSettings.Control.TERRAIN_BATCHES_PER_FRAME);
                     check(terrainBatches.get() ==
@@ -285,6 +289,16 @@ public final class SettingsCpuSmoke {
                           "Frozen OMM control stays available");
                     check(list.findOption(terrainBatches).active,
                           "Frozen terrain scheduling control stays available");
+                    check(!list.findOption(controls.get(RenderSettings.Control.STARS)).active,
+                          "Frozen star lighting control stays fixed");
+                    check(!list.findOption(controls.get(RenderSettings.Control.FRAME_GENERATION))
+                                   .active,
+                          "Frozen frame generation control is unavailable");
+                    check(list.findOption(controls.get(RenderSettings.Control.AUTO_EXPOSURE))
+                                          .active &&
+                                  list.findOption(controls.get(RenderSettings.Control.HDR_WHITE))
+                                          .active,
+                          "Frozen display controls stay available without changing accumulation");
                     check(!list.findOption(rayReconstruction).active &&
                                   !list.findOption(dlssQuality).active,
                           "Offline accumulation disables realtime reconstruction controls");
@@ -303,6 +317,18 @@ public final class SettingsCpuSmoke {
                         }
                         terrainBatches.set(
                                 settings.value(RenderSettings.Control.TERRAIN_BATCHES_PER_FRAME));
+                        for (var control : List.of(RenderSettings.Control.AUTO_EXPOSURE,
+                                                   RenderSettings.Control.HDR,
+                                                   RenderSettings.Control.HDR_WHITE)) {
+                            for (int value :
+                                 new int[] {control.minimum, control.maximum, control.initial}) {
+                                controls.get(control).set(value);
+                                check(PrimeClient.settings().value(control) == value &&
+                                              offline.active() && offline.requested(),
+                                      "Display callback preserves the frozen scene: " + control);
+                            }
+                            controls.get(control).set(settings.value(control));
+                        }
                         opacityMicromap.set(false);
                         check(!PrimeClient.settings().opacityMicromap() && offline.active() &&
                                       offline.requested(),
@@ -313,6 +339,17 @@ public final class SettingsCpuSmoke {
                         check(list.findOption(rayReconstruction).active &&
                                       list.findOption(dlssQuality).active,
                               "Realtime reconstruction controls become available");
+                        for (var control : List.of(RenderSettings.Control.STARS,
+                                                   RenderSettings.Control.FRAME_GENERATION)) {
+                            for (int value :
+                                 new int[] {control.minimum, control.maximum, control.initial}) {
+                                controls.get(control).set(value);
+                                check(PrimeClient.settings().value(control) == value,
+                                      "Realtime display callback changes persisted settings: " +
+                                              control);
+                            }
+                            controls.get(control).set(settings.value(control));
+                        }
                         rayReconstruction.set(false);
                         screen.tick();
                         check(!PrimeClient.settings().rayReconstruction() &&

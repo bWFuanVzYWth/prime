@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 
 pub(crate) const OBJECT_BIT: u32 = 0x0080_0000;
 pub(crate) const INHERIT: u32 = u32::MAX;
+pub(crate) const MATERIAL_BYTES: u64 = 96;
 
 #[cfg(test)]
 pub(crate) fn translation([x, y, z]: [f32; 3]) -> [f32; 12] {
@@ -116,13 +117,18 @@ pub(crate) fn pack_material(
     address: u64,
     texture: u32,
     placement: &Placement,
+    previous: Option<[f32; 12]>,
 ) {
     bytes.extend_from_slice(&address.to_le_bytes());
     uint(bytes, texture);
     uint(bytes, placement.flags);
     uint(bytes, u32::from_le_bytes(placement.tint));
-    bytes.extend_from_slice(&[0; 12]);
+    uint(bytes, u32::from(previous.is_some()));
+    bytes.extend_from_slice(&[0; 8]);
     float4(bytes, placement.uv);
+    for row in previous.unwrap_or([0.0; 12]).as_chunks::<4>().0 {
+        float4(bytes, *row);
+    }
 }
 
 #[cfg(test)]
@@ -140,8 +146,8 @@ mod tests {
             uv: [0.5, 0.25, 0.1, 0.2],
         };
         let mut bytes = Vec::new();
-        pack_material(&mut bytes, 0x1234567890abcdef, 42, &placement);
-        assert_eq!(bytes.len(), 48);
+        pack_material(&mut bytes, 0x1234567890abcdef, 42, &placement, None);
+        assert_eq!(bytes.len(), MATERIAL_BYTES as usize);
         assert_eq!(
             u64::from_le_bytes(bytes[0..8].try_into().unwrap()),
             0x1234567890abcdef
@@ -151,6 +157,14 @@ mod tests {
         assert_eq!(&bytes[16..20], &[1, 2, 3, 4]);
         assert_eq!(&bytes[20..32], &[0; 12]);
         assert_eq!(f32::from_le_bytes(bytes[32..36].try_into().unwrap()), 0.5);
+        assert!(bytes[48..].iter().all(|&v| v == 0));
+        bytes.clear();
+        let previous = translation([1.0, 2.0, 3.0]);
+        pack_material(&mut bytes, 0, 42, &placement, Some(previous));
+        assert_eq!(u32::from_le_bytes(bytes[20..24].try_into().unwrap()), 1);
+        for (word, expected) in bytes[48..].as_chunks::<4>().0.iter().zip(previous) {
+            assert_eq!(f32::from_le_bytes(*word), expected);
+        }
     }
 
     #[test]

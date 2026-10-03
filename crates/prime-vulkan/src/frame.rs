@@ -18,9 +18,99 @@ pub(super) struct Output {
     readback: Option<Buffer>,
     accumulation: Option<Buffer>,
     scratch: Option<realtime::Scratch>,
+    linear: Option<Image>,
+    hdr_world: Option<Image>,
+    sdr_baseline: Option<Image>,
+    hdr_extent: [u32; 2],
+    snapshot_extent: [u32; 2],
+    fg_hudless: Option<Image>,
+    fg_alpha: Option<Image>,
+    fg_extent: [u32; 2],
+    fg_hdr: bool,
 }
 
 impl Output {
+    fn prepare_display(
+        &mut self,
+        context: &Arc<Context>,
+        mode: RenderMode,
+        needed: bool,
+        hdr: bool,
+        fg: bool,
+    ) -> Result<(), String> {
+        if !needed && !hdr {
+            self.linear = None;
+            self.hdr_world = None;
+            self.sdr_baseline = None;
+            self.hdr_extent = [0; 2];
+            self.snapshot_extent = [0; 2];
+            self.fg_hudless = None;
+            self.fg_alpha = None;
+            self.fg_extent = [0; 2];
+            return Ok(());
+        }
+        if needed && mode == RenderMode::Realtime && self.linear.is_none() {
+            self.linear = Some(Image::with_format(
+                context,
+                self.width,
+                self.height,
+                vk::Format::R32G32B32A32_SFLOAT,
+            )?);
+        }
+        let hdr_extent = if hdr {
+            [self.width, self.height]
+        } else {
+            [1, 1]
+        };
+        if hdr_extent != self.hdr_extent {
+            self.hdr_world = Some(Image::with_format(
+                context,
+                hdr_extent[0],
+                hdr_extent[1],
+                vk::Format::R16G16B16A16_SFLOAT,
+            )?);
+            self.hdr_extent = hdr_extent;
+        }
+        let snapshot_extent = if hdr || fg {
+            [self.width, self.height]
+        } else {
+            [1, 1]
+        };
+        if self.snapshot_extent != snapshot_extent {
+            self.sdr_baseline = Some(Image::new(context, snapshot_extent[0], snapshot_extent[1])?);
+            self.snapshot_extent = snapshot_extent;
+        }
+        let fg_extent = if fg {
+            [self.width, self.height]
+        } else {
+            [1, 1]
+        };
+        if self.fg_extent != fg_extent || self.fg_hdr != hdr {
+            self.fg_alpha = Some(Image::with_format(
+                context,
+                fg_extent[0],
+                fg_extent[1],
+                vk::Format::R8_UNORM,
+            )?);
+            self.fg_hudless = if fg {
+                Some(Image::with_format(
+                    context,
+                    self.width,
+                    self.height,
+                    if hdr {
+                        vk::Format::R16G16B16A16_SFLOAT
+                    } else {
+                        vk::Format::R8G8B8A8_UNORM
+                    },
+                )?)
+            } else {
+                None
+            };
+            self.fg_extent = fg_extent;
+            self.fg_hdr = hdr;
+        }
+        Ok(())
+    }
     #[cfg(all(test, feature = "shader-tests"))]
     pub(super) fn linear_buffer(&self) -> &Buffer {
         self.accumulation.as_ref().unwrap()
@@ -39,6 +129,15 @@ impl Output {
             height,
             log2_resolution: extent.log2_resolution(),
             scratch: None,
+            linear: None,
+            hdr_world: None,
+            sdr_baseline: None,
+            hdr_extent: [0; 2],
+            snapshot_extent: [0; 2],
+            fg_hudless: None,
+            fg_alpha: None,
+            fg_extent: [0; 2],
+            fg_hdr: false,
             image: if offline {
                 Some(Image::new(context, width, height)?)
             } else {
@@ -54,6 +153,7 @@ impl Output {
                     context,
                     bytes * 16,
                     vk::BufferUsageFlags::STORAGE_BUFFER
+                        | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS
                         | if cfg!(all(test, feature = "shader-tests")) {
                             vk::BufferUsageFlags::TRANSFER_SRC
                         } else {
@@ -216,6 +316,10 @@ impl Renderer {
             &context,
             settings.mode,
             reconstruction.is_some(),
+            settings.frame_generation
+                && reconstruction
+                    .as_ref()
+                    .is_some_and(|rr| rr.frame_generation_supported()),
             &energy_lut,
         )?);
         let mut result = Self {
@@ -240,10 +344,25 @@ impl Renderer {
                 saturation_compensation: settings.saturation,
             }
             .prepare(1.0)?,
+            linear_display: None,
+            exposure: None,
+            exposure_reset: true,
+            exposure_frozen: false,
+            exposure_time: None,
+            hdr_calibration: None,
+            hdr_present: None,
+            fg_present: None,
+            starmap: None,
+            stars: None,
             settings,
             scene_frozen: false,
             failed: false,
             host_serials: [0; FRAME_SLOTS],
+            hdr_serials: [0; FRAME_SLOTS],
+            fg_serials: [0; FRAME_SLOTS],
+            fg_prepared_serial: 0,
+            fg_prepared: false,
+            pending_temporal_serial: 0,
             query_serials: [0; FRAME_SLOTS],
             gpu_intervals: [GpuIntervals::default(); FRAME_SLOTS],
             host_query: vk::QueryPool::null(),
@@ -277,6 +396,71 @@ impl Renderer {
         self.energy_lut.prepare()?;
         if self.atmosphere.is_none() {
             self.atmosphere = Some(atmosphere::Atmosphere::new(&self.context)?);
+        }
+        if self.settings.stars > 0.0 && self.starmap.is_none() {
+            self.starmap = Some(starmap::Starmap::new(&self.context)?);
+            let map = self.starmap.as_mut().unwrap();
+            let mut result = Ok(Vec::new());
+            self.context
+                .submit_named("starmap_prepare", |command| result = map.prepare(command))?;
+            drop(result?);
+        }
+        if self.needs_linear_display() && self.linear_display.is_none() {
+            self.linear_display = Some(display_pipeline::LinearDisplay::new(&self.context)?);
+        }
+        if self.settings.auto_exposure_compensation > 0.0 && self.exposure.is_none() {
+            self.exposure = Some(exposure::Exposure::new(&self.context)?);
+            self.exposure_reset = true;
+        }
+        if self.reconstruction.is_some() && self.settings.stars > 0.0 && self.stars.is_none() {
+            self.stars = Some(starmap::Stars::new(&self.context)?);
+        }
+        if self.hdr_calibration.is_some() && self.hdr_present.is_none() {
+            self.hdr_present = Some(hdr::HdrPresent::new(&self.context)?);
+        }
+        if self.frame_generation_active() && self.fg_present.is_none() {
+            self.fg_present = Some(hdr::FrameGenerationPresent::new(&self.context)?);
+        }
+        Ok(())
+    }
+
+    fn needs_linear_display(&self) -> bool {
+        self.settings.view == prime_scene::settings::DiagnosticView::Output
+            && (self.settings.auto_exposure_compensation > 0.0
+                || self.hdr_calibration.is_some()
+                || self.frame_generation_active()
+                || self.reconstruction.is_some() && self.settings.stars > 0.0)
+    }
+
+    fn frame_generation_active(&self) -> bool {
+        self.settings.frame_generation
+            && self.settings.view == prime_scene::settings::DiagnosticView::Output
+            && self
+                .reconstruction
+                .as_ref()
+                .is_some_and(|rr| rr.frame_generation_supported())
+    }
+
+    pub fn display_output(&mut self, active: bool, peak: f32, white: f32) -> Result<(), String> {
+        if self.failed || self.pending_temporal_serial != 0 {
+            return Err(
+                "Display reconfiguration requires a healthy accepted frame boundary".into(),
+            );
+        }
+        let calibration = if active && self.settings.hdr {
+            Some(hdr::HdrCalibration::new(
+                peak,
+                white,
+                self.settings.hdr_reference_white,
+            )?)
+        } else {
+            None
+        };
+        if calibration != self.hdr_calibration {
+            if let Some(rr) = &mut self.reconstruction {
+                rr.suspend_frame_generation()?;
+            }
+            self.hdr_calibration = calibration;
         }
         Ok(())
     }
@@ -343,7 +527,11 @@ impl Renderer {
     /// Shared geometry survives; exclusive old pipelines/images retire before the new pipeline is created.
     pub fn configure(&mut self, settings: RenderSettings) -> Result<(), String> {
         settings.validate()?;
-        if self.failed {
+        let reset_temporal = settings.mode != self.settings.mode
+            || !settings.transport_matches(self.settings)
+            || settings.ray_reconstruction != self.settings.ray_reconstruction
+            || settings.reconstruction_quality != self.settings.reconstruction_quality;
+        if self.failed || self.pending_temporal_serial != 0 {
             return Err("Cannot configure a failed renderer".into());
         }
         let display = PrimeDrtSettings {
@@ -352,9 +540,18 @@ impl Renderer {
             saturation_compensation: settings.saturation,
         }
         .prepare(1.0)?;
+        if settings.view != self.settings.view {
+            // The next prepare can replace HUDless/UI images even when the world extent
+            // and RR quality stay unchanged. Present consumers outlive the world serial.
+            if let Some(rr) = &mut self.reconstruction {
+                rr.suspend_frame_generation()?;
+            }
+            self.fg_prepared = false;
+        }
         if settings.mode != self.settings.mode
             || settings.mode == RenderMode::Realtime
                 && settings.ray_reconstruction != self.settings.ray_reconstruction
+            || settings.frame_generation != self.settings.frame_generation
         {
             self.failed = true;
             self.context.wait_host_idle()?;
@@ -376,6 +573,11 @@ impl Renderer {
                 &self.context,
                 settings.mode,
                 self.reconstruction.is_some(),
+                settings.frame_generation
+                    && self
+                        .reconstruction
+                        .as_ref()
+                        .is_some_and(|rr| rr.frame_generation_supported()),
                 &self.energy_lut,
             )?);
             self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
@@ -392,8 +594,29 @@ impl Renderer {
         }
         if let Some(geometry) = &mut self.geometry {
             geometry.set_omm(settings.opacity_micromap && self.context.opacity_micromap.is_some());
+            if reset_temporal {
+                geometry.objects.reset_motion();
+            }
         }
         self.display = display;
+        if settings.mode != self.settings.mode {
+            self.exposure_frozen =
+                settings.mode == RenderMode::Offline && self.exposure_time.is_some();
+            if settings.mode == RenderMode::Realtime {
+                self.exposure_reset = true;
+                self.exposure_time = None;
+            }
+        }
+        if settings.auto_exposure_compensation != self.settings.auto_exposure_compensation {
+            self.exposure_reset = true;
+            self.exposure_frozen = false;
+        }
+        if self.settings.hdr && !settings.hdr {
+            if let Some(rr) = &mut self.reconstruction {
+                rr.suspend_frame_generation()?;
+            }
+            self.hdr_calibration = None;
+        }
         self.settings = settings;
         Ok(())
     }
@@ -422,6 +645,9 @@ impl Renderer {
         if completed < self.context.retirement_serial() {
             return Err("World reset requires completed host work".into());
         }
+        if let Some(rr) = &mut self.reconstruction {
+            rr.suspend_frame_generation()?;
+        }
         drop(self.geometry.take());
         drop(self.output.take());
         if let Some(rr) = &mut self.reconstruction {
@@ -436,6 +662,14 @@ impl Renderer {
         self.context.completed_serial()?;
         self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
         self.host_serials = [0; FRAME_SLOTS];
+        self.hdr_serials = [0; FRAME_SLOTS];
+        self.fg_serials = [0; FRAME_SLOTS];
+        self.fg_prepared_serial = 0;
+        self.fg_prepared = false;
+        self.pending_temporal_serial = 0;
+        self.exposure_reset = true;
+        self.exposure_frozen = false;
+        self.exposure_time = None;
         self.query_serials = [0; FRAME_SLOTS];
         self.gpu_intervals = [GpuIntervals::default(); FRAME_SLOTS];
         self.last_gpu = GpuIntervals::default();
@@ -479,7 +713,7 @@ impl Renderer {
             .or(self.reconstruction_error.as_deref())
             .unwrap_or("");
         format!(
-            "{} gpu_supported={} gpu_completed_serial={} gpu_preparation_ms={:.3} gpu_render_ms={:.3} gpu_total_ms={:.3} gpu_sample=delayed_completed_interval omm_capable={} omm_enabled={} omm_two_blocks={} omm_four_blocks={} omm_special_triangles={} omm_referenced_packed_bytes={} omm_template_ms={:.3} omm_bind_ms={:.3} omm_resource_record_ms={:.3} omm_template_preparations={} omm_bound_primitives={} omm_resource_builds={} omm_resource_blocks={} omm_resource_packed_bytes={} omm_resource_storage_bytes={} atmosphere_sky_updates={} atmosphere_camera_t_updates={} atmosphere_aerial_s_updates={} atmosphere_aerial_t_updates={} rr_requested={} rr_capable={} rr_ready={} rr_evaluation_succeeded={} rr_input={}x{} rr_output={}x{} rr_error={:?}",
+            "{} gpu_supported={} gpu_completed_serial={} gpu_preparation_ms={:.3} gpu_render_ms={:.3} gpu_total_ms={:.3} gpu_sample=delayed_completed_interval omm_capable={} omm_enabled={} omm_two_blocks={} omm_four_blocks={} omm_special_triangles={} omm_referenced_packed_bytes={} omm_template_ms={:.3} omm_bind_ms={:.3} omm_resource_record_ms={:.3} omm_template_preparations={} omm_bound_primitives={} omm_resource_builds={} omm_resource_blocks={} omm_resource_packed_bytes={} omm_resource_storage_bytes={} atmosphere_sky_updates={} atmosphere_camera_t_updates={} atmosphere_aerial_s_updates={} atmosphere_aerial_t_updates={} rr_requested={} rr_capable={} rr_ready={} rr_evaluation_succeeded={} rr_input={}x{} rr_output={}x{} rr_error={:?} fg_requested={} fg_capable={} fg_last_prepare_succeeded={} fg_prepare_serial={}",
             self.cpu_profile.last_report(),
             self.host_query != vk::QueryPool::null(),
             self.last_gpu.serial,
@@ -515,7 +749,13 @@ impl Renderer {
             rr_input[1],
             rr_output[0],
             rr_output[1],
-            rr_error
+            rr_error,
+            self.settings.frame_generation,
+            self.reconstruction
+                .as_ref()
+                .is_some_and(|rr| rr.frame_generation_supported()),
+            !self.failed && self.frame_generation_active() && self.fg_prepared,
+            self.fg_prepared_serial,
         )
     }
 
@@ -537,6 +777,9 @@ impl Renderer {
     pub fn shutdown(&mut self) -> Result<(), String> {
         if self.context.is_borrowed() {
             self.context.finish_host()?;
+        }
+        if let Some(rr) = &mut self.reconstruction {
+            rr.suspend_frame_generation()?;
         }
         self.failed = true;
         Ok(())
@@ -696,6 +939,11 @@ impl Renderer {
                 }
             }
             cpu.finish(Stage::Static, started);
+            self.geometry
+                .as_mut()
+                .unwrap()
+                .objects
+                .set_motion_enabled(self.reconstruction.is_some());
             let (dynamic_changed, occlusion_changed, bindings_changed) = self
                 .geometry
                 .as_mut()
@@ -718,6 +966,9 @@ impl Renderer {
             .as_ref()
             .is_none_or(|o| o.width != width || o.height != height)
         {
+            if let Some(rr) = &mut self.reconstruction {
+                rr.suspend_frame_generation()?;
+            }
             self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
             self.output = Some(Output::new(
                 &self.context,
@@ -752,6 +1003,7 @@ impl Renderer {
                 sample_index,
                 self.settings.reconstruction_quality,
                 completed,
+                self.settings.frame_generation,
             );
             if let Err(message) = prepared {
                 if !self.context.can_destroy() {
@@ -766,6 +1018,7 @@ impl Renderer {
                 self.pipeline = Some(Pipeline::new(
                     &self.context,
                     self.settings.mode,
+                    false,
                     false,
                     &self.energy_lut,
                 )?);
@@ -798,6 +1051,26 @@ impl Renderer {
             )?;
         }
         cpu.finish(Stage::Output, started);
+        let needs_display = self.needs_linear_display();
+        let fg = self.frame_generation_active();
+        self.output.as_mut().unwrap().prepare_display(
+            &self.context,
+            self.settings.mode,
+            needs_display,
+            self.hdr_calibration.is_some(),
+            fg,
+        )?;
+        let star_controls = [
+            (self.settings.astronomy.latitude_degrees as f32).to_radians(),
+            (self.settings.astronomy.solar_longitude_degrees as f32).to_radians(),
+            0.025 * self.settings.stars,
+            0.0,
+        ];
+        self.atmosphere.as_mut().unwrap().set_starmap(
+            slot,
+            self.starmap.as_ref(),
+            star_controls,
+        )?;
         self.atmosphere.as_mut().unwrap().prepare(
             self.environment,
             camera,
@@ -966,7 +1239,8 @@ impl Renderer {
         }
         push[116..120].copy_from_slice(&self.settings.depth_range.to_le_bytes());
         push[120..124].copy_from_slice(&self.settings.bounces.to_le_bytes());
-        push[124..128].copy_from_slice(&(self.settings.view as u32).to_le_bytes());
+        let view_flags = self.settings.view as u32 | (u32::from(self.needs_linear_display()) << 31);
+        push[124..128].copy_from_slice(&view_flags.to_le_bytes());
         unsafe {
             self.context.device.cmd_bind_pipeline(
                 command,
@@ -1065,7 +1339,12 @@ impl Renderer {
             self.realtime_barrier(command);
             dispatch(pipeline.pipelines[variant], &pushes.transport(variant >= 2));
             self.realtime_barrier(command);
-            dispatch(pipeline.realtime_post.unwrap(), &pushes.post());
+            let post = if self.reconstruction.is_none() && self.needs_linear_display() {
+                pipeline.realtime_linear_post.unwrap()
+            } else {
+                pipeline.realtime_post.unwrap()
+            };
+            dispatch(post, &pushes.post());
         }
     }
 
@@ -1084,6 +1363,305 @@ impl Renderer {
                 &[],
             );
         }
+    }
+
+    fn record_display(
+        &mut self,
+        command: vk::CommandBuffer,
+        slot: usize,
+        host: vk::ImageView,
+        bottom_up: bool,
+    ) -> Result<(), String> {
+        if !self.needs_linear_display() {
+            return Ok(());
+        }
+        let output = self.output.as_ref().unwrap();
+        let extent = [output.width, output.height];
+        let hdr_world = output.hdr_world.as_ref().unwrap().view;
+        let baseline = output.sdr_baseline.as_ref().unwrap().view;
+        let input = output.linear.as_ref().map_or(hdr_world, |image| image.view);
+        let history = output.accumulation.as_ref().map_or(0, Buffer::address);
+        let linear709 = self.reconstruction.is_some();
+        if let (Some(stars), Some(map), Some(rr)) =
+            (&self.stars, &self.starmap, &self.reconstruction)
+            && self.settings.stars > 0.0
+        {
+            let camera = self.camera.unwrap();
+            let input_extent = rr.input_extent();
+            let radius = self.environment.eye_radius_km();
+            let horizon = -(1.0 - (6360.0 / radius) * (6360.0 / radius))
+                .max(0.0)
+                .sqrt();
+            stars.record(
+                command,
+                slot,
+                input,
+                rr.status_view(),
+                self.atmosphere.as_ref().unwrap().transmittance_view(),
+                map,
+                &starmap::StarsParameters {
+                    forward: [
+                        camera.forward[0],
+                        camera.forward[1],
+                        camera.forward[2],
+                        (camera.vertical_fov_radians * 0.5).tan(),
+                    ],
+                    right: [
+                        camera.right[0],
+                        camera.right[1],
+                        camera.right[2],
+                        output.width as f32 / output.height as f32,
+                    ],
+                    up: [camera.up[0], camera.up[1], camera.up[2], 0.0],
+                    sun: [
+                        self.environment.sun_direction[0],
+                        self.environment.sun_direction[1],
+                        self.environment.sun_direction[2],
+                        horizon,
+                    ],
+                    settings: [
+                        (self.settings.astronomy.latitude_degrees as f32).to_radians(),
+                        (self.settings.astronomy.solar_longitude_degrees as f32).to_radians(),
+                        self.settings.stars * 0.025,
+                        1.0,
+                    ],
+                    dimensions: [
+                        output.width,
+                        output.height,
+                        input_extent[0],
+                        input_extent[1],
+                    ],
+                    jitter: reconstruction_history::jitter(
+                        self.frame_seed,
+                        input_extent[0],
+                        output.width,
+                    ),
+                },
+            );
+        }
+        let exposure_address = if self.settings.auto_exposure_compensation > 0.0 {
+            if !self.exposure_frozen {
+                let now = std::time::Instant::now();
+                let delta = self
+                    .exposure_time
+                    .map_or(0.0, |previous| now.duration_since(previous).as_secs_f32());
+                self.exposure.as_mut().unwrap().record(
+                    command,
+                    slot,
+                    input,
+                    history,
+                    extent,
+                    linear709,
+                    delta,
+                    self.exposure_reset,
+                    self.settings.mode == RenderMode::Offline,
+                    self.settings.auto_exposure_compensation,
+                )?;
+                self.exposure_time = Some(now);
+                self.exposure_reset = false;
+                self.exposure_frozen = self.settings.mode == RenderMode::Offline;
+            }
+            self.exposure.as_ref().unwrap().state_address()
+        } else {
+            0
+        };
+        let hdr = PrimeDrtSettings {
+            exposure_multiplier: self.display.values[0],
+            hue_compensation: self.display.values[3],
+            saturation_compensation: self.display.values[4],
+        }
+        .prepare(
+            self.hdr_calibration
+                .map_or(1.0, |calibration| calibration.headroom),
+        )?;
+        self.linear_display.as_ref().unwrap().record(
+            command,
+            slot,
+            [input, host, hdr_world, baseline],
+            history,
+            extent,
+            linear709,
+            bottom_up,
+            self.hdr_calibration.is_some(),
+            exposure_address,
+            self.display,
+            hdr,
+            self.frame_generation_active(),
+        )
+    }
+
+    /// # Safety
+    /// The active host command and borrowed sampled RGBA8 UI / storage FP16 output views are
+    /// on the attached device/queue in GENERAL, and remain live through serial completion.
+    #[allow(clippy::too_many_arguments)]
+    pub unsafe fn present_hdr(
+        &mut self,
+        command: u64,
+        ui: u64,
+        output: u64,
+        serial: u64,
+        extent: [u32; 2],
+    ) -> Result<(), String> {
+        if self.failed
+            || [command, ui, output, serial].contains(&0)
+            || self.hdr_serials.contains(&serial)
+        {
+            return Err("Invalid or duplicate HDR presentation state".into());
+        }
+        let calibration = self
+            .hdr_calibration
+            .ok_or("HDR surface calibration is inactive")?;
+        let frame = self.output.as_ref().ok_or("No HDR world frame available")?;
+        if extent != [frame.width, frame.height] {
+            return Err("HDR presentation extent differs from the world snapshot".into());
+        }
+        let command = vk::CommandBuffer::from_raw(command);
+        self.failed = true;
+        let completed = self.context.begin_host_record(command, serial)?;
+        let _scope = HostRecordScope(self.context.clone());
+        let slot = match self
+            .hdr_serials
+            .iter()
+            .position(|value| *value <= completed)
+        {
+            Some(slot) => slot,
+            None => {
+                let completed = self
+                    .context
+                    .wait_host_serial(*self.hdr_serials.iter().min().unwrap())?;
+                self.hdr_serials
+                    .iter()
+                    .position(|value| *value <= completed)
+                    .ok_or("HDR descriptor slot did not complete")?
+            }
+        };
+        let fg = self.frame_generation_active();
+        self.hdr_present
+            .as_ref()
+            .ok_or("HDR presentation pipeline is absent")?
+            .record(
+                command,
+                slot,
+                [
+                    frame.hdr_world.as_ref().unwrap().view,
+                    frame.sdr_baseline.as_ref().unwrap().view,
+                    vk::ImageView::from_raw(ui),
+                    vk::ImageView::from_raw(output),
+                    frame
+                        .fg_hudless
+                        .as_ref()
+                        .map_or(frame.hdr_world.as_ref().unwrap().view, |image| image.view),
+                    frame.fg_alpha.as_ref().unwrap().view,
+                ],
+                extent,
+                self.needs_linear_display(),
+                true,
+                calibration.sc_rgb_scale,
+                fg,
+            )?;
+        self.hdr_serials[slot] = serial;
+        self.failed = false;
+        Ok(())
+    }
+
+    /// # Safety
+    /// Views and command belong to the borrowed host device, are in GENERAL, and stay
+    /// live through the SDK's published input-consumer completion as well as host serial.
+    #[allow(clippy::too_many_arguments)]
+    pub unsafe fn prepare_frame_generation(
+        &mut self,
+        command: u64,
+        ui: u64,
+        serial: u64,
+        extent: [u32; 2],
+        back_buffers: u32,
+        format: u32,
+    ) -> Result<bool, String> {
+        if !self.frame_generation_active() {
+            self.fg_prepared = false;
+            return Ok(false);
+        }
+        if self.failed
+            || [command, ui, serial].contains(&0)
+            || serial <= self.fg_prepared_serial
+            || back_buffers == 0
+        {
+            return Err("Invalid or duplicate frame generation presentation".into());
+        }
+        let format =
+            vk::Format::from_raw(i32::try_from(format).map_err(|_| "Invalid back buffer format")?);
+        let hdr = self.hdr_calibration.is_some();
+        if (hdr && format != vk::Format::R16G16B16A16_SFLOAT)
+            || (!hdr && ![vk::Format::R8G8B8A8_UNORM, vk::Format::B8G8R8A8_UNORM].contains(&format))
+        {
+            return Err(
+                "Frame generation back buffer colorspace/format differs from the displayed world"
+                    .into(),
+            );
+        }
+        let frame = self
+            .output
+            .as_ref()
+            .ok_or("No frame generation world frame")?;
+        if extent != [frame.width, frame.height] || frame.fg_extent != extent || frame.fg_hdr != hdr
+        {
+            return Err("Frame generation presentation extent or calibration differs from the world snapshot".into());
+        }
+        if hdr && !self.hdr_serials.contains(&serial) {
+            return Err(
+                "HDR frame generation requires its same-submission scRGB composite first".into(),
+            );
+        }
+        self.failed = true;
+        let command = vk::CommandBuffer::from_raw(command);
+        let completed = self.context.begin_host_record(command, serial)?;
+        let _scope = HostRecordScope(self.context.clone());
+        if !hdr {
+            let slot = match self.fg_serials.iter().position(|value| *value <= completed) {
+                Some(slot) => slot,
+                None => {
+                    let completed = self
+                        .context
+                        .wait_host_serial(*self.fg_serials.iter().min().unwrap())?;
+                    self.fg_serials
+                        .iter()
+                        .position(|value| *value <= completed)
+                        .ok_or("Frame generation descriptor slot did not complete")?
+                }
+            };
+            self.fg_present
+                .as_ref()
+                .ok_or("Frame generation display pipeline is absent")?
+                .record(
+                    command,
+                    slot,
+                    [
+                        frame.sdr_baseline.as_ref().unwrap().view,
+                        vk::ImageView::from_raw(ui),
+                        frame.fg_hudless.as_ref().unwrap().view,
+                        frame.fg_alpha.as_ref().unwrap().view,
+                    ],
+                    extent,
+                    true,
+                )?;
+            self.fg_serials[slot] = serial;
+        }
+        let prepared = self
+            .reconstruction
+            .as_mut()
+            .unwrap()
+            .prepare_frame_generation(
+                command,
+                frame.fg_hudless.as_ref().unwrap(),
+                frame.fg_alpha.as_ref().unwrap(),
+                back_buffers,
+                format,
+                serial,
+            )?;
+        self.fg_prepared_serial = serial;
+        self.fg_prepared = prepared;
+        self.failed = false;
+        Ok(prepared)
     }
 
     // Covers prior host color writes, previous trace reads, material arena copies,
@@ -1133,64 +1711,88 @@ impl Renderer {
             &mut FrameCpu::default(),
         )?;
         let view = self.output.as_ref().unwrap().image.as_ref().unwrap().view;
-        self.descriptors(0, view);
-        let output = self.output.as_ref().unwrap();
-        let image = output.image.as_ref().unwrap();
-        let readback = output.readback.as_ref().unwrap();
-        self.context
-            .submit_named("diagnostic_render", |command| unsafe {
-                self.before_frame(command);
-                self.dispatch(command, 0, false);
-                let barrier = [vk::ImageMemoryBarrier::default()
-                    .image(image.image)
-                    .old_layout(vk::ImageLayout::GENERAL)
-                    .new_layout(vk::ImageLayout::GENERAL)
-                    .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                    .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                    .src_access_mask(vk::AccessFlags::SHADER_WRITE)
-                    .dst_access_mask(vk::AccessFlags::TRANSFER_READ)
-                    .subresource_range(target::color_range())];
-                self.context.device.cmd_pipeline_barrier(
-                    command,
-                    vk::PipelineStageFlags::COMPUTE_SHADER,
-                    vk::PipelineStageFlags::TRANSFER,
-                    vk::DependencyFlags::empty(),
-                    &[],
-                    &[],
-                    &barrier,
-                );
-                self.context.device.cmd_copy_image_to_buffer(
-                    command,
-                    image.image,
-                    vk::ImageLayout::GENERAL,
-                    readback.buffer,
-                    &[vk::BufferImageCopy::default()
-                        .image_subresource(
-                            vk::ImageSubresourceLayers::default()
-                                .aspect_mask(vk::ImageAspectFlags::COLOR)
-                                .layer_count(1),
-                        )
-                        .image_extent(vk::Extent3D {
-                            width,
-                            height,
-                            depth: 1,
-                        })],
-                );
-                let host = [vk::MemoryBarrier::default()
-                    .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
-                    .dst_access_mask(vk::AccessFlags::HOST_READ)];
-                self.context.device.cmd_pipeline_barrier(
-                    command,
-                    vk::PipelineStageFlags::TRANSFER,
-                    vk::PipelineStageFlags::HOST,
-                    vk::DependencyFlags::empty(),
-                    &host,
-                    &[],
-                    &[],
-                );
-            })?;
+        let selected = if self.settings.mode == RenderMode::Realtime && self.needs_linear_display()
+        {
+            self.output.as_ref().unwrap().linear.as_ref().unwrap().view
+        } else {
+            view
+        };
+        self.descriptors(0, selected);
+        let image = self.output.as_ref().unwrap().image.as_ref().unwrap().image;
+        let readback_buffer = self
+            .output
+            .as_ref()
+            .unwrap()
+            .readback
+            .as_ref()
+            .unwrap()
+            .buffer;
+        let context = self.context.clone();
+        let mut recorded = Ok(());
+        context.submit_named("diagnostic_render", |command| unsafe {
+            self.before_frame(command);
+            self.dispatch(command, 0, false);
+            recorded = self.record_display(command, 0, view, false);
+            let barrier = [vk::ImageMemoryBarrier::default()
+                .image(image)
+                .old_layout(vk::ImageLayout::GENERAL)
+                .new_layout(vk::ImageLayout::GENERAL)
+                .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .src_access_mask(vk::AccessFlags::SHADER_WRITE)
+                .dst_access_mask(vk::AccessFlags::TRANSFER_READ)
+                .subresource_range(target::color_range())];
+            self.context.device.cmd_pipeline_barrier(
+                command,
+                vk::PipelineStageFlags::COMPUTE_SHADER,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &barrier,
+            );
+            self.context.device.cmd_copy_image_to_buffer(
+                command,
+                image,
+                vk::ImageLayout::GENERAL,
+                readback_buffer,
+                &[vk::BufferImageCopy::default()
+                    .image_subresource(
+                        vk::ImageSubresourceLayers::default()
+                            .aspect_mask(vk::ImageAspectFlags::COLOR)
+                            .layer_count(1),
+                    )
+                    .image_extent(vk::Extent3D {
+                        width,
+                        height,
+                        depth: 1,
+                    })],
+            );
+            let host = [vk::MemoryBarrier::default()
+                .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+                .dst_access_mask(vk::AccessFlags::HOST_READ)];
+            self.context.device.cmd_pipeline_barrier(
+                command,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::PipelineStageFlags::HOST,
+                vk::DependencyFlags::empty(),
+                &host,
+                &[],
+                &[],
+            );
+        })?;
+        recorded?;
         self.samples = self.samples.saturating_add(self.samples_per_frame());
-        readback.read(width as usize * height as usize * 4)
+        let result = self
+            .output
+            .as_ref()
+            .unwrap()
+            .readback
+            .as_ref()
+            .unwrap()
+            .read(width as usize * height as usize * 4);
+        self.commit_temporal();
+        result
     }
 
     /// Records into a host-owned command buffer and image; no submission or pixel transfer.
@@ -1216,6 +1818,7 @@ impl Renderer {
         let scene = scene.into();
         let instances = instances.into();
         if self.failed
+            || self.pending_temporal_serial != 0
             || !self.context.is_borrowed()
             || command == 0
             || image == 0
@@ -1240,6 +1843,7 @@ impl Renderer {
             self.pipeline = Some(Pipeline::new(
                 &self.context,
                 self.settings.mode,
+                false,
                 false,
                 &self.energy_lut,
             )?);
@@ -1342,7 +1946,13 @@ impl Renderer {
             cpu,
         )?;
         let started = cpu.start();
-        self.descriptors(slot, view);
+        let linear_output = self.needs_linear_display();
+        let selected = if linear_output && self.settings.mode == RenderMode::Realtime {
+            self.output.as_ref().unwrap().linear.as_ref().unwrap().view
+        } else {
+            view
+        };
+        self.descriptors(slot, selected);
         cpu.finish(Stage::Descriptors, started);
         let started = cpu.start();
         if self.host_query != vk::QueryPool::null() {
@@ -1368,8 +1978,10 @@ impl Renderer {
                 self.settings.view,
                 self.settings.depth_range,
                 true,
+                linear_output,
             )?;
         }
+        self.record_display(command, slot, view, true)?;
         unsafe {
             let after = [vk::MemoryBarrier::default()
                 .src_access_mask(vk::AccessFlags::SHADER_WRITE)
@@ -1394,8 +2006,28 @@ impl Renderer {
             }
         }
         self.host_serials[slot] = serial;
+        self.pending_temporal_serial = serial;
         self.samples = self.samples.saturating_add(self.samples_per_frame());
         cpu.finish(Stage::Dispatch, started);
+        Ok(())
+    }
+
+    fn commit_temporal(&mut self) {
+        if let Some(geometry) = &mut self.geometry {
+            geometry.objects.commit_motion();
+        }
+        if let Some(rr) = &mut self.reconstruction {
+            rr.commit();
+        }
+    }
+
+    /// Host queue acceptance, distinct from recording and from GPU completion.
+    pub fn submission_accepted(&mut self, serial: u64) -> Result<(), String> {
+        if self.failed || serial == 0 || serial != self.pending_temporal_serial {
+            return Err("Submission acceptance does not match the pending PT frame".into());
+        }
+        self.commit_temporal();
+        self.pending_temporal_serial = 0;
         Ok(())
     }
 

@@ -31,7 +31,8 @@ subprojects {
 }
 
 // One native engine is shared byte-for-byte by both Minecraft adapters.
-ext.streamlineRuntimeFiles = ['sl.interposer.dll', 'sl.common.dll', 'sl.dlss_d.dll', 'nvngx_dlssd.dll']
+ext.streamlineRuntimeFiles = ['sl.interposer.dll', 'sl.common.dll', 'sl.dlss_d.dll', 'nvngx_dlssd.dll',
+                             'sl.dlss_g.dll', 'sl.pcl.dll', 'sl.reflex.dll', 'nvngx_dlssg.dll', 'NvLowLatencyVk.dll']
 tasks.register('stageStreamlineRuntime', Copy) {
     onlyIf { System.getProperty('os.name').toLowerCase(Locale.ROOT).startsWith('windows') }
     from('third_party/streamline/bin/x64') { include rootProject.streamlineRuntimeFiles }
@@ -104,18 +105,16 @@ tasks.register('verifyNativeJars') {
                     if (!Arrays.equals(new File(nativeJarVerificationRoot, "adapters/common/src/main/resources/${asset}").bytes, actual))
                         throw new GradleException("Mismatched ${asset} in ${archive}")
                 }
-                def notices = ['LICENSE', 'LICENSE-EXCEPTIONS', 'META-INF/THIRD_PARTY_NOTICES.md',
-                        'META-INF/licenses/nvidia-self-intersection-BSD-3-Clause.txt',
-                        'META-INF/licenses/pbrt-Apache-2.0.txt',
-                        'META-INF/licenses/atmosphere-SKY-TRACER-NOTICE.md',
-                        'META-INF/licenses/intel-outdoor-light-scattering-NOTICE.txt',
-                        'META-INF/licenses/intel-outdoor-light-scattering-Apache-2.0.txt',
-                        'META-INF/licenses/NVIDIA-Streamline.txt',
-                        'META-INF/licenses/NVIDIA-Streamline-Third-Party.md',
-                        'META-INF/licenses/NVIDIA-DLSS.txt']
+                def notices = ['LICENSE', 'LICENSE-EXCEPTIONS', 'META-INF/THIRD_PARTY_NOTICES.md']
+                fileTree(new File(nativeJarVerificationRoot, 'licenses')).files.sort().each { license ->
+                    String relative = new File(nativeJarVerificationRoot, 'licenses').toPath()
+                            .relativize(license.toPath()).toString().replace('\\', '/')
+                    notices.add("META-INF/licenses/${relative}")
+                }
                 notices.each { name ->
                     def entry = zip.getEntry(name)
-                    if (entry == null) throw new GradleException("Missing ${name} in ${archive}")
+                    if (entry == null || Collections.list(zip.entries()).count { it.name == name } != 1)
+                        throw new GradleException("Missing or duplicated ${name} in ${archive}")
                     byte[] actual = zip.getInputStream(entry).withCloseable { it.readAllBytes() }
                     String source = name.startsWith('META-INF/') ? name.substring('META-INF/'.length()) : name
                     if (!Arrays.equals(new File(nativeJarVerificationRoot, source).bytes, actual)) throw new GradleException("Mismatched ${name} in ${archive}")

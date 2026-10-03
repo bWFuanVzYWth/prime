@@ -7,10 +7,15 @@ import static java.lang.foreign.ValueLayout.*;
 
 public final class PrimeAbi {
     private PrimeAbi() {}
-    public static final int PRIME_ABI_VERSION = 8;
+    public static final int PRIME_ABI_VERSION = 9;
     public static final int PRIME_MAX_BATCH_BYTES = 268435456;
     public static final int PRIME_HOST_OMM = 1;
     public static final int PRIME_HOST_STREAMLINE = 2;
+    public static final int PRIME_STREAMLINE_BEGIN_FRAME = 0;
+    public static final int PRIME_STREAMLINE_RENDER_START = 1;
+    public static final int PRIME_STREAMLINE_RENDER_END = 2;
+    public static final int PRIME_STREAMLINE_SUSPEND = 3;
+    public static final int PRIME_STREAMLINE_HOST_SHUTDOWN = 4;
     public static final int PRIME_MC_SOURCE_VERSION = 7;
     public static final int PRIME_MC_RESOURCE_REPLACE = 1;
     public static final class PrimeHeader {
@@ -264,22 +269,26 @@ public final class PrimeAbi {
     }
     public static final class PrimeSettings {
         private PrimeSettings() {}
-        public static final long SIZE = 76, ALIGN = 4;
+        public static final long SIZE = 96, ALIGN = 4;
         public static final MemoryLayout LAYOUT =
                 MemoryLayout
-                        .structLayout(PrimeHeader.LAYOUT.withName("header"),
-                                      JAVA_INT.withName("mode"), JAVA_INT.withName("bounces"),
-                                      JAVA_INT.withName("offline_samples"),
-                                      JAVA_FLOAT.withName("exposure"), JAVA_FLOAT.withName("hue"),
-                                      JAVA_FLOAT.withName("saturation"), JAVA_INT.withName("view"),
-                                      JAVA_FLOAT.withName("sun"), JAVA_FLOAT.withName("sky"),
-                                      JAVA_FLOAT.withName("depth_range"), JAVA_INT.withName("seed"),
-                                      JAVA_INT.withName("latitude_degrees"),
-                                      JAVA_INT.withName("solar_longitude_degrees"),
-                                      JAVA_INT.withName("opacity_micromap"),
-                                      JAVA_INT.withName("ray_reconstruction"),
-                                      JAVA_INT.withName("reconstruction_quality"),
-                                      JAVA_INT.withName("terrain_batches_per_frame"))
+                        .structLayout(
+                                PrimeHeader.LAYOUT.withName("header"), JAVA_INT.withName("mode"),
+                                JAVA_INT.withName("bounces"), JAVA_INT.withName("offline_samples"),
+                                JAVA_FLOAT.withName("exposure"), JAVA_FLOAT.withName("hue"),
+                                JAVA_FLOAT.withName("saturation"), JAVA_INT.withName("view"),
+                                JAVA_FLOAT.withName("sun"), JAVA_FLOAT.withName("sky"),
+                                JAVA_FLOAT.withName("depth_range"), JAVA_INT.withName("seed"),
+                                JAVA_INT.withName("latitude_degrees"),
+                                JAVA_INT.withName("solar_longitude_degrees"),
+                                JAVA_INT.withName("opacity_micromap"),
+                                JAVA_INT.withName("ray_reconstruction"),
+                                JAVA_INT.withName("reconstruction_quality"),
+                                JAVA_INT.withName("terrain_batches_per_frame"),
+                                JAVA_FLOAT.withName("stars"),
+                                JAVA_FLOAT.withName("auto_exposure_compensation"),
+                                JAVA_INT.withName("hdr"), JAVA_INT.withName("hdr_reference_white"),
+                                JAVA_INT.withName("frame_generation"))
                         .withName("PrimeSettings");
         static {
             if (LAYOUT.byteSize() != SIZE || LAYOUT.byteAlignment() != ALIGN)
@@ -327,6 +336,19 @@ public final class PrimeAbi {
                         MemoryLayout.PathElement.groupElement("terrain_batches_per_frame")) != 72)
                 throw new ExceptionInInitializerError(
                         "PrimeSettings.terrain_batches_per_frame offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("stars")) != 76)
+                throw new ExceptionInInitializerError("PrimeSettings.stars offset");
+            if (LAYOUT.byteOffset(
+                        MemoryLayout.PathElement.groupElement("auto_exposure_compensation")) != 80)
+                throw new ExceptionInInitializerError(
+                        "PrimeSettings.auto_exposure_compensation offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("hdr")) != 84)
+                throw new ExceptionInInitializerError("PrimeSettings.hdr offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("hdr_reference_white")) !=
+                88)
+                throw new ExceptionInInitializerError("PrimeSettings.hdr_reference_white offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("frame_generation")) != 92)
+                throw new ExceptionInInitializerError("PrimeSettings.frame_generation offset");
         }
         public static MemorySegment header(MemorySegment value) {
             return value.asSlice(0L, 8);
@@ -432,6 +454,36 @@ public final class PrimeAbi {
         }
         public static void terrain_batches_per_frame(MemorySegment value, int field) {
             value.set(JAVA_INT, 72L, field);
+        }
+        public static float stars(MemorySegment value) {
+            return value.get(JAVA_FLOAT, 76L);
+        }
+        public static void stars(MemorySegment value, float field) {
+            value.set(JAVA_FLOAT, 76L, field);
+        }
+        public static float auto_exposure_compensation(MemorySegment value) {
+            return value.get(JAVA_FLOAT, 80L);
+        }
+        public static void auto_exposure_compensation(MemorySegment value, float field) {
+            value.set(JAVA_FLOAT, 80L, field);
+        }
+        public static int hdr(MemorySegment value) {
+            return value.get(JAVA_INT, 84L);
+        }
+        public static void hdr(MemorySegment value, int field) {
+            value.set(JAVA_INT, 84L, field);
+        }
+        public static int hdr_reference_white(MemorySegment value) {
+            return value.get(JAVA_INT, 88L);
+        }
+        public static void hdr_reference_white(MemorySegment value, int field) {
+            value.set(JAVA_INT, 88L, field);
+        }
+        public static int frame_generation(MemorySegment value) {
+            return value.get(JAVA_INT, 92L);
+        }
+        public static void frame_generation(MemorySegment value, int field) {
+            value.set(JAVA_INT, 92L, field);
         }
     }
     public static final class PrimeVulkanHost {
@@ -562,6 +614,145 @@ public final class PrimeAbi {
         }
         public static void serial(MemorySegment value, long field) {
             value.set(JAVA_LONG, 32L, field);
+        }
+    }
+    public static final class PrimeDisplayOutput {
+        private PrimeDisplayOutput() {}
+        public static final long SIZE = 24, ALIGN = 4;
+        public static final MemoryLayout LAYOUT =
+                MemoryLayout
+                        .structLayout(PrimeHeader.LAYOUT.withName("header"),
+                                      JAVA_INT.withName("active"), JAVA_FLOAT.withName("peak_nits"),
+                                      JAVA_FLOAT.withName("system_white_nits"),
+                                      JAVA_INT.withName("reserved"))
+                        .withName("PrimeDisplayOutput");
+        static {
+            if (LAYOUT.byteSize() != SIZE || LAYOUT.byteAlignment() != ALIGN)
+                throw new ExceptionInInitializerError("PrimeDisplayOutput layout");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("header")) != 0)
+                throw new ExceptionInInitializerError("PrimeDisplayOutput.header offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("active")) != 8)
+                throw new ExceptionInInitializerError("PrimeDisplayOutput.active offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("peak_nits")) != 12)
+                throw new ExceptionInInitializerError("PrimeDisplayOutput.peak_nits offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("system_white_nits")) != 16)
+                throw new ExceptionInInitializerError(
+                        "PrimeDisplayOutput.system_white_nits offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("reserved")) != 20)
+                throw new ExceptionInInitializerError("PrimeDisplayOutput.reserved offset");
+        }
+        public static MemorySegment header(MemorySegment value) {
+            return value.asSlice(0L, 8);
+        }
+        public static int active(MemorySegment value) {
+            return value.get(JAVA_INT, 8L);
+        }
+        public static void active(MemorySegment value, int field) {
+            value.set(JAVA_INT, 8L, field);
+        }
+        public static float peak_nits(MemorySegment value) {
+            return value.get(JAVA_FLOAT, 12L);
+        }
+        public static void peak_nits(MemorySegment value, float field) {
+            value.set(JAVA_FLOAT, 12L, field);
+        }
+        public static float system_white_nits(MemorySegment value) {
+            return value.get(JAVA_FLOAT, 16L);
+        }
+        public static void system_white_nits(MemorySegment value, float field) {
+            value.set(JAVA_FLOAT, 16L, field);
+        }
+        public static int reserved(MemorySegment value) {
+            return value.get(JAVA_INT, 20L);
+        }
+        public static void reserved(MemorySegment value, int field) {
+            value.set(JAVA_INT, 20L, field);
+        }
+    }
+    public static final class PrimeHdrTarget {
+        private PrimeHdrTarget() {}
+        public static final long SIZE = 64, ALIGN = 8;
+        public static final MemoryLayout LAYOUT =
+                MemoryLayout
+                        .structLayout(
+                                PrimeHeader.LAYOUT.withName("header"),
+                                JAVA_LONG.withName("command"), JAVA_LONG.withName("ui_image"),
+                                JAVA_LONG.withName("ui_view"), JAVA_LONG.withName("output_image"),
+                                JAVA_LONG.withName("output_view"), JAVA_LONG.withName("serial"),
+                                JAVA_INT.withName("width"), JAVA_INT.withName("height"))
+                        .withName("PrimeHdrTarget");
+        static {
+            if (LAYOUT.byteSize() != SIZE || LAYOUT.byteAlignment() != ALIGN)
+                throw new ExceptionInInitializerError("PrimeHdrTarget layout");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("header")) != 0)
+                throw new ExceptionInInitializerError("PrimeHdrTarget.header offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("command")) != 8)
+                throw new ExceptionInInitializerError("PrimeHdrTarget.command offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("ui_image")) != 16)
+                throw new ExceptionInInitializerError("PrimeHdrTarget.ui_image offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("ui_view")) != 24)
+                throw new ExceptionInInitializerError("PrimeHdrTarget.ui_view offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("output_image")) != 32)
+                throw new ExceptionInInitializerError("PrimeHdrTarget.output_image offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("output_view")) != 40)
+                throw new ExceptionInInitializerError("PrimeHdrTarget.output_view offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("serial")) != 48)
+                throw new ExceptionInInitializerError("PrimeHdrTarget.serial offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("width")) != 56)
+                throw new ExceptionInInitializerError("PrimeHdrTarget.width offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("height")) != 60)
+                throw new ExceptionInInitializerError("PrimeHdrTarget.height offset");
+        }
+        public static MemorySegment header(MemorySegment value) {
+            return value.asSlice(0L, 8);
+        }
+        public static long command(MemorySegment value) {
+            return value.get(JAVA_LONG, 8L);
+        }
+        public static void command(MemorySegment value, long field) {
+            value.set(JAVA_LONG, 8L, field);
+        }
+        public static long ui_image(MemorySegment value) {
+            return value.get(JAVA_LONG, 16L);
+        }
+        public static void ui_image(MemorySegment value, long field) {
+            value.set(JAVA_LONG, 16L, field);
+        }
+        public static long ui_view(MemorySegment value) {
+            return value.get(JAVA_LONG, 24L);
+        }
+        public static void ui_view(MemorySegment value, long field) {
+            value.set(JAVA_LONG, 24L, field);
+        }
+        public static long output_image(MemorySegment value) {
+            return value.get(JAVA_LONG, 32L);
+        }
+        public static void output_image(MemorySegment value, long field) {
+            value.set(JAVA_LONG, 32L, field);
+        }
+        public static long output_view(MemorySegment value) {
+            return value.get(JAVA_LONG, 40L);
+        }
+        public static void output_view(MemorySegment value, long field) {
+            value.set(JAVA_LONG, 40L, field);
+        }
+        public static long serial(MemorySegment value) {
+            return value.get(JAVA_LONG, 48L);
+        }
+        public static void serial(MemorySegment value, long field) {
+            value.set(JAVA_LONG, 48L, field);
+        }
+        public static int width(MemorySegment value) {
+            return value.get(JAVA_INT, 56L);
+        }
+        public static void width(MemorySegment value, int field) {
+            value.set(JAVA_INT, 56L, field);
+        }
+        public static int height(MemorySegment value) {
+            return value.get(JAVA_INT, 60L);
+        }
+        public static void height(MemorySegment value, int field) {
+            value.set(JAVA_INT, 60L, field);
         }
     }
     public static final class PrimePrepareResources {
@@ -3093,6 +3284,20 @@ public final class PrimeAbi {
             FunctionDescriptor.of(JAVA_INT, JAVA_LONG, ADDRESS);
     public static final FunctionDescriptor PRIME_RECORD_DESCRIPTOR =
             FunctionDescriptor.of(JAVA_INT, JAVA_LONG, ADDRESS, ADDRESS);
+    public static final FunctionDescriptor PRIME_SUBMISSION_ACCEPTED_DESCRIPTOR =
+            FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_LONG);
+    public static final FunctionDescriptor PRIME_DISPLAY_OUTPUT_DESCRIPTOR =
+            FunctionDescriptor.of(JAVA_INT, JAVA_LONG, ADDRESS);
+    public static final FunctionDescriptor PRIME_PRESENT_HDR_DESCRIPTOR =
+            FunctionDescriptor.of(JAVA_INT, JAVA_LONG, ADDRESS);
+    public static final FunctionDescriptor PRIME_PREPARE_FRAME_GENERATION_DESCRIPTOR =
+            FunctionDescriptor.of(JAVA_INT, JAVA_LONG, ADDRESS, JAVA_INT, JAVA_INT);
+    public static final FunctionDescriptor PRIME_HDR_SURFACE_CREATE_DESCRIPTOR =
+            FunctionDescriptor.of(JAVA_LONG, ADDRESS);
+    public static final FunctionDescriptor PRIME_HDR_SURFACE_RECORD_DESCRIPTOR =
+            FunctionDescriptor.of(JAVA_INT, JAVA_LONG, ADDRESS, ADDRESS);
+    public static final FunctionDescriptor PRIME_HDR_SURFACE_DESTROY_DESCRIPTOR =
+            FunctionDescriptor.of(JAVA_INT, JAVA_LONG);
     public static final FunctionDescriptor PRIME_RENDER_DESCRIPTOR =
             FunctionDescriptor.of(JAVA_INT, JAVA_LONG, ADDRESS, ADDRESS, JAVA_LONG);
     public static final FunctionDescriptor PRIME_GPU_TIME_DESCRIPTOR =
@@ -3105,6 +3310,10 @@ public final class PrimeAbi {
             FunctionDescriptor.of(JAVA_LONG, ADDRESS, JAVA_LONG);
     public static final FunctionDescriptor PRIME_STREAMLINE_PRESENT_DESCRIPTOR =
             FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_LONG);
+    public static final FunctionDescriptor PRIME_STREAMLINE_BOOTSTRAP_DESCRIPTOR =
+            FunctionDescriptor.of(JAVA_INT);
+    public static final FunctionDescriptor PRIME_STREAMLINE_FRAME_DESCRIPTOR =
+            FunctionDescriptor.of(JAVA_INT, JAVA_INT, JAVA_INT);
     public static final FunctionDescriptor PRIME_MC_RESOURCES_DESCRIPTOR =
             FunctionDescriptor.of(JAVA_INT, JAVA_LONG, ADDRESS);
     public static final FunctionDescriptor PRIME_MC_PLAN_DESCRIPTOR =
@@ -3128,12 +3337,21 @@ public final class PrimeAbi {
             case "prime_configure" -> PRIME_CONFIGURE_DESCRIPTOR;
             case "prime_prepare_resources" -> PRIME_PREPARE_RESOURCES_DESCRIPTOR;
             case "prime_record" -> PRIME_RECORD_DESCRIPTOR;
+            case "prime_submission_accepted" -> PRIME_SUBMISSION_ACCEPTED_DESCRIPTOR;
+            case "prime_display_output" -> PRIME_DISPLAY_OUTPUT_DESCRIPTOR;
+            case "prime_present_hdr" -> PRIME_PRESENT_HDR_DESCRIPTOR;
+            case "prime_prepare_frame_generation" -> PRIME_PREPARE_FRAME_GENERATION_DESCRIPTOR;
+            case "prime_hdr_surface_create" -> PRIME_HDR_SURFACE_CREATE_DESCRIPTOR;
+            case "prime_hdr_surface_record" -> PRIME_HDR_SURFACE_RECORD_DESCRIPTOR;
+            case "prime_hdr_surface_destroy" -> PRIME_HDR_SURFACE_DESTROY_DESCRIPTOR;
             case "prime_render" -> PRIME_RENDER_DESCRIPTOR;
             case "prime_gpu_time" -> PRIME_GPU_TIME_DESCRIPTOR;
             case "prime_cpu_diagnostics" -> PRIME_CPU_DIAGNOSTICS_DESCRIPTOR;
             case "prime_destroy" -> PRIME_DESTROY_DESCRIPTOR;
             case "prime_last_error" -> PRIME_LAST_ERROR_DESCRIPTOR;
             case "prime_streamline_present" -> PRIME_STREAMLINE_PRESENT_DESCRIPTOR;
+            case "prime_streamline_bootstrap" -> PRIME_STREAMLINE_BOOTSTRAP_DESCRIPTOR;
+            case "prime_streamline_frame" -> PRIME_STREAMLINE_FRAME_DESCRIPTOR;
             case "prime_mc_resources" -> PRIME_MC_RESOURCES_DESCRIPTOR;
             case "prime_mc_plan" -> PRIME_MC_PLAN_DESCRIPTOR;
             case "prime_mc_sections" -> PRIME_MC_SECTIONS_DESCRIPTOR;

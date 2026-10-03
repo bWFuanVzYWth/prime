@@ -8,7 +8,7 @@ import java.util.Arrays;
 
 /** Immutable client settings. Version adapters own widgets; native consumes the validated wire. */
 public final class RenderSettings {
-    public static final int VERSION = 5;
+    public static final int VERSION = 6;
     public static final int WIRE_BYTES = (int)PrimeSettings.SIZE;
     public enum Control {
         BOUNCES("render.bounces", 1, 64, 12),
@@ -18,6 +18,11 @@ public final class RenderSettings {
         SOLAR_LONGITUDE("astronomy.solar_longitude_degrees", 0, 359, 0),
         SUN_EV("lighting.sun_ev_quarters", -32, 32, 0),
         SKY_EV("lighting.sky_ev_quarters", -32, 32, 0),
+        STARS("lighting.stars_percent", 0, 400, 100),
+        AUTO_EXPOSURE("display.auto_exposure_percent", 0, 100, 60),
+        HDR("display.hdr", 0, 1, 0),
+        HDR_WHITE("display.hdr_reference_white_nits", 0, 10000, 0),
+        FRAME_GENERATION("render.frame_generation", 0, 1, 0),
         EXPOSURE_EV("display.exposure_ev_quarters", -48, 48, 0),
         HUE("display.hue_percent", 0, 100, 75),
         SATURATION("display.saturation_percent", 0, 50, 8),
@@ -69,6 +74,12 @@ public final class RenderSettings {
     public DlssQuality dlssQuality() {
         return dlssQuality;
     }
+    public boolean hdr() {
+        return value(Control.HDR) != 0;
+    }
+    public boolean frameGeneration() {
+        return value(Control.FRAME_GENERATION) != 0;
+    }
     public int value(Control control) {
         return values[control.ordinal()];
     }
@@ -116,6 +127,11 @@ public final class RenderSettings {
         PrimeSettings.ray_reconstruction(s, rayReconstruction ? 1 : 0);
         PrimeSettings.reconstruction_quality(s, dlssQuality.ordinal());
         PrimeSettings.terrain_batches_per_frame(s, value(Control.TERRAIN_BATCHES_PER_FRAME));
+        PrimeSettings.stars(s, value(Control.STARS) / 100.0f);
+        PrimeSettings.auto_exposure_compensation(s, value(Control.AUTO_EXPOSURE) / 100.0f);
+        PrimeSettings.hdr(s, hdr() ? 1 : 0);
+        PrimeSettings.hdr_reference_white(s, value(Control.HDR_WHITE));
+        PrimeSettings.frame_generation(s, frameGeneration() ? 1 : 0);
         target.position(WIRE_BYTES);
     }
 

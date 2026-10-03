@@ -179,7 +179,40 @@ fn gpu_resource_prepare_world_reset_and_quality_reuse() {
         }
         .unwrap();
         result.unwrap().unwrap();
+        assert!(renderer.submission_accepted(serial + 1).is_err());
+        renderer.submission_accepted(serial).unwrap();
+        assert!(renderer.submission_accepted(serial).is_err());
     }
+    // A completed realtime exposure may be frozen when entering Offline, except when
+    // the same settings transaction also changes the meter's compensation strength.
+    renderer.exposure_time = Some(std::time::Instant::now());
+    renderer.exposure_reset = false;
+    renderer
+        .configure(RenderSettings {
+            mode: RenderMode::Offline,
+            auto_exposure_compensation: 0.8,
+            ..settings
+        })
+        .unwrap();
+    assert!(renderer.exposure_reset);
+    assert!(!renderer.exposure_frozen);
+    renderer.exposure_reset = false;
+    renderer
+        .configure(RenderSettings {
+            mode: RenderMode::Offline,
+            auto_exposure_compensation: 0.0,
+            ..settings
+        })
+        .unwrap();
+    renderer
+        .configure(RenderSettings {
+            mode: RenderMode::Offline,
+            auto_exposure_compensation: 0.6,
+            ..settings
+        })
+        .unwrap();
+    assert!(renderer.exposure_reset);
+    assert!(!renderer.exposure_frozen);
     renderer.shutdown().unwrap();
 }
 
@@ -240,11 +273,26 @@ pub(crate) fn plane() -> Scene {
 #[ignore = "requires Vulkan with synchronization validation; realtime primary sample and diagnostic display"]
 fn gpu_realtime_views_match_primary_visibility_and_have_no_history() {
     let mut renderer = Renderer::with_mode(RenderMode::Realtime).unwrap();
+    // This oracle compares transport and deterministic manual display, independently of
+    // wall-clock-driven exposure adaptation and the optional celestial display pass.
+    let settings = RenderSettings {
+        stars: 0.0,
+        auto_exposure_compensation: 0.0,
+        ray_reconstruction: false,
+        ..Default::default()
+    };
+    renderer.configure(settings).unwrap();
     let mut scene = plane();
     let camera = camera();
     let first = renderer.render(&scene, &camera, 31, 17, 0).unwrap();
     assert!(renderer.output.as_ref().unwrap().accumulation.is_none());
     let mut offline = Renderer::new().unwrap();
+    offline
+        .configure(RenderSettings {
+            mode: RenderMode::Offline,
+            ..settings
+        })
+        .unwrap();
     assert_eq!(
         first,
         offline.render(&scene, &camera, 31, 17, 0).unwrap(),
@@ -269,7 +317,7 @@ fn gpu_realtime_views_match_primary_visibility_and_have_no_history() {
             .configure(RenderSettings {
                 view,
                 depth_range: 4.0,
-                ..Default::default()
+                ..settings
             })
             .unwrap();
         let image = renderer.render(&scene, &camera, 31, 17, 0).unwrap();
@@ -284,12 +332,12 @@ fn gpu_realtime_views_match_primary_visibility_and_have_no_history() {
     renderer
         .configure(RenderSettings {
             view: DiagnosticView::NoisyColor,
-            ..Default::default()
+            ..settings
         })
         .unwrap();
     let image = renderer.render(&scene, &camera, 31, 17, 0).unwrap();
     assert_ne!(image, first, "Raw view must bypass primeDRT");
-    renderer.configure(RenderSettings::default()).unwrap();
+    renderer.configure(settings).unwrap();
     assert_eq!(
         renderer.render(&scene, &camera, 31, 17, 0).unwrap(),
         first,
@@ -299,10 +347,7 @@ fn gpu_realtime_views_match_primary_visibility_and_have_no_history() {
     scene.revision += 1;
     for view in [DiagnosticView::LinearDepth, DiagnosticView::Normal] {
         renderer
-            .configure(RenderSettings {
-                view,
-                ..Default::default()
-            })
+            .configure(RenderSettings { view, ..settings })
             .unwrap();
         let sky = renderer.render(&scene, &camera, 31, 17, 0).unwrap();
         assert!(
@@ -321,6 +366,19 @@ fn gpu_realtime_views_match_primary_visibility_and_have_no_history() {
 fn gpu_realtime_matches_offline_single_sample_on_surface_paths() {
     let mut realtime = Renderer::with_mode(RenderMode::Realtime).unwrap();
     let mut offline = Renderer::with_mode(RenderMode::Offline).unwrap();
+    let settings = RenderSettings {
+        stars: 0.0,
+        auto_exposure_compensation: 0.0,
+        ray_reconstruction: false,
+        ..Default::default()
+    };
+    realtime.configure(settings).unwrap();
+    offline
+        .configure(RenderSettings {
+            mode: RenderMode::Offline,
+            ..settings
+        })
+        .unwrap();
     for flags in 0..3 {
         for (index, pattern) in ["checker", "sloped", "layers"].into_iter().enumerate() {
             let mut scene = crate::surface_tests::scene(1, pattern, flags);
@@ -343,13 +401,20 @@ fn gpu_realtime_matches_offline_single_sample_on_surface_paths() {
 #[ignore = "requires Vulkan; exclusive modes, shared geometry and pure batched accumulation"]
 fn gpu_mode_switch_preserves_scene_and_offline_batching_matches_sequential_samples() {
     let mut renderer = Renderer::with_mode(RenderMode::Realtime).unwrap();
+    let settings = RenderSettings {
+        stars: 0.0,
+        auto_exposure_compensation: 0.0,
+        ray_reconstruction: false,
+        ..Default::default()
+    };
+    renderer.configure(settings).unwrap();
     let scene = plane();
     let camera = camera();
     renderer.render(&scene, &camera, 31, 17, 0).unwrap();
     let top = renderer.geometry.as_ref().unwrap().top.handle();
     let offline = RenderSettings {
         mode: RenderMode::Offline,
-        ..Default::default()
+        ..settings
     };
     renderer.configure(offline).unwrap();
     renderer.set_scene_frozen(true);
@@ -374,7 +439,7 @@ fn gpu_mode_switch_preserves_scene_and_offline_batching_matches_sequential_sampl
     let darker = renderer.render(&scene, &camera, 31, 17, 4).unwrap();
     assert_eq!(renderer.samples, 5);
     assert_ne!(darker, four);
-    renderer.configure(RenderSettings::default()).unwrap();
+    renderer.configure(settings).unwrap();
     renderer.set_scene_frozen(false);
     assert!(renderer.output.is_none());
     renderer.render(&scene, &camera, 31, 17, 0).unwrap();

@@ -36,7 +36,14 @@ public final class PrimeSettingsScreen extends OptionsSubScreen {
                     case SUN_EV, SKY_EV, EXPOSURE_EV ->
                         String.format(Locale.ROOT, "%+.2f EV", value / 4.0);
                     case LATITUDE, SOLAR_LONGITUDE -> value + "°";
-                    case HUE, SATURATION -> value + "%";
+                    case HUE, SATURATION, STARS, AUTO_EXPOSURE -> value + "%";
+                    case HDR, FRAME_GENERATION ->
+                        Component.translatable(value == 0 ? "options.off" : "options.on")
+                                .getString();
+                    case HDR_WHITE ->
+                        value == 0
+                                ? Component.translatable("primept.settings.automatic").getString()
+                                : value + " nit";
                     default -> Integer.toString(value);
                 })),
                 new OptionInstance.IntRange(control.minimum, control.maximum),
@@ -102,13 +109,17 @@ public final class PrimeSettingsScreen extends OptionsSubScreen {
                 PrimeClient.settings().dlssQuality(),
                 value -> PrimeClient.updateSettings(PrimeClient.settings().withDlssQuality(value)));
         list.addBig(dlssQuality);
+        list.addBig(controls.get(Control.FRAME_GENERATION));
         list.addSmall(controls.get(Control.BOUNCES), controls.get(Control.OFFLINE_SAMPLES));
         list.addBig(controls.get(Control.TERRAIN_BATCHES_PER_FRAME));
         list.addHeader(Component.translatable("primept.settings.lighting"));
         list.addSmall(controls.get(Control.SUN_EV), controls.get(Control.SKY_EV));
+        list.addBig(controls.get(Control.STARS));
         list.addSmall(controls.get(Control.LATITUDE), controls.get(Control.SOLAR_LONGITUDE));
         list.addHeader(Component.translatable("primept.settings.display"));
         list.addBig(controls.get(Control.EXPOSURE_EV));
+        list.addBig(controls.get(Control.AUTO_EXPOSURE));
+        list.addSmall(controls.get(Control.HDR), controls.get(Control.HDR_WHITE));
         list.addSmall(controls.get(Control.HUE), controls.get(Control.SATURATION));
         list.addHeader(Component.translatable("primept.settings.diagnostics"));
         view = new OptionInstance<>(
@@ -145,9 +156,12 @@ public final class PrimeSettingsScreen extends OptionsSubScreen {
                                           Minecraft.getInstance().level != null;
         list.findOption(opacityMicromap).active = PrimeClient.controlsAvailable();
         list.findOption(rayReconstruction).active = PrimeClient.controlsAvailable() && !frozen;
+        list.findOption(controls.get(Control.FRAME_GENERATION)).active =
+                PrimeClient.controlsAvailable() && !frozen &&
+                PrimeClient.settings().rayReconstruction();
         list.findOption(dlssQuality).active = PrimeClient.controlsAvailable() && !frozen &&
                                               PrimeClient.settings().rayReconstruction();
-        for (var control : List.of(Control.BOUNCES, Control.SUN_EV, Control.SKY_EV,
+        for (var control : List.of(Control.BOUNCES, Control.SUN_EV, Control.SKY_EV, Control.STARS,
                                    Control.LATITUDE, Control.SOLAR_LONGITUDE))
             list.findOption(controls.get(control)).active = !frozen;
         list.findOption(view).active = !frozen;

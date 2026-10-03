@@ -2,12 +2,16 @@
 //! submission and target; synchronous readback is restricted to offline diagnostics.
 mod arena;
 mod atmosphere;
+mod compaction;
 #[cfg(feature = "atmosphere-bake")]
 pub use atmosphere::bake_default_atmosphere;
 mod benchmark;
 mod cpu_profile;
 mod display;
+mod display_pipeline;
 mod dynamic;
+mod exposure;
+mod hdr;
 mod light_grid;
 mod light_grid_cpu;
 #[cfg(all(test, feature = "shader-tests"))]
@@ -20,6 +24,8 @@ mod omm_cpu;
 #[cfg(all(test, feature = "shader-tests"))]
 mod omm_tests;
 mod openpbr;
+mod post_compute;
+mod starmap;
 mod static_directory;
 #[cfg(all(test, feature = "shader-tests"))]
 mod terrain_budget_tests;
@@ -50,6 +56,8 @@ mod resources;
 mod rr_display_tests;
 mod scene_resources;
 mod surface;
+mod surface_display;
+pub use surface_display::HdrSurface;
 #[cfg(test)]
 mod surface_tests;
 mod target;
@@ -73,6 +81,13 @@ const FRAME_SLOTS: usize = 3;
 /// Both arguments must remain valid for the actual vkQueuePresentKHR call.
 pub unsafe fn streamline_present(queue: u64, present_info: u64) -> i32 {
     unsafe { reconstruction::present(queue, present_info) }
+}
+/// Installs Streamline before the host creates its Vulkan loader/instance.
+pub fn streamline_bootstrap() -> Result<(), String> {
+    reconstruction::bootstrap()
+}
+pub fn streamline_frame(action: u32, enabled: bool) -> Result<(), String> {
+    reconstruction::frame(action, enabled)
 }
 
 /// Last recorded frame's object work; independent of opt-in timing instrumentation.
@@ -103,7 +118,9 @@ struct Pipeline {
     single_sample_pipelines: Option<[vk::Pipeline; 6]>,
     primary_pipelines: Option<[vk::Pipeline; 4]>,
     realtime_post: Option<vk::Pipeline>,
+    realtime_linear_post: Option<vk::Pipeline>,
     reconstruction_display: Option<vk::Pipeline>,
+    reconstruction_linear: Option<vk::Pipeline>,
 }
 impl Drop for Pipeline {
     fn drop(&mut self) {
@@ -115,7 +132,9 @@ impl Drop for Pipeline {
                     .chain(self.single_sample_pipelines.into_iter().flatten())
                     .chain(self.primary_pipelines.into_iter().flatten())
                     .chain(self.realtime_post)
+                    .chain(self.realtime_linear_post)
                     .chain(self.reconstruction_display)
+                    .chain(self.reconstruction_linear)
                 {
                     self.context.device.destroy_pipeline(pipeline, None);
                 }
@@ -147,6 +166,7 @@ impl Pipeline {
         context: &Arc<Context>,
         mode: RenderMode,
         reconstruction: bool,
+        frame_generation: bool,
         energy_lut: &openpbr::EnergyLut,
     ) -> Result<Self, String> {
         unsafe {
@@ -163,12 +183,14 @@ impl Pipeline {
                 primary_pipelines: (mode == RenderMode::Realtime)
                     .then_some([vk::Pipeline::null(); 4]),
                 realtime_post: None,
+                realtime_linear_post: None,
                 reconstruction_display: None,
+                reconstruction_linear: None,
             };
             let binding_ids: &[u32] = match mode {
                 RenderMode::Offline => &[0, 2, 3, 4, 5, 7, 8, 9],
                 RenderMode::Realtime if reconstruction => &[
-                    0, 2, 3, 4, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+                    0, 2, 3, 4, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
                 ],
                 RenderMode::Realtime => &[0, 2, 3, 4, 7, 8, 9],
             };
@@ -231,7 +253,7 @@ impl Pipeline {
                 },
                 vk::DescriptorPoolSize {
                     ty: vk::DescriptorType::STORAGE_IMAGE,
-                    descriptor_count: (if reconstruction { 11 } else { 1 }) * FRAME_SLOTS as u32,
+                    descriptor_count: (if reconstruction { 13 } else { 1 }) * FRAME_SLOTS as u32,
                 },
                 vk::DescriptorPoolSize {
                     ty: vk::DescriptorType::UNIFORM_BUFFER,
@@ -311,19 +333,35 @@ impl Pipeline {
                         size: 4,
                     },
                     vk::SpecializationMapEntry {
-                        constant_id: 4,
+                        constant_id: 3,
                         offset: 12,
                         size: 4,
                     },
+                    vk::SpecializationMapEntry {
+                        constant_id: 4,
+                        offset: 16,
+                        size: 4,
+                    },
                 ];
-                let data =
-                    [features[0], features[1], features[2], single_sample].map(u32::to_le_bytes);
-                let primary_entries = [entries[0], entries[2]];
+                let data = [
+                    features[0],
+                    features[1],
+                    features[2],
+                    if primary && reconstruction {
+                        1 | (u32::from(frame_generation) << 1)
+                    } else {
+                        0
+                    },
+                    single_sample,
+                ]
+                .map(u32::to_le_bytes);
+                let primary_entries = [entries[0], entries[2], entries[3]];
+                let transport_entries = [entries[0], entries[1], entries[2], entries[4]];
                 let specialization = vk::SpecializationInfo::default()
                     .map_entries(if primary {
                         &primary_entries
                     } else {
-                        &entries[..if mode == RenderMode::Offline { 4 } else { 3 }]
+                        &transport_entries[..if mode == RenderMode::Offline { 4 } else { 3 }]
                     })
                     .data(data.as_flattened());
                 let stage = vk::PipelineShaderStageCreateInfo::default()
@@ -392,8 +430,22 @@ impl Pipeline {
                     0,
                     false,
                 )?);
+                if !reconstruction {
+                    result.realtime_linear_post = Some(create(
+                        include_bytes!(concat!(env!("OUT_DIR"), "/realtime_linear.spv")),
+                        [0, 0, 0],
+                        0,
+                        false,
+                    )?);
+                }
             }
             if reconstruction {
+                result.reconstruction_linear = Some(create(
+                    include_bytes!(concat!(env!("OUT_DIR"), "/rr_linear.spv")),
+                    [0, 0, 0],
+                    0,
+                    false,
+                )?);
                 result.reconstruction_display = Some(create(
                     include_bytes!(concat!(env!("OUT_DIR"), "/rr_display.spv")),
                     [0, 0, 0],
@@ -464,10 +516,25 @@ pub struct Renderer {
     samples: u32,
     frame_seed: u32,
     display: PrimeDrtParameters,
+    linear_display: Option<display_pipeline::LinearDisplay>,
+    exposure: Option<exposure::Exposure>,
+    exposure_reset: bool,
+    exposure_frozen: bool,
+    exposure_time: Option<std::time::Instant>,
+    hdr_calibration: Option<hdr::HdrCalibration>,
+    hdr_present: Option<hdr::HdrPresent>,
+    fg_present: Option<hdr::FrameGenerationPresent>,
+    starmap: Option<starmap::Starmap>,
+    stars: Option<starmap::Stars>,
     settings: RenderSettings,
     scene_frozen: bool,
     failed: bool,
     host_serials: [u64; FRAME_SLOTS],
+    hdr_serials: [u64; FRAME_SLOTS],
+    fg_serials: [u64; FRAME_SLOTS],
+    fg_prepared_serial: u64,
+    fg_prepared: bool,
+    pending_temporal_serial: u64,
     query_serials: [u64; FRAME_SLOTS],
     gpu_intervals: [GpuIntervals; FRAME_SLOTS],
     host_query: vk::QueryPool,

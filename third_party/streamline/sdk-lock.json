@@ -616,6 +616,36 @@
       "source": "vulkan_headers",
       "entry": "Vulkan-Headers-1.4.350/LICENSES/MIT.txt",
       "sha256": "1ca3502222d967f3be5751c55f6b7ee735b5383909c3b501495f54b216dbf227"
+    },
+    {
+      "path": "third_party/streamline/bin/x64/sl.dlss_g.dll",
+      "source": "streamline",
+      "entry": "bin/x64/sl.dlss_g.dll",
+      "sha256": "f4a6b2b14dcc0b1485989e430d3b4e3a44ac1800b92ba1ad74f476e64fb2b09c"
+    },
+    {
+      "path": "third_party/streamline/bin/x64/sl.pcl.dll",
+      "source": "streamline",
+      "entry": "bin/x64/sl.pcl.dll",
+      "sha256": "f13d51cfa05f4cd514df2026049e2db8adf359221713170ad386fd499915b582"
+    },
+    {
+      "path": "third_party/streamline/bin/x64/sl.reflex.dll",
+      "source": "streamline",
+      "entry": "bin/x64/sl.reflex.dll",
+      "sha256": "0ce9725e3e03ea9e7f81d008b57f33ee365973d2e349131c8b1c3e3378fe2db0"
+    },
+    {
+      "path": "third_party/streamline/bin/x64/nvngx_dlssg.dll",
+      "source": "streamline",
+      "entry": "bin/x64/nvngx_dlssg.dll",
+      "sha256": "ff6e90eb78b827927dff5b4ecc6b1c870c2e9bca29ed9f48c7d348cc9e170b82"
+    },
+    {
+      "path": "third_party/streamline/bin/x64/NvLowLatencyVk.dll",
+      "source": "streamline",
+      "entry": "bin/x64/NvLowLatencyVk.dll",
+      "sha256": "2a77dc3e1c724b7eea5755be0ae7423752e79a2459fae72181a9f00e3507e5d6"
     }
   ]
 }

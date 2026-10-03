@@ -56,6 +56,19 @@ impl Image {
         )
     }
 
+    pub fn storage_uninitialized(
+        context: &Arc<Context>,
+        format: vk::Format,
+    ) -> Result<Self, String> {
+        Self::create(
+            context,
+            [1, 1, 1],
+            format,
+            vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::STORAGE,
+            false,
+        )
+    }
+
     fn create(
         context: &Arc<Context>,
         extent: [u32; 3],

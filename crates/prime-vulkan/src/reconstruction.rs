@@ -8,6 +8,8 @@ use std::sync::Arc;
 
 #[path = "streamline.rs"]
 mod streamline;
+pub(crate) use streamline::bootstrap;
+pub(crate) use streamline::frame;
 pub(crate) use streamline::present;
 
 const FORMATS: [vk::Format; 9] = [
@@ -29,6 +31,7 @@ struct Images {
     images: [Image; 9],
     // Engine completion state only; never tagged as an SDK input or BiasCurrentColorHint.
     unresolved: Image,
+    visible: Option<[Image; 2]>,
 }
 
 #[derive(Clone, Copy)]
@@ -112,9 +115,75 @@ impl Reconstruction {
     }
     pub fn reset(&mut self) {
         self.previous = None;
+        self.pending = None;
+    }
+    /// The host proves actual ordered submission, independently of CPU recording.
+    pub fn commit(&mut self) {
+        self.previous = self.pending.take();
     }
     pub fn input_extent(&self) -> [u32; 2] {
         self.images.as_ref().unwrap().input
+    }
+    pub fn status_view(&self) -> vk::ImageView {
+        self.images.as_ref().unwrap().unresolved.view
+    }
+
+    pub fn frame_generation_supported(&self) -> bool {
+        !self.failed()
+            && self
+                .runtime
+                .as_ref()
+                .is_some_and(|runtime| runtime.frame_generation_supported())
+    }
+
+    /// SDK FG may read outside the world's submission. Its public fence proves that consumer.
+    pub(super) fn suspend_frame_generation(&mut self) -> Result<(), String> {
+        let result = self
+            .runtime
+            .as_mut()
+            .map_or(Ok(()), |runtime| runtime.suspend_frame_generation());
+        if result.is_err() {
+            self.context
+                .uncertain_submission
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        result
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn prepare_frame_generation(
+        &mut self,
+        command: vk::CommandBuffer,
+        hudless: &Image,
+        ui_alpha: &Image,
+        back_buffers: u32,
+        back_buffer_format: vk::Format,
+        serial: u64,
+    ) -> Result<bool, String> {
+        if !self.frame_generation_supported() {
+            return Ok(false);
+        }
+        let Some(images) = self.images.as_ref() else {
+            return Ok(false);
+        };
+        let Some(visible) = images.visible.as_ref() else {
+            return Ok(false);
+        };
+        let Some(frame) = self.current.as_ref() else {
+            return Ok(false);
+        };
+        self.last_serial = serial;
+        self.runtime.as_mut().unwrap().prepare_frame_generation(
+            command,
+            frame,
+            visible,
+            hudless,
+            ui_alpha,
+            images.input,
+            images.output,
+            back_buffers,
+            back_buffer_format,
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -128,6 +197,7 @@ impl Reconstruction {
         sequence: u32,
         quality: ReconstructionQuality,
         completed: u64,
+        frame_generation: bool,
     ) -> Result<(), String> {
         if self.epoch != Some(epoch) {
             self.reset();
@@ -138,6 +208,8 @@ impl Reconstruction {
             .as_ref()
             .is_none_or(|images| images.output != output || images.quality != quality)
         {
+            // FG's consumer is independent of the host-world timeline.
+            self.suspend_frame_generation()?;
             // Reconfiguration can release SDK-private history, so first prove its last use complete.
             if self.last_serial > completed {
                 self.context.wait_host_serial(self.last_serial)?;
@@ -165,6 +237,7 @@ impl Reconstruction {
                     input[1],
                     vk::Format::R8_UNORM,
                 )?,
+                visible: None,
             });
             self.descriptor_dirty.fill(true);
             self.reset();
@@ -172,6 +245,33 @@ impl Reconstruction {
                 "[Prime PT] DLSS RR preset F {:?}: {}x{} -> {}x{}",
                 quality, input[0], input[1], output[0], output[1]
             );
+        }
+        let frame_generation = frame_generation && self.frame_generation_supported();
+        if self.images.as_ref().unwrap().visible.is_some() != frame_generation {
+            self.suspend_frame_generation()?;
+            if self.last_serial > completed {
+                self.context.wait_host_serial(self.last_serial)?;
+            }
+            let images = self.images.as_mut().unwrap();
+            images.visible = if frame_generation {
+                Some([
+                    Image::with_format(
+                        &self.context,
+                        images.input[0],
+                        images.input[1],
+                        vk::Format::R32_SFLOAT,
+                    )?,
+                    Image::with_format(
+                        &self.context,
+                        images.input[0],
+                        images.input[1],
+                        vk::Format::R16G16_SFLOAT,
+                    )?,
+                ])
+            } else {
+                None
+            };
+            self.descriptor_dirty.fill(true);
         }
         let input = self.input_extent();
         let aspect = output[0] as f32 / output[1] as f32;
@@ -221,7 +321,14 @@ impl Reconstruction {
         let unresolved = [vk::DescriptorImageInfo::default()
             .image_view(self.images.as_ref().unwrap().unresolved.view)
             .image_layout(vk::ImageLayout::GENERAL)];
-        let mut writes = [vk::WriteDescriptorSet::default(); 11];
+        let visible = self.images.as_ref().unwrap().visible.as_ref();
+        let visible_infos = [vk::DescriptorImageInfo::default()
+            .image_view(visible.map_or(images[1].view, |images| images[0].view))
+            .image_layout(vk::ImageLayout::GENERAL)];
+        let motion_infos = [vk::DescriptorImageInfo::default()
+            .image_view(visible.map_or(images[2].view, |images| images[1].view))
+            .image_layout(vk::ImageLayout::GENERAL)];
+        let mut writes = [vk::WriteDescriptorSet::default(); 13];
         for ((binding, info), write) in [10, 11, 12, 13, 14, 15, 16, 18, 20]
             .into_iter()
             .zip(&infos)
@@ -243,6 +350,16 @@ impl Reconstruction {
             .dst_binding(19)
             .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
             .image_info(&unresolved);
+        writes[11] = vk::WriteDescriptorSet::default()
+            .dst_set(descriptor)
+            .dst_binding(21)
+            .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+            .image_info(&visible_infos);
+        writes[12] = vk::WriteDescriptorSet::default()
+            .dst_set(descriptor)
+            .dst_binding(22)
+            .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+            .image_info(&motion_infos);
         unsafe {
             self.context.device.update_descriptor_sets(&writes, &[]);
         }
@@ -286,6 +403,7 @@ impl Reconstruction {
         view: DiagnosticView,
         depth_range: f32,
         bottom_up: bool,
+        linear_output: bool,
     ) -> Result<(), String> {
         self.barrier(command, true);
         let images = self.images.as_ref().unwrap();
@@ -303,11 +421,11 @@ impl Reconstruction {
             match result {
                 Ok(()) => {
                     success = true;
-                    self.previous = self.pending;
+                    // Promotion occurs only at the actual host submission acceptance hook.
                 }
                 Err(failure) => {
                     self.error = Some(failure.message.clone());
-                    self.previous = None;
+                    self.reset();
                     if failure.unsafe_recording {
                         return Err(failure.message);
                     }
@@ -318,7 +436,7 @@ impl Reconstruction {
                 }
             }
         } else {
-            self.previous = None;
+            self.reset();
         }
         self.barrier(command, false);
         let images = self.images.as_ref().unwrap();
@@ -349,7 +467,11 @@ impl Reconstruction {
             self.context.device.cmd_bind_pipeline(
                 command,
                 vk::PipelineBindPoint::COMPUTE,
-                pipeline.reconstruction_display.unwrap(),
+                if linear_output {
+                    pipeline.reconstruction_linear.unwrap()
+                } else {
+                    pipeline.reconstruction_display.unwrap()
+                },
             );
             self.context.device.cmd_bind_descriptor_sets(
                 command,
@@ -379,6 +501,11 @@ impl Reconstruction {
 
 impl Drop for Reconstruction {
     fn drop(&mut self) {
+        if self.context.can_destroy()
+            && let Err(message) = self.suspend_frame_generation()
+        {
+            eprintln!("[Prime PT] Streamline FG resources quarantined: {message}");
+        }
         if self.context.can_destroy()
             && self.last_serial != 0
             && let Err(message) = self.context.wait_host_serial(self.last_serial)

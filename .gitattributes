@@ -7,6 +7,7 @@
 # Binary assets and build inputs must never undergo line-ending conversion.
 *.jar -text
 *.zip -text
+*.gz -text
 *.png -text
 *.jpg -text
 *.jpeg -text

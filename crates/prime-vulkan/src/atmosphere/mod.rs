@@ -21,6 +21,8 @@ pub(crate) const CONSUMER_TYPES: &[vk::DescriptorType] = &[
     vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
     vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
     vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+    vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+    vk::DescriptorType::UNIFORM_BUFFER,
 ];
 pub(crate) fn consumer_layout(context: &Context) -> Result<vk::DescriptorSetLayout, String> {
     gpu::descriptor_layout(context, CONSUMER_TYPES)
@@ -32,6 +34,9 @@ pub(super) struct Atmosphere {
     _medium: Buffer,
     _physical: Vec<Texture>,
     _frames: Vec<Buffer>,
+    star_controls: Vec<Buffer>,
+    star_keys: [Option<[u32; 4]>; crate::FRAME_SLOTS],
+    star_views: [u64; crate::FRAME_SLOTS],
     _sky: Texture,
     _transmittance: Texture,
     _aerial_radiance: Texture,
@@ -150,7 +155,27 @@ impl Atmosphere {
             96,
         )?;
         let mut frames = vec![];
+        let mut star_controls = vec![];
         for slot in 0..crate::FRAME_SLOTS {
+            star_controls.push(Buffer::new(
+                context,
+                16,
+                vk::BufferUsageFlags::UNIFORM_BUFFER,
+                true,
+            )?);
+            let info = [vk::DescriptorBufferInfo::default()
+                .buffer(star_controls[slot].buffer)
+                .range(16)];
+            unsafe {
+                context.device.update_descriptor_sets(
+                    &[vk::WriteDescriptorSet::default()
+                        .dst_set(compute.sets[1][slot])
+                        .dst_binding(6)
+                        .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                        .buffer_info(&info)],
+                    &[],
+                );
+            }
             frames.push(Buffer::new(
                 context,
                 400,
@@ -189,6 +214,9 @@ impl Atmosphere {
             _medium: medium,
             _physical: physical,
             _frames: frames,
+            star_controls,
+            star_keys: [None; crate::FRAME_SLOTS],
+            star_views: [0; crate::FRAME_SLOTS],
             _sky: sky,
             _transmittance: transmittance,
             _aerial_radiance: aerial_radiance,
@@ -210,6 +238,43 @@ impl Atmosphere {
     }
     pub fn descriptor(&self, slot: usize) -> vk::DescriptorSet {
         self.compute.sets[1][slot]
+    }
+    pub fn set_starmap(
+        &mut self,
+        slot: usize,
+        map: Option<&crate::starmap::Starmap>,
+        controls: [f32; 4],
+    ) -> Result<(), String> {
+        use ash::vk::Handle;
+        let values = controls.map(f32::to_bits);
+        if self.star_keys[slot] != Some(values) {
+            self.star_controls[slot].write(values.map(u32::to_le_bytes).as_flattened())?;
+            self.star_keys[slot] = Some(values);
+        }
+        let (view, sampler) = map.map_or((self._sky.image.view, self.compute.sampler), |map| {
+            (map.view, map.sampler)
+        });
+        if self.star_views[slot] != view.as_raw() {
+            let image = [vk::DescriptorImageInfo::default()
+                .image_view(view)
+                .sampler(sampler)
+                .image_layout(vk::ImageLayout::GENERAL)];
+            unsafe {
+                self.context.device.update_descriptor_sets(
+                    &[vk::WriteDescriptorSet::default()
+                        .dst_set(self.descriptor(slot))
+                        .dst_binding(5)
+                        .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                        .image_info(&image)],
+                    &[],
+                );
+            }
+            self.star_views[slot] = view.as_raw();
+        }
+        Ok(())
+    }
+    pub fn transmittance_view(&self) -> vk::ImageView {
+        self._transmittance.image.view
     }
     pub fn prepare(
         &mut self,

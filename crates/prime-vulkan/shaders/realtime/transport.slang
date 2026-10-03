@@ -77,7 +77,7 @@ public float3 primeTraceLanding<Distance>(TraceScene resources, AtmLighting envi
                 distancePending = false;
             }
             if (!hit.found) {
-                float3 escaped = atmSky(environment, direction) * parameters.lighting.y;
+                float3 escaped = atmSky(environment, direction, parameters.lighting.y);
                 if (atmSunContains(environment, direction)) {
                     float weight = previousPdf == 0.0
                                            ? 1.0

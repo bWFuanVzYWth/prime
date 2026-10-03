@@ -8,7 +8,7 @@ use prime_scene::{
     workers::CpuWorkers,
 };
 
-const CHANNELS: [(u32, vk::Format, usize); 8] = [
+const CHANNELS: [(u32, vk::Format, usize); 10] = [
     (11, vk::Format::R32_SFLOAT, 4),
     (12, vk::Format::R16G16_SFLOAT, 4),
     (13, vk::Format::R16G16B16A16_SFLOAT, 8),
@@ -17,6 +17,8 @@ const CHANNELS: [(u32, vk::Format, usize); 8] = [
     (16, vk::Format::R16_SFLOAT, 2),
     (19, vk::Format::R8_UNORM, 1),
     (20, vk::Format::R16G16_SFLOAT, 4),
+    (21, vk::Format::R32_SFLOAT, 4),
+    (22, vk::Format::R16G16_SFLOAT, 4),
 ];
 
 struct Fixture {
@@ -33,6 +35,7 @@ struct Fixture {
     byte_count: usize,
     extent: [u32; 2],
     history_valid: bool,
+    motion_features: u32,
 }
 
 #[derive(Debug)]
@@ -161,6 +164,44 @@ impl Snapshot {
             }
         }
     }
+
+    fn rigid_motion(&self, current: Camera, extent: [u32; 2], jitter: [f32; 2], angle: f32) {
+        let tangent = (current.vertical_fov_radians * 0.5).tan();
+        let aspect = extent[0] as f32 / extent[1] as f32;
+        let values = self.channel(1);
+        for (index, actual) in values.as_chunks::<2>().0.iter().enumerate() {
+            let uv = [
+                ((index as u32 % extent[0]) as f32 + 0.5 + jitter[0]) / extent[0] as f32,
+                ((index as u32 / extent[0]) as f32 + 0.5 + jitter[1]) / extent[1] as f32,
+            ];
+            // Current plane is Rz(angle) * local + (0.1, -0.05, 0.05).
+            // Invert the known rigid pose to recover the same barycentric point at old identity.
+            let x = current.position[0] + 3.05 * (uv[0] * 2.0 - 1.0) * tangent * aspect - 0.1;
+            let y = current.position[1] - 3.05 * (uv[1] * 2.0 - 1.0) * tangent + 0.05;
+            let old = [
+                angle.cos() * x + angle.sin() * y,
+                -angle.sin() * x + angle.cos() * y,
+            ];
+            let projected = [
+                (old[0] - current.position[0]) / (3.0 * tangent * aspect),
+                -(old[1] - current.position[1]) / (3.0 * tangent),
+            ];
+            for component in 0..2 {
+                let expected =
+                    (0.5 * (projected[component] + 1.0) - uv[component]) * extent[component] as f32;
+                assert!(
+                    (actual[component] - expected).abs() < 0.002,
+                    "rigid pixel {index}, component {component}: {} != {expected}",
+                    actual[component]
+                );
+            }
+        }
+        assert!(
+            self.channel(0)
+                .iter()
+                .all(|depth| (*depth - 3.05).abs() < 1e-5)
+        );
+    }
 }
 
 impl Fixture {
@@ -182,8 +223,29 @@ impl Fixture {
         extent: [u32; 2],
         instances: &InstanceScene,
     ) -> Self {
+        Self::with_motion(context, scene, extent, instances, false)
+    }
+
+    fn with_motion(
+        context: &Arc<Context>,
+        scene: &Scene,
+        extent: [u32; 2],
+        instances: &InstanceScene,
+        enabled: bool,
+    ) -> Self {
+        Self::with_features(context, scene, extent, instances, u32::from(enabled))
+    }
+
+    fn with_features(
+        context: &Arc<Context>,
+        scene: &Scene,
+        extent: [u32; 2],
+        instances: &InstanceScene,
+        features: u32,
+    ) -> Self {
         let mut geometry =
             Geometry::new(context, scene.into(), Arc::new(CpuWorkers::new(1).unwrap())).unwrap();
+        geometry.objects.set_motion_enabled(features != 0);
         geometry
             .prepare_dynamic(
                 context,
@@ -233,7 +295,9 @@ impl Fixture {
             single_sample_pipelines: None,
             primary_pipelines: None,
             realtime_post: None,
+            realtime_linear_post: None,
             reconstruction_display: None,
+            reconstruction_linear: None,
         };
         energy_lut.prepare().unwrap();
         unsafe {
@@ -395,7 +459,16 @@ impl Fixture {
                         vk::PipelineShaderStageCreateInfo::default()
                             .stage(vk::ShaderStageFlags::COMPUTE)
                             .module(shader)
-                            .name(c"main"),
+                            .name(c"main")
+                            .specialization_info(
+                                &vk::SpecializationInfo::default()
+                                    .map_entries(&[vk::SpecializationMapEntry {
+                                        constant_id: 3,
+                                        offset: 0,
+                                        size: 4,
+                                    }])
+                                    .data(&features.to_le_bytes()),
+                            ),
                     )],
                 None,
             );
@@ -416,6 +489,46 @@ impl Fixture {
             byte_count,
             extent,
             history_valid: true,
+            motion_features: features,
+        }
+    }
+
+    fn update_instances(&mut self, scene: &Scene, instances: &InstanceScene) {
+        // Every prior run waited for this owned context's submission before descriptors change.
+        self._geometry.begin_frame(&self.context, u64::MAX);
+        self._geometry
+            .prepare_dynamic(
+                &self.context,
+                scene,
+                instances,
+                0,
+                &mut cpu_profile::FrameCpu::default(),
+            )
+            .unwrap();
+        unsafe {
+            let handles = [self._geometry.top.handle()];
+            let mut acceleration = vk::WriteDescriptorSetAccelerationStructureKHR::default()
+                .acceleration_structures(&handles);
+            self.context.device.update_descriptor_sets(
+                &[vk::WriteDescriptorSet::default()
+                    .dst_set(self.pipeline.descriptors[0])
+                    .dst_binding(0)
+                    .descriptor_type(vk::DescriptorType::ACCELERATION_STRUCTURE_KHR)
+                    .descriptor_count(1)
+                    .push_next(&mut acceleration)],
+                &[],
+            );
+            let metadata = &self._geometry.objects.metadata;
+            self.context.device.update_descriptor_sets(
+                &[vk::WriteDescriptorSet::default()
+                    .dst_set(self.pipeline.descriptors[0])
+                    .dst_binding(7)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .buffer_info(&[vk::DescriptorBufferInfo::default()
+                        .buffer(metadata.buffer)
+                        .range(metadata.size)])],
+                &[],
+            );
         }
     }
 
@@ -446,7 +559,16 @@ impl Fixture {
                         vk::PipelineShaderStageCreateInfo::default()
                             .stage(vk::ShaderStageFlags::COMPUTE)
                             .module(shader)
-                            .name(c"main"),
+                            .name(c"main")
+                            .specialization_info(
+                                &vk::SpecializationInfo::default()
+                                    .map_entries(&[vk::SpecializationMapEntry {
+                                        constant_id: 3,
+                                        offset: 0,
+                                        size: 4,
+                                    }])
+                                    .data(&self.motion_features.to_le_bytes()),
+                            ),
                     )],
                 None,
             );
@@ -950,14 +1072,14 @@ fn gpu_primary_rr_post_completes_rough_pixel_reflection_motion() {
         let actual = fixture.run_with_distance(current, previous, [0.0; 2], 90, 1, Some(distance));
         actual.resolved();
         assert!(
-            actual.0[6].iter().all(|status| *status == 0),
+            actual.0[6].iter().all(|status| *status == 8),
             "ordinary surface does not claim a K1 explicit reflection"
         );
         actual.planar_motion(current, previous, [17, 9], [3.0; 2], [0.0, distance]);
     }
     let invalid = fixture.run_with_distance(current, previous, [0.0; 2], 91, 1, Some(-1.0));
     assert!(
-        invalid.0[6].iter().all(|status| *status == 2),
+        invalid.0[6].iter().all(|status| *status == 10),
         "invalid distance only invalidates reflection completion"
     );
     assert!(
@@ -971,11 +1093,11 @@ fn gpu_primary_rr_post_completes_rough_pixel_reflection_motion() {
 fn gpu_primary_rr_partial_completion_tir_reset_and_dynamic_contracts() {
     let context = Context::new().unwrap();
     for (name, scene, expected_status) in [
-        ("transmission_pending_reflection_done", water(0.0), 5u8),
+        ("transmission_pending_reflection_done", water(0.0), 13u8),
         (
             "transmission_done_reflection_pending",
             slow_reflection(),
-            6u8,
+            14u8,
         ),
     ] {
         let fixture = Fixture::new(&context, &scene, [17, 9]);
@@ -1031,7 +1153,7 @@ fn gpu_primary_rr_partial_completion_tir_reset_and_dynamic_contracts() {
     expected.resolved();
     expected.static_motion();
     assert!(
-        expected.0[6].iter().all(|status| *status == 0),
+        expected.0[6].iter().all(|status| *status == 8),
         "TIR completes its one primary guide without the explicit-companion bit"
     );
     for seed in 1..32 {
@@ -1050,7 +1172,7 @@ fn gpu_primary_rr_partial_completion_tir_reset_and_dynamic_contracts() {
     displaced.position[0] -= 5.0;
     let actual = reset.run(camera(), displaced, [0.3, -0.4], 100, 3);
     actual.resolved();
-    assert!(actual.0[6].iter().all(|status| *status == 4));
+    assert!(actual.0[6].iter().all(|status| *status == 12));
     for index in [1, 7] {
         assert!(
             actual.channel(index).iter().all(|motion| *motion == 0.0),
@@ -1104,12 +1226,247 @@ fn gpu_primary_rr_partial_completion_tir_reset_and_dynamic_contracts() {
     let fixture = Fixture::with_instances(&context, &scene, [17, 9], &instances);
     let actual = fixture.run(camera(), camera(), [0.0; 2], 101, 1);
     assert!(
-        actual.0[6].iter().all(|status| *status == 3),
+        actual.0[6].iter().all(|status| *status == 11),
         "unknown primary motion also prevents reflection proxy completion"
     );
     for index in [1, 7] {
         assert!(actual.channel(index).iter().all(|motion| *motion == 0.0));
     }
+}
+
+#[test]
+#[ignore = "windowless actual Objects previous-pose metadata, specialized K1 and FP16 motion/depth readback"]
+fn gpu_primary_rr_rigid_motion_uses_only_accepted_corresponding_poses() {
+    let context = Context::new().unwrap();
+    let extent = [17, 9];
+    let scene = realtime_tests::scene(7, vec![]);
+    let mut original = InstanceScene {
+        epoch: scene.epoch,
+        resource_revision: 1,
+        instance_revision: 1,
+        ..Default::default()
+    };
+    let triangles: Vec<_> = [
+        [[0.0, 0.0, 3.0], [0.0, 16.0, 3.0], [16.0, 16.0, 3.0]],
+        [[0.0, 0.0, 3.0], [16.0, 16.0, 3.0], [16.0, 0.0, 3.0]],
+    ]
+    .into_iter()
+    .map(|positions| prime_scene::Triangle {
+        positions,
+        colors: [[1.0; 4]; 3],
+        uvs: [[0.5; 2]; 3],
+        texture_id: 0,
+        flags: 0,
+    })
+    .collect();
+    original.prototypes.insert(
+        1,
+        prime_scene::Prototype {
+            revision: 1,
+            triangles: triangles.into(),
+            bounds: [[0.0, 0.0, 3.0], [16.0, 16.0, 3.0]],
+        },
+    );
+    original.instances.insert(
+        1,
+        prime_scene::Instance {
+            revision: 1,
+            prototype_id: 1,
+            origin: [0.0; 3],
+            transform: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+            texture_id: u32::MAX,
+            flags: u32::MAX,
+            tint: [255; 4],
+            uv_transform: [1.0, 1.0, 0.0, 0.0],
+        },
+    );
+    let copy_instances = |source: &InstanceScene| InstanceScene {
+        epoch: source.epoch,
+        resource_revision: source.resource_revision,
+        instance_revision: source.instance_revision,
+        prototypes: source.prototypes.clone(),
+        instances: source.instances.clone(),
+    };
+    let angle = 0.01f32;
+    let mut moved = copy_instances(&original);
+    moved.instance_revision = 2;
+    let instance = moved.instances.get_mut(&1).unwrap();
+    instance.revision = 2;
+    instance.transform = [
+        angle.cos(),
+        -angle.sin(),
+        0.0,
+        0.1,
+        angle.sin(),
+        angle.cos(),
+        0.0,
+        -0.05,
+        0.0,
+        0.0,
+        1.0,
+        0.05,
+    ];
+    let pending = |snapshot: &Snapshot| {
+        assert!(snapshot.0[6].iter().all(|status| *status == 11));
+        for channel in [1, 7] {
+            assert!(
+                snapshot
+                    .channel(channel)
+                    .iter()
+                    .all(|motion| *motion == 0.0)
+            );
+        }
+    };
+    let mut accepted = Fixture::with_motion(&context, &scene, extent, &original, true);
+    pending(&accepted.run(camera(), camera(), [0.0; 2], 110, 1));
+    // The exact production API promotes history only after a submission is accepted.
+    // This fixture's owned submit also proves GPU completion before reusing its descriptors.
+    accepted._geometry.objects.commit_motion();
+    accepted.update_instances(&scene, &moved);
+    let mut generated = Fixture::with_features(&context, &scene, extent, &original, 3);
+    pending(&generated.run(camera(), camera(), [0.0; 2], 110, 1));
+    generated._geometry.objects.commit_motion();
+    generated.update_instances(&scene, &moved);
+    let legacy = std::env::var_os("PRIME_RR_K1_BEFORE_SPV").map(|path| {
+        let mut fixture = Fixture::with_features(&context, &scene, extent, &original, 3);
+        fixture.replace_shader(&std::fs::read(path).unwrap());
+        pending(&fixture.run(camera(), camera(), [0.0; 2], 110, 1));
+        fixture._geometry.objects.commit_motion();
+        fixture.update_instances(&scene, &moved);
+        fixture
+    });
+    for (seed, jitter) in [(111, [0.0; 2]), (112, [0.25, -0.25])] {
+        let actual = accepted.run(camera(), camera(), jitter, seed, 1);
+        actual.resolved();
+        assert!(actual.0[6].iter().all(|status| *status == 8));
+        actual.rigid_motion(camera(), extent, jitter, angle);
+        assert!(actual.channel(1).iter().any(|motion| motion.abs() > 0.05));
+        let fg = generated.run(camera(), camera(), jitter, seed, 1);
+        for channel in 0..8 {
+            assert_eq!(
+                fg.0[channel], actual.0[channel],
+                "FG must preserve RR channel {channel}"
+            );
+        }
+        // Device depth uses the actual first hit, while ordinary opaque main motion has
+        // the same rigid barycentric correspondence as the FG first-visible consumer.
+        let expected_depth = 1.0 - 0.01 / 3.05;
+        assert!(
+            fg.channel(8)
+                .iter()
+                .all(|depth| (*depth - expected_depth).abs() < 1e-7)
+        );
+        assert_eq!(fg.0[9], fg.0[1], "first-visible opaque rigid motion");
+        if let Some(legacy) = &legacy {
+            let before = legacy.run(camera(), camera(), jitter, seed, 1);
+            for channel in 0..CHANNELS.len() {
+                assert_eq!(
+                    fg.0[channel], before.0[channel],
+                    "before/after extent channel {channel}"
+                );
+            }
+            assert_eq!(fg.1, before.1, "before/after K1 reports");
+        }
+    }
+
+    // A camera-only sky has no physical hit. Initialize publishes finite zero-motion
+    // and device depth 1 for every input pixel, using the same jitter/extent contract.
+    let sky = Fixture::with_features(
+        &context,
+        &scene,
+        extent,
+        &InstanceScene {
+            epoch: scene.epoch,
+            ..Default::default()
+        },
+        3,
+    );
+    let actual = sky.run(camera(), camera(), [0.25, -0.25], 119, 1);
+    assert!(actual.channel(8).iter().all(|depth| *depth == 1.0));
+    assert!(actual.channel(9).iter().all(|motion| motion.abs() < 2e-5));
+    if let Some(path) = std::env::var_os("PRIME_RR_K1_BEFORE_SPV") {
+        let mut legacy_sky = Fixture::with_features(
+            &context,
+            &scene,
+            extent,
+            &InstanceScene {
+                epoch: scene.epoch,
+                ..Default::default()
+            },
+            3,
+        );
+        legacy_sky.replace_shader(&std::fs::read(path).unwrap());
+        let mut previous = camera();
+        previous.vertical_fov_radians = 0.45;
+        for jitter in [[0.0; 2], [0.25, -0.25]] {
+            let before = legacy_sky.run(camera(), previous, jitter, 119, 1);
+            let after = sky.run(camera(), previous, jitter, 119, 1);
+            for channel in 0..CHANNELS.len() {
+                assert_eq!(
+                    before.0[channel], after.0[channel],
+                    "before/after sky extent channel {channel}"
+                );
+            }
+            assert_eq!(before.1, after.1, "before/after sky K1 reports");
+        }
+    }
+
+    let mut unaccepted = Fixture::with_motion(&context, &scene, extent, &original, true);
+    pending(&unaccepted.run(camera(), camera(), [0.0; 2], 113, 1));
+    // A completed GPU dispatch alone must not advance displayed history.
+    unaccepted.update_instances(&scene, &moved);
+    pending(&unaccepted.run(camera(), camera(), [0.0; 2], 114, 1));
+    drop(unaccepted);
+
+    for rejection in ["new_identity", "changed_geometry", "new_epoch"] {
+        let mut fixture = Fixture::with_motion(&context, &scene, extent, &original, true);
+        pending(&fixture.run(camera(), camera(), [0.0; 2], 115, 1));
+        fixture._geometry.objects.commit_motion();
+        let mut changed = copy_instances(&moved);
+        let mut changed_scene = realtime_tests::scene(7, vec![]);
+        match rejection {
+            "new_identity" => {
+                let instance = changed.instances.remove(&1).unwrap();
+                changed.instances.insert(2, instance);
+            }
+            "changed_geometry" => {
+                changed.resource_revision += 1;
+                let prototype = changed.prototypes.get_mut(&1).unwrap();
+                prototype.revision += 1;
+                Arc::make_mut(&mut prototype.triangles)[0].positions[0][0] += 0.001;
+            }
+            "new_epoch" => {
+                changed_scene.epoch += 1;
+                changed.epoch = changed_scene.epoch;
+            }
+            _ => unreachable!(),
+        }
+        fixture.update_instances(&changed_scene, &changed);
+        pending(&fixture.run(camera(), camera(), [0.0; 2], 116, 1));
+    }
+
+    let mut anchored_scene = realtime_tests::scene(7, vec![]);
+    anchored_scene.anchor = [256.0, 0.0, 0.0];
+    let mut anchored = original;
+    anchored.instances.get_mut(&1).unwrap().origin = [256.0, 0.0, 0.0];
+    let mut fixture = Fixture::with_motion(&context, &anchored_scene, extent, &anchored, true);
+    pending(&fixture.run(camera(), camera(), [0.0; 2], 117, 1));
+    fixture._geometry.objects.commit_motion();
+    anchored_scene.anchor[0] += 256.0;
+    fixture.update_instances(&anchored_scene, &anchored);
+    let mut rebased_camera = camera();
+    rebased_camera.position[0] -= 256.0;
+    let actual = fixture.run(rebased_camera, rebased_camera, [0.0; 2], 118, 1);
+    actual.resolved();
+    assert!(actual.0[6].iter().all(|status| *status == 8));
+    // Float32 world-space rebase plus FP16 output; no physical object/camera motion.
+    assert!(actual.channel(1).iter().all(|motion| motion.abs() < 0.002));
+    assert!(
+        actual
+            .channel(0)
+            .iter()
+            .all(|depth| (*depth - 3.0).abs() < 1e-5)
+    );
 }
 
 #[test]
@@ -1133,6 +1490,12 @@ fn gpu_rr_k1_timestamp_ab_ba() {
     };
     let before = load("PRIME_RR_K1_BEFORE_SPV");
     let after = load("PRIME_RR_K1_AFTER_SPV");
+    let motion_features: u32 =
+        std::env::var("PRIME_RR_K1_MOTION_FEATURES").map_or(0, |value| value.parse().unwrap());
+    assert!(
+        [0, 1, 3].contains(&motion_features),
+        "actual runtime K1 motion profiles"
+    );
     assert_ne!(
         before.1, after.1,
         "benchmark requires distinct before/after artifacts"
@@ -1158,6 +1521,7 @@ fn gpu_rr_k1_timestamp_ab_ba() {
     writeln!(metadata, "{}", context.benchmark_device_details()).unwrap();
     writeln!(metadata, "scope=K1 fixture only; constant environment; matching report writes; no K2/post/NGX/display; not a whole-frame RR result").unwrap();
     writeln!(metadata, "extent=1920x1080 seed=0x13572468 sequence=0 jitter=0,0 budget=12 warmup=12 steady=48 orders=AB,BA retained_outliers=true").unwrap();
+    writeln!(metadata, "specialization_id3={motion_features}").unwrap();
     for (label, (path, bytes)) in [("before", &before), ("after", &after)] {
         let hash = bytes.iter().fold(0xcbf29ce484222325u64, |hash, byte| {
             (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
@@ -1195,7 +1559,16 @@ fn gpu_rr_k1_timestamp_ab_ba() {
         ("water", water(0.0)),
         ("glass_mirror_chain", mirror_chain()),
     ] {
-        let mut fixture = Fixture::new(&context, &scene, [1920, 1080]);
+        let mut fixture = Fixture::with_features(
+            &context,
+            &scene,
+            [1920, 1080],
+            &InstanceScene {
+                epoch: scene.epoch,
+                ..Default::default()
+            },
+            motion_features,
+        );
         let current = camera();
         fixture
             .constants

@@ -64,9 +64,9 @@ final class SettingsTest {
                 RenderSettings.Control.BOUNCES, 12);
         String valid = SettingsFile.encode(changed);
         for (String broken : new String[] {
-                     valid.replace("version=5", "version=0"),
-                     valid.replace("version=5", "version=4"),
-                     valid.replace("version=5", "version=6"), valid.replace("version=5", ""),
+                     valid.replace("version=6", "version=0"),
+                     valid.replace("version=6", "version=5"),
+                     valid.replace("version=6", "version=7"), valid.replace("version=6", ""),
                      valid.replace("render.bounces=12", ""),
                      valid.replace("render.bounces=12", "render.bounces=65"),
                      valid.replace("terrain.batches_per_frame=8", ""),
@@ -120,6 +120,11 @@ final class SettingsTest {
         assertEquals(1, PrimeSettings.ray_reconstruction(view(bytes)));
         assertEquals(3, PrimeSettings.reconstruction_quality(view(bytes)));
         assertEquals(8, PrimeSettings.terrain_batches_per_frame(view(bytes)));
+        assertEquals(1f, PrimeSettings.stars(view(bytes)));
+        assertEquals(.6f, PrimeSettings.auto_exposure_compensation(view(bytes)));
+        assertEquals(0, PrimeSettings.hdr(view(bytes)));
+        assertEquals(0, PrimeSettings.hdr_reference_white(view(bytes)));
+        assertEquals(0, PrimeSettings.frame_generation(view(bytes)));
     }
     @Test
     void terrainBatchBudgetDefaultsRangePersistenceAndIndependentWire(@TempDir Path dir) {
@@ -138,18 +143,78 @@ final class SettingsTest {
                 changed.write(after, offline, RenderSettings.View.OUTPUT);
                 assertEquals(PrimeSettings.SIZE, after.position());
                 assertEquals(budget, PrimeSettings.terrain_batches_per_frame(view(after)));
-                assertArrayEquals(view(before)
-                                          .asSlice(0, PrimeSettings.SIZE - 4)
-                                          .toArray(java.lang.foreign.ValueLayout.JAVA_BYTE),
-                                  view(after)
-                                          .asSlice(0, PrimeSettings.SIZE - 4)
-                                          .toArray(java.lang.foreign.ValueLayout.JAVA_BYTE));
+                assertOnlyFieldChanged(before, after, 72);
             }
         }
         assertNotEquals(defaults, defaults.with(control, 1));
         assertEquals(8, defaults.value(control));
         assertThrows(IllegalArgumentException.class, () -> defaults.with(control, 0));
         assertThrows(IllegalArgumentException.class, () -> defaults.with(control, 129));
+    }
+    @Test
+    void matureDisplayControlsPreserveBoundsPersistenceAndIndependentAbiFields() {
+        var defaults = RenderSettings.defaults();
+        var controls = new RenderSettings.Control[] {
+                RenderSettings.Control.STARS, RenderSettings.Control.AUTO_EXPOSURE,
+                RenderSettings.Control.HDR, RenderSettings.Control.HDR_WHITE,
+                RenderSettings.Control.FRAME_GENERATION};
+        int[] offsets = {76, 80, 84, 88, 92};
+        int[] expectedDefaults = {100, 60, 0, 0, 0};
+        var before = settingsBuffer();
+        var after = settingsBuffer();
+        for (int i = 0; i < controls.length; i++) {
+            var control = controls[i];
+            assertEquals(expectedDefaults[i], defaults.value(control));
+            assertThrows(IllegalArgumentException.class,
+                         () -> defaults.with(control, control.minimum - 1));
+            assertThrows(IllegalArgumentException.class,
+                         () -> defaults.with(control, control.maximum + 1));
+            for (int value : new int[] {control.minimum, control.maximum, control.initial}) {
+                var changed = defaults.with(control, value);
+                assertEquals(changed, SettingsFile.decode(SettingsFile.encode(changed)).settings());
+                for (boolean offline : new boolean[] {false, true}) {
+                    defaults.write(before, offline, RenderSettings.View.OUTPUT);
+                    changed.write(after, offline, RenderSettings.View.OUTPUT);
+                    assertOnlyFieldChanged(before, after, offsets[i]);
+                    if (control == RenderSettings.Control.STARS)
+                        assertEquals(value / 100f, PrimeSettings.stars(view(after)));
+                    else if (control == RenderSettings.Control.AUTO_EXPOSURE)
+                        assertEquals(value / 100f,
+                                     PrimeSettings.auto_exposure_compensation(view(after)));
+                    else if (control == RenderSettings.Control.HDR)
+                        assertEquals(value, PrimeSettings.hdr(view(after)));
+                    else if (control == RenderSettings.Control.HDR_WHITE)
+                        assertEquals(value, PrimeSettings.hdr_reference_white(view(after)));
+                    else
+                        assertEquals(value, PrimeSettings.frame_generation(view(after)));
+                }
+            }
+            String valid = SettingsFile.encode(defaults);
+            for (String malformed :
+                 new String[] {valid.replace(control.key + "=" + control.initial + "\n", ""),
+                               valid.replace(control.key + "=" + control.initial,
+                                             control.key + "=" + (control.maximum + 1)),
+                               valid.replace(control.key + "=" + control.initial,
+                                             control.key + "=NaN")}) {
+                assertFalse(SettingsFile.decode(malformed).resetReason().isEmpty());
+            }
+        }
+        assertFalse(defaults.hdr());
+        assertFalse(defaults.frameGeneration());
+        assertTrue(defaults.with(RenderSettings.Control.HDR, 1).hdr());
+        assertTrue(defaults.with(RenderSettings.Control.FRAME_GENERATION, 1).frameGeneration());
+    }
+
+    private static void assertOnlyFieldChanged(ByteBuffer before, ByteBuffer after, long offset) {
+        // Check both sides: appended fields must not weaken the original independent byte oracle.
+        for (long[] slice :
+             new long[][] {{0, offset}, {offset + 4, PrimeSettings.SIZE - offset - 4}})
+            assertArrayEquals(view(before)
+                                      .asSlice(slice[0], slice[1])
+                                      .toArray(java.lang.foreign.ValueLayout.JAVA_BYTE),
+                              view(after)
+                                      .asSlice(slice[0], slice[1])
+                                      .toArray(java.lang.foreign.ValueLayout.JAVA_BYTE));
     }
     @Test
     void opacityMicromapIsEnabledByDefaultAndCanBePersistedAndToggled() {

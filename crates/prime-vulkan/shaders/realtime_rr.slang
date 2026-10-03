@@ -6,6 +6,7 @@ import "math/color.slang";
 import "reconstruct/rr_format.slang";
 import "reconstruct/rr_guides.slang";
 import "reconstruct/reflection_motion.slang";
+import "reconstruct/rr_status.slang";
 #include "atmosphere/aerial_bindings.slang"
 
 [[vk::binding(10, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> noisyColor;
@@ -21,7 +22,8 @@ import "reconstruct/reflection_motion.slang";
         return;
     float3 radiance = primeComposeRealtime(atmosphereAerial(), parameters, id.xy);
     // Complete scene-linear radiance and camera air segment precede reconstruction.
-    noisyColor[id.xy] = float4(primeRrFiniteHalfColor(workingToLinear709(radiance)), 1.0);
+    noisyColor[id.xy] = float4(primeRrFiniteHalfColor(workingToLinear709(radiance)),
+                               primeRrForeground(guideStatus[id.xy]) ? 1.0 : 0.0);
     float2 sampleUv = (float2(id.xy) + 0.5 + parameters.sample.xy) / float2(parameters.sampling.xy);
     primeCompleteReflectionMotion(rrCamera, id.xy, parameters.sampling.xy, sampleUv, guideStatus,
                                   specularMotion, linearDepth[id.xy], specularDistance[id.xy]);

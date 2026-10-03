@@ -9,11 +9,12 @@
 | [LabPBR 与 OpenPBR 支持子域](materials.md) | 源声明、规范通道、数值清洗、法线分布过滤、动画、完整模型的支持边界、保留的 LitePBR 近似与发光 |
 | [镂空表面 OMM](opacity-micromaps.md) | 二值优先的有限资源模板、共享资源代次与运行时绑定、未知退路、Vulkan 能力和完成证明 |
 | [大气资产与缓存](atmosphere.md) | 固定物理场、天空/太阳/空气透视、GPU 遮挡列与更新依赖 |
+| [星图、曝光与HDR显示](display.md) | 旧算法移植、测光与冻结、scRGB标定、UI覆盖及帧生成显示输入 |
 | [工程结构与路由边界](structure.md) | Rust crate、Java 版本适配、公共层依赖、Rust 版本适配、分页路由与矩形分解边界 |
 | [源路由边界与批量数据流](capture-boundaries.md) | 外观描述与下游计算的分界、接管后的 Java 截断、兼容范围、缓存与接入状态 |
 | [全局空间网格与几何合批](spatial-batching.md) | 4×4×4 区块段对齐、翻译层归属、静态/动态分离及未来光源树边界 |
 | [设置与渲染模式](renderers.md) | 当前配置版本、冻结快照、互斥资源、实时噪声与深度/法线诊断 |
-| [Streamline 与 DLSS RR](reconstruction.md) | preset F、超分档位、重建输入、Present、历史与 GPU 完成证明 |
+| [Streamline、DLSS RR与帧生成](reconstruction.md) | preset F、超分档位、动态前态、重建与插帧输入、Present及完成证明 |
 | [FFM ABI](abi.md) | 生成的 C/FFM 结构、批量数组、输入验证与借用、宿主 Vulkan 接口 |
 | [宿主 Vulkan 流水线](pipeline.md) | 设备协商、直接输出、命令提交、同步、手部与 HUD 合成 |
 | [Slang 数学基础与显示策略](shaders.md) | 模块边界、OpenPBR 支持子域与 LitePBR 参考、可替换的 primeDRT、颜色空间、Z-Sobol、求交误差与尺寸历史 |

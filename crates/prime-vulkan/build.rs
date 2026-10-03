@@ -53,6 +53,30 @@ fn main() {
     compile(&compiler, "shaders/realtime.slang", "realtime.spv");
     compile(&compiler, "shaders/realtime_rr.slang", "realtime_rr.spv");
     compile(&compiler, "shaders/rr_display.slang", "rr_display.spv");
+    compile(
+        &compiler,
+        "shaders/realtime_linear.slang",
+        "realtime_linear.spv",
+    );
+    compile(&compiler, "shaders/rr_linear.slang", "rr_linear.spv");
+    compile(
+        &compiler,
+        "shaders/display/from_linear.slang",
+        "display_from_linear.spv",
+    );
+    compile(&compiler, "shaders/display/stars.slang", "stars.spv");
+    for name in [
+        "exposure_histogram",
+        "exposure_update",
+        "hdr_present",
+        "frame_generation_present",
+    ] {
+        compile(
+            &compiler,
+            &format!("shaders/display/{name}.slang"),
+            &format!("{name}.spv"),
+        );
+    }
     if env::var_os("CARGO_FEATURE_LIGHT_SAMPLING_BENCH").is_some() {
         compile(
             &compiler,

@@ -7,6 +7,7 @@
 | `math/color.slang` | sRGB 传递函数、线性 BT.709 ↔ Rec.2020（D65）、工作空间亮度；无资源依赖 |
 | `math/z_sobol.slang` | Z-order + 二维 Sobol + FastOwen；无纹理、表、64 位整数算术或隐式随机状态 |
 | `math/ray_offset.slang` | 三角形交点重建、误差界与双侧安全起点；无资源依赖 |
+| `math/rigid_motion.slang` | 已证明同一有序局部几何的前帧仿射命中重建；不含安全起点偏移或未知形变对应 |
 | `math/transport.slang` | 面积 PDF、MIS、稳定乘除、Beer、eta 补偿及 roulette；无资源依赖 |
 | `bsdf/common/` | 材质值类型、事件 flags、默认初始化、坐标框架、标量数学与内部介质栈；无闭包或纹理资源 |
 | `bsdf/full/` | 旧完整 OpenPBR 数学的 opaque/solid/thin 支持子域、显式 energy 资源接口与生产窄构造 |
@@ -20,6 +21,12 @@
 | `grid_sampling.slang` | 生产固定单级局部 alias、全局退路及正反向混合 PDF，无资源绑定 |
 | `light_sampling.slang` | 显式采样实验保留的 32B 功率树节点与选择，无资源绑定 |
 | `display/prime_drt.slang` | 当前可替换的显示策略；显式显示变换与艺术调整，只依赖颜色数学库 |
+| `display/exposure.slang`、`display/hdr.slang` | 曝光/适应、extended-sRGB EOTF、source-over界面合成与coverage数学；无资源绑定 |
+| `display/exposure_histogram.slang`、`display/exposure_update.slang` | 线性image/BDA histogram和设备端16B曝光状态更新 |
+| `display/from_linear.slang` | 线性image/BDA最终显示；SDR/HDR参数分开，手动×自动曝光一次，按需保留baseline |
+| `display/stars.slang` | RR原生输出分辨率星图合成；实际前景位/coverage、未jitter方向、球面滤波 |
+| `display/hdr_present.slang`、`display/frame_generation_present.slang` | HDR/UI线性scRGB呈现及HDR/SDR FG HUDless与R8界面coverage输出 |
+| `atmosphere/celestial.slang`、`atmosphere/starmap_filter.slang` | 天文帧、赤经缝、椭圆footprint与coverage数学；不绑定资产 |
 | `trace/closest.slang` | 最近交点、表面/纹理/光学端点与 coverage；K1只消费此查询模块 |
 | `ray_query.slang` | 阴影、灯采样与最近交点兼容门面；依赖起点和颜色数学库 |
 | `frame.slang`、`realtime/*_parameters.slang` | Offline 原帧参数与 K1/K2/post 各自的 push 类型，无全局绑定 |
@@ -33,7 +40,8 @@
 | `realtime.slang`、`realtime_rr.slang` | raw后处理显示、RR线性输入合成入口；不执行射线查询 |
 | `reconstruct/primary_guides.slang`、`reconstruct/primary_psr.slang` | 主表面提升、仿射PSR、独立反射guide与各分支完成状态 |
 | `reconstruct/reflection_motion.slang`、`reconstruct/rr_guides.slang` | 输入像素单位运动、普通粗糙反射的距离代理与全图specular motion补全；无射线查询 |
-| `rr_display.slang` | 输出分辨率RR显示；失败或未解析guide采样足迹使用当前raw，无CPU图像传递 |
+| `reconstruct/visible_guides.slang` | FG真实第一可见界面的device depth；不使用RR的PSR提升终点代替首界面 |
+| `rr_display.slang`、`rr_linear.slang` | 输出分辨率RR显示/FP32线性selector；失败或未解析guide足迹使用当前raw，非有限alpha保守为前景 |
 
 库不声明描述符、push constant 或全局可变状态，不通过 DCE 消除不需要的资源。入口按阶段显式传入场景、OpenPBR energy 或显示资源；私有辅助函数保持模块可见，只公开跨模块所需类型、字段和函数。大气物理库显式接收 `AtmModel`；K1/K2消费窄 `AtmLighting`，post消费 `AtmAerial`，Offline保留 `AtmEnvironment`；绑定与极线 groupshared 工作区只存在于入口或入口专用 include。构建跟踪整个 shader 目录，修改被导入模块也必须重新编译。
 
@@ -49,11 +57,11 @@
 
 `primeDRT` 沿用旧 Prime 的 RGB Reinhard DRT：曝光、Rec.2020 → BT.709、虚拟 RGB 色域压缩、分段有理曲线、逆压缩、保留负 outset 的 sRGB 编码、HSV 色相与饱和补偿、输出峰值裁剪。不是逐通道 `x/(1+x)`。
 
-保留旧代码中实际变化的输入：曝光乘数（可含未来自动曝光结果）、输出 headroom、色相补偿 `[0,1]`、饱和度补偿 `[0,0.5]`。默认分别为 `1 / 1 / 0.75 / 0.08`。Rust `PrimeDrtSettings::prepare` 根据 headroom 推导曲线渐近峰与编码输出峰；这些派生值不作为独立美术旋钮，在配置变化时计算。`Renderer::set_prime_drt` 调整当前 SDR 显示参数而不清空线性历史。
+保留旧代码中实际变化的输入：曝光乘数（手动×设备端自动曝光）、输出 headroom、色相补偿 `[0,1]`、饱和度补偿 `[0,0.5]`。默认分别为 `1 / 1 / 0.75 / 0.08`。Rust `PrimeDrtSettings::prepare` 根据 headroom 推导曲线渐近峰与编码输出峰；这些派生值不作为独立美术旋钮，在配置变化时计算。`Renderer::set_prime_drt` 调整当前 SDR 显示参数而不清空线性历史。
 
 固定常量保留旧值：neutral 权重 `(0.2120053547549465, 0.3921825078090138, 0.3958121374360396)`、虚拟色域压缩 `0.04`、曲线起点 `0.18`、单位起始斜率和 `+8 EV` 高光范围。旧固定曝光系数是 `1`，直接消去。倒数形式保留，避免极亮输入产生大的最终除数。
 
-当前宿主目标仍为 `RGBA8_UNORM`，输出已编码 sRGB、alpha=1；后续宿主手部/HUD 合成沿用现有契约，不执行第二次 sRGB 编码。生产固定 SDR headroom=1；保留并测试 HDR 数学参数不表示已实现 HDR surface、校准或呈现。游戏内设置与 FFM 控制见 [渲染模式](renderers.md)；自动曝光尚未接入。NaN/Inf 输入按旧入口置黑；负颜色在旧算法规定的位置处理。
+SDR世界仍写宿主 `RGBA8_UNORM`，已编码sRGB；启用HDR或实际FG时alpha=0以记录后续手部/HUD coverage，否则alpha=1。HDR保留FP16 extended-sRGB world与独立SDR baseline，宿主选择和Windows P/W标定成功后，在界面完成时做EOTF与W/80 scRGB呈现。需要曝光/HDR/FG或RR星图时使用显式线性display入口，关闭这些功能时保留原直接显示；诊断视图不走曝光/星图/FG。自动曝光、HDR、星图合成、buffer/image读取与成本详见[显示契约](display.md)，游戏内设置与FFM控制见[渲染模式](renderers.md)。NaN/Inf辐射亮度输入置黑；负颜色在旧算法规定的位置处理。
 
 ## 采样域
 
@@ -97,4 +105,4 @@ Offline 保持逐样本在线均值、原 sequence 与随机域。当前单样�
 
 PBR 检查分别覆盖 LitePBR sample/evaluate/PDF、delta/TIR/薄壁与数值清洗，以及实际纹理描述符、规范通道、法线分布、动画、atlas lookup 和发光消费。窄delta/guide夹具对拍Full入口，检查整闭包分类、0.5条件估计器期望、same-event方向逐分量数值精确相等和窄albedo；正负零位差单独统计，不使用误差容忍。K1夹具另检查照明终止后guide继续、预算末步/耗尽与PSR边界；生产RR图像夹具读回真实格式通道，检查固定相机/jitter时跨照明种子的稳定性，以及相机运动、双分支完成状态和post补全。底层闭包数学、资源翻译和生产输运是不同验证层；单个数值域或无窗口夹具不能外推完整游戏材质和帧率。
 
-测试入口的读回只用于无窗口行为验证，不进入游戏流水线。它们不替代两版 Minecraft 的窗口/全屏/HUD 验收。操作入口见 [CONTRIBUTING](../CONTRIBUTING.md)。
+显示无窗口夹具另执行生产FP32 RR selector→BC6H星图、image/BDA曝光与显示、HDR合成及两种FG HUDless/mask输出，核对独立数学参考和实际像素/同步；不等于已经验证真实显示器亮度或SDK帧生成Present。测试入口的读回只用于无窗口行为验证，不进入游戏流水线。它们不替代两版 Minecraft 的窗口/全屏/HUD 验收。操作入口见 [CONTRIBUTING](../CONTRIBUTING.md)。

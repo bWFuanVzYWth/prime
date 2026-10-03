@@ -2,6 +2,7 @@
 module "trace/closest.slang";
 import "math/ray_offset.slang";
 import "math/color.slang";
+import "math/rigid_motion.slang";
 import "model/material/labpbr.slang";
 import "model/material/medium.slang";
 import "service/material/normal_mapping.slang";
@@ -11,6 +12,7 @@ import "service/material/normal_mapping.slang";
 // 0: ordinary; 1: repeats/emission; 2: compound records and sprite sampling.
 [[vk::constant_id(0)]] public const uint surfaceFeatures = 2;
 [[vk::constant_id(2)]] public const uint opticalFeatures = 1;
+[[vk::constant_id(3)]] public const uint motionFeatures = 0;
 
 // GPU records are shared with Rust. Only entry points assign descriptor bindings.
 public struct Triangle {
@@ -34,6 +36,9 @@ public struct InstanceMaterial {
     uint reserved1;
     uint reserved2;
     float4 uv;
+    float4 previous0;
+    float4 previous1;
+    float4 previous2;
 };
 public struct SurfaceRecord {
     public Triangle triangle;
@@ -70,9 +75,9 @@ public struct TraceScene {
 };
 public struct SurfaceHit {
     public bool found;
-    // Only static section geometry has a known world-space previous position. Dynamic
-    // instances and captured meshes currently carry no previous-pose/vertex correspondence.
-    public bool staticGeometry;
+    public bool staticGeometry; // Moving optical interface planes remain unsupported.
+    public bool previousPositionKnown;
+    public float3 previousPosition;
     public SurfacePoint surface;
     public float4 sourceColor;
     public float3 emission;
@@ -477,6 +482,17 @@ public SurfaceHit traceClosest(TraceScene resources, float3 origin, float3 direc
             boundary.triangle.p0.xyz = record.triangle.p0.xyz;
             boundary.triangle.p1.xyz = record.triangle.p1.xyz;
             boundary.triangle.p2.xyz = record.triangle.p2.xyz;
+        }
+        hit.previousPosition = hit.surface.position;
+        hit.previousPositionKnown = (instance & 0x00800000) == 0;
+        if (motionFeatures != 0 && !hit.previousPositionKnown) {
+            InstanceMaterial placement = resources.instanceMaterials[instance & 0x007fffff];
+            if ((placement.reserved0 & 1u) != 0) {
+                hit.previousPosition = primeRigidPreviousPosition(
+                        tri.p0.xyz, tri.p1.xyz, tri.p2.xyz, bary,
+                        float3x4(placement.previous0, placement.previous1, placement.previous2));
+                hit.previousPositionKnown = true;
+            }
         }
         float footprint = (coneWidth + coneSpread * distance) /
                           max(abs(dot(hit.surface.normal, direction)), 0.05);

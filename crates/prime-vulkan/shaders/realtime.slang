@@ -6,13 +6,20 @@ import "display/prime_drt.slang";
 import "math/color.slang";
 #include "atmosphere/aerial_bindings.slang"
 
+#if PRIME_LINEAR_OUTPUT
+[[vk::binding(4, 0)]] [[vk::image_format("rgba32f")]] RWTexture2D<float4> outputImage;
+#else
 [[vk::binding(4, 0)]] [[vk::image_format("rgba8")]] RWTexture2D<float4> outputImage;
+#endif
 [[vk::push_constant]] ConstantBuffer<PostParameters> parameters;
 
 [shader("compute")][numthreads(8, 8, 1)] void main(uint3 id : SV_DispatchThreadID) {
     if (any(id.xy >= parameters.sampling.xy))
         return;
     float3 radiance = primeComposeRealtime(atmosphereAerial(), parameters, id.xy);
+#if PRIME_LINEAR_OUTPUT
+    outputImage[id.xy] = float4(radiance, 1);
+#else
     PrimeDRTParameters display = {parameters.display.x, parameters.display.y, parameters.display.z,
                                   parameters.display.w, parameters.extra.x};
     float3 value;
@@ -38,4 +45,5 @@ import "math/color.slang";
     uint2 targetPixel =
             uint2(id.x, parameters.output.z != 0 ? parameters.output.y - 1 - id.y : id.y);
     outputImage[targetPixel] = float4(float3(encoded) / 255.0, 1);
+#endif
 }

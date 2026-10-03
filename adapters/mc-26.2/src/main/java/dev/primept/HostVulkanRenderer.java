@@ -22,11 +22,16 @@ public final class HostVulkanRenderer implements AutoCloseable {
     private static final long RETIRE_TIMEOUT_NANOS = 5_000_000_000L;
     // A failed retirement is terminal. Keep one owner alive; never accumulate sessions after failures.
     private static NativeBridge retainedBridge;
+    private static HostVulkanRenderer submissionOwner;
     private static Throwable retirementFailure;
     private final NativeBridge bridge;
     private final VulkanCommandEncoder encoder;
     private boolean closed;
     private boolean retired;
+    private long pendingTemporalSerial;
+    private long presentationSerial;
+    private dev.primept.display.HdrOutput.Calibration appliedCalibration;
+    private int appliedReferenceWhite = -1;
     private long readinessGeneration;
     private boolean completedWorldFrame;
     private RenderSettings appliedSettings;
@@ -52,6 +57,10 @@ public final class HostVulkanRenderer implements AutoCloseable {
             appliedSettings = initialSettings;
             appliedView = initialView;
             prepareResources();
+            if (submissionOwner != null)
+                throw new IllegalStateException(
+                        "Another host renderer still owns submission history");
+            submissionOwner = this;
         } catch (RuntimeException | Error failure) {
             try {
                 submitAndAwait(encoder);
@@ -155,6 +164,110 @@ public final class HostVulkanRenderer implements AutoCloseable {
             retainedBridge = bridge;
     }
 
+    public static void shutdownHostDevice() {
+        var owner = submissionOwner;
+        if (owner != null)
+            owner.close();
+        requireRetirementResolved();
+    }
+
+    public static boolean frameGenerationRequested() {
+        var owner = submissionOwner;
+        return owner != null && !owner.closed && !owner.offline && owner.appliedSettings != null &&
+                owner.appliedSettings.frameGeneration() &&
+                owner.appliedSettings.rayReconstruction() &&
+                owner.appliedView == RenderSettings.View.OUTPUT &&
+                !PrimeClient.offlineRequested() && !PrimeClient.offlineActive();
+    }
+
+    public static void beginPresentationFrame() {
+        if (submissionOwner != null)
+            submissionOwner.presentationSerial = 0;
+    }
+
+    /** Returns false when this frame has no PT world result; the surface converts vanilla itself. */
+    public static boolean presentSurface(Object encoder, long command, long uiImage, long uiView,
+                                         long outputImage, long outputView, long serial, int width,
+                                         int height, boolean hdr, int backBufferCount,
+                                         int backBufferFormat) {
+        var owner = submissionOwner;
+        if (owner == null || owner.closed || owner.encoder != encoder ||
+            owner.presentationSerial != serial)
+            return false;
+        try {
+            if (hdr)
+                owner.bridge.presentHdr(command, uiImage, uiView, outputImage, outputView, serial,
+                                        width, height);
+            if (StreamlineFrames.active()) {
+                boolean prepared = owner.bridge.prepareFrameGeneration(
+                        command, uiImage, uiView, outputImage, outputView, serial, width, height,
+                        backBufferCount, backBufferFormat);
+                StreamlineFrames.prepared(prepared);
+            }
+            return hdr;
+        } catch (RuntimeException | Error failure) {
+            submissionFailed(encoder, failure);
+            throw failure;
+        }
+    }
+
+    /** Native surface views retire directly after the current host submission completes. */
+    public static void retireSurfaceResources(VulkanCommandEncoder encoder, Runnable release) {
+        requireRetirementResolved();
+        try {
+            StreamlineFrames.suspend();
+            submitAndAwait(encoder);
+            release.run();
+        } catch (RuntimeException | Error failure) {
+            blockRetirement(null, failure);
+            throw failure;
+        }
+    }
+
+    private void updateDisplayOutput() {
+        var calibration = dev.primept.display.HdrOutput.activeCalibration();
+        int reference = dev.primept.display.HdrOutput.referenceWhiteNits();
+        if (!calibration.equals(appliedCalibration) || reference != appliedReferenceWhite) {
+            bridge.displayOutput(
+                    calibration.active(), calibration.maximumNits(),
+                    dev.primept.display.HdrOutput.capability().supported()
+                            ? dev.primept.display.HdrOutput.capability().systemReferenceWhiteNits()
+                            : calibration.referenceWhiteNits());
+            appliedCalibration = calibration;
+            appliedReferenceWhite = reference;
+        }
+    }
+
+    /** Called only after Submission.close successfully queued this exact ordered submission. */
+    public static void submissionAccepted(Object encoder, long serial) {
+        var owner = submissionOwner;
+        if (owner == null || owner.encoder != encoder || owner.pendingTemporalSerial == 0)
+            return;
+        try {
+            if (owner.pendingTemporalSerial != serial)
+                throw new IllegalStateException(
+                        "Host submission does not match the pending temporal frame");
+            owner.bridge.submissionAccepted(serial);
+            owner.pendingTemporalSerial = 0;
+        } catch (RuntimeException | Error failure) {
+            submissionFailed(encoder, failure);
+            throw failure;
+        }
+    }
+
+    public static void surfaceFailed(Throwable failure) {
+        blockRetirement(null, failure);
+    }
+
+    /** A queue/record failure gives no cancellation proof: retain the owner and forbid reuse. */
+    public static void submissionFailed(Object encoder, Throwable failure) {
+        var owner = submissionOwner;
+        if (owner == null || owner.encoder != encoder)
+            return;
+        owner.closed = true;
+        blockRetirement(owner.bridge, failure);
+    }
+
     public NativeBridge sourceBridge() {
         return bridge;
     }
@@ -251,13 +364,24 @@ public final class HostVulkanRenderer implements AutoCloseable {
         long submitValue =
                 ((VulkanCommandEncoderAccessor)(Object)encoder).primept$currentSubmitIndex();
         lastCpuSerial = submitValue;
-        bridge.record(command.address(), texture.vkImage(), view.vkImageView(), submitValue);
-        int status = VK10.vkEndCommandBuffer(command);
-        if (status != VK10.VK_SUCCESS)
-            throw new IllegalStateException("Cannot finish native render command buffer: " +
-                                            status);
-        // execute preserves the vanilla terrain -> PT -> hand/HUD ordering; the host submits once normally.
-        encoder.execute(command);
+        try {
+            if (pendingTemporalSerial != 0)
+                throw new IllegalStateException(
+                        "The preceding temporal frame has not been submitted");
+            updateDisplayOutput();
+            bridge.record(command.address(), texture.vkImage(), view.vkImageView(), submitValue);
+            int status = VK10.vkEndCommandBuffer(command);
+            if (status != VK10.VK_SUCCESS)
+                throw new IllegalStateException("Cannot finish native render command buffer: " +
+                                                status);
+            // execute only appends commands. Submission.close is the actual queue acceptance boundary.
+            encoder.execute(command);
+            pendingTemporalSerial = submitValue;
+            presentationSerial = submitValue;
+        } catch (RuntimeException | Error failure) {
+            submissionFailed(encoder, failure);
+            throw failure;
+        }
     }
 
     @Override
@@ -272,6 +396,8 @@ public final class HostVulkanRenderer implements AutoCloseable {
             submitAndAwait(encoder);
             bridge.close();
             retired = true;
+            if (submissionOwner == this)
+                submissionOwner = null;
         } catch (RuntimeException | Error failure) {
             blockRetirement(bridge, failure);
             throw failure;

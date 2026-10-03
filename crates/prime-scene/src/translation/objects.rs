@@ -361,6 +361,11 @@ impl Planner {
         &self.placements.values[slot]
     }
 
+    /// Stable host instance identity; raw batches have no temporal correspondence.
+    pub fn placement_instance_id(&self, slot: usize) -> Option<u64> {
+        self.placements.instance_id(slot)
+    }
+
     /// Membership is retained independently of compact executor slots.
     pub fn instance_cells(&self) -> impl Iterator<Item = (Cell, &std::collections::BTreeSet<u64>)> {
         self.placements.cells.iter().map(|(&cell, ids)| (cell, ids))

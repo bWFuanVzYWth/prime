@@ -1,10 +1,12 @@
 //! Persistent prototype/bucket BLAS and shared shading arenas.
+#[path = "object_motion.rs"]
+mod motion;
 use crate::cpu_profile::{FrameCpu, Stage};
 use crate::dynamic::slot_buffer;
 use crate::material_arena::{Allocation, MaterialArena};
 use crate::plan::{
-    INHERIT, MAX_MATERIAL_RECORDS, OBJECT_BIT, ObjectKey, Planner, ScenePlan, arena_capacity,
-    pack_material, validate_material_count,
+    INHERIT, MATERIAL_BYTES, MAX_MATERIAL_RECORDS, OBJECT_BIT, ObjectKey, Planner, ScenePlan,
+    arena_capacity, pack_material, validate_material_count,
 };
 use crate::resources::{Acceleration, Buffer, Context, PreparedAcceleration};
 use crate::textures::Textures;
@@ -44,6 +46,9 @@ pub(crate) struct Objects {
     // Acceleration objects retire before their arena and shared index input.
     objects: BTreeMap<ObjectKey, Object>,
     planner: Planner,
+    motion: motion::History,
+    motion_enabled: bool,
+    anchor: [f64; 3],
     materials: MaterialArena,
     indices: Buffer,
     pub metadata: Buffer,
@@ -78,11 +83,14 @@ impl Objects {
                 triangles: MAX_MATERIAL_RECORDS,
                 placements: OBJECT_BIT - 1,
             })?,
+            motion: motion::History::default(),
+            motion_enabled: false,
+            anchor: [0.0; 3],
             materials: MaterialArena::with_stride(crate::packing::stride(0) as u64),
             indices: index_buffer_with_stride(context, 16, 11)?,
             metadata: Buffer::new(
                 context,
-                48,
+                MATERIAL_BYTES,
                 vk::BufferUsageFlags::STORAGE_BUFFER
                     | vk::BufferUsageFlags::TRANSFER_DST
                     | vk::BufferUsageFlags::TRANSFER_SRC,
@@ -112,7 +120,29 @@ impl Objects {
         cpu: &mut FrameCpu,
     ) -> Result<ObjectChanges, String> {
         let started = cpu.start();
-        let plan = self.planner.plan(scene, source)?;
+        let mut plan = self.planner.plan(scene, source)?;
+        self.anchor = scene.anchor;
+        if self.motion_enabled {
+            self.motion.prepare(&self.planner, &plan, source, scene);
+            for &slot in self.motion.rows() {
+                plan.changes
+                    .push(prime_scene::translation::PlacementChange {
+                        slot,
+                        transform: false,
+                        material: true,
+                    });
+            }
+            plan.changes.sort_unstable_by_key(|change| change.slot);
+            plan.changes.dedup_by(|next, previous| {
+                if next.slot != previous.slot {
+                    return false;
+                }
+                previous.transform |= next.transform;
+                previous.material |= next.material;
+                true
+            });
+            self.motion.clear_rows();
+        }
         cpu.finish(Stage::Plan, started);
         let started = cpu.start();
         // Material-only placement edits can change ray coverage without changing
@@ -146,7 +176,7 @@ impl Objects {
         self.occlusion_changed = plan.tlas_changed;
         self.tlas_update = plan.geometry.is_empty() && plan.removed.is_empty();
         self.changed_instances.clear();
-        if plan.geometry.is_empty() && plan.removed.is_empty() && !plan.placements_changed {
+        if plan.geometry.is_empty() && plan.removed.is_empty() && plan.changes.is_empty() {
             return Ok(false);
         }
         for key in &plan.removed {
@@ -259,7 +289,7 @@ impl Objects {
         self.tlas_update &= count == self.instances.len();
         self.occlusion_materials
             .resize(count, OcclusionMaterial::default());
-        let metadata_bytes = (count as u64 * 48).max(48);
+        let metadata_bytes = (count as u64 * MATERIAL_BYTES).max(MATERIAL_BYTES);
         let metadata_grown = metadata_bytes > self.metadata.size;
         if metadata_grown {
             let next = Buffer::new(
@@ -331,19 +361,20 @@ impl Objects {
                     self.materials.address(object.allocation),
                     texture,
                     placement,
+                    self.motion.previous(index, self.anchor),
                 );
                 let regions = copies.entry(self.metadata.buffer).or_default();
-                let dst = index as u64 * 48;
+                let dst = index as u64 * MATERIAL_BYTES;
                 if let Some(last) = regions.last_mut().filter(|last| {
                     last.src_offset + last.size == offset && last.dst_offset + last.size == dst
                 }) {
-                    last.size += 48;
+                    last.size += MATERIAL_BYTES;
                 } else {
                     regions.push(
                         vk::BufferCopy::default()
                             .src_offset(offset)
                             .dst_offset(dst)
-                            .size(48),
+                            .size(MATERIAL_BYTES),
                     );
                 }
             }
@@ -462,6 +493,22 @@ impl Objects {
                 .release_scratch(builds);
         }
         Ok(bindings)
+    }
+
+    pub fn set_motion_enabled(&mut self, enabled: bool) {
+        if self.motion_enabled != enabled {
+            self.motion = motion::History::default();
+            self.motion_enabled = enabled;
+        }
+    }
+
+    /// Only an actual ordered submission promotes a prepared rigid pose to history.
+    pub fn commit_motion(&mut self) {
+        self.motion.commit();
+    }
+
+    pub fn reset_motion(&mut self) {
+        self.motion.reset();
     }
 
     #[cfg(test)]

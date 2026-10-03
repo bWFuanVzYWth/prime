@@ -4,11 +4,11 @@
 
 ## 源边界与默认值
 
-两个 Java 适配器在 `LevelExtractor.extract` 的天空源准备点读取相机 `EnvironmentAttributeProbe` 的 `SUN_ANGLE`，使用宿主相同的 partial tick 插值与角度到弧度转换，存入 `skyRenderState.sunAngle` 后连同相机绝对位置发包。Prime 接管时跳过原版天空的其余提取，不依赖只在原版 `addSkyPass` 中惰性创建的 `SkyRenderer`，也不重复求值太阳属性；切回原版则恢复原调用。ABI v8 的96字节 `PrimeFrame` 通过具名 `solar_hour_angle` 字段传递 f32 太阳时角，单位弧度。`prime_minecraft` 解释时角，使用 Rust 的 `SolarOrbit` 按观测纬度、太阳黄经和旧轴倾角 23.43928°产生方向；默认纬度 30°、黄经 0°；`prime_scene::Environment` 只包含世界高度和单位太阳方向。Rust 负责失效与 GPU 调度。离线冻结同时冻结时角、纬度/季节、世界高度和视角。观测纬度范围 -90°…90°，太阳黄经范围 0°…359°；0/90/180/270° 对应春分/夏至/秋分/冬至（北半球）。季节沿用旧版手动控制，与游戏天数独立。纬度和赤纬的常量只在设置变化时由 CPU 准备，每帧只计算实际时角。
+两个 Java 适配器在 `LevelExtractor.extract` 的天空源准备点读取相机 `EnvironmentAttributeProbe` 的 `SUN_ANGLE`，使用宿主相同的 partial tick 插值与角度到弧度转换，存入 `skyRenderState.sunAngle` 后连同相机绝对位置发包。Prime 接管时跳过原版天空的其余提取，不依赖只在原版 `addSkyPass` 中惰性创建的 `SkyRenderer`，也不重复求值太阳属性；切回原版则恢复原调用。96字节 `PrimeFrame` 通过具名 `solar_hour_angle` 字段传递 f32 太阳时角，单位弧度。`prime_minecraft` 解释时角，使用 Rust 的 `SolarOrbit` 按观测纬度、太阳黄经和旧轴倾角 23.43928°产生方向；默认纬度 30°、黄经 0°；`prime_scene::Environment` 只包含世界高度和单位太阳方向。Rust 负责失效与 GPU 调度。离线冻结同时冻结时角、纬度/季节、世界高度和视角。观测纬度范围 -90°…90°，太阳黄经范围 0°…359°；0/90/180/270° 对应春分/夏至/秋分/冬至（北半球）。季节沿用旧版手动控制，与游戏天数独立。纬度和赤纬的常量只在设置变化时由 CPU 准备，每帧只计算实际时角。
 
 默认值保持地面半径 6360 km、大气顶 6480 km、世界 Y=-64 对应物理高度 300 m、世界单位 1 m、气溶胶密度倍率 1、太阳角半径 0.00471 rad、外太空太阳积分强度 12.5。世界高度到 f32 半径的转换点和大气内 clamp 与旧版相同。颜色输运使用 450/510/580/650 nm 四个采样点，最终为线性 Rec.2020；这仍是拟合近似。
 
-物理介质和高度映射固定为上述调优配置；设置页的光照组提供纬度和太阳黄经。气溶胶编辑器、天气、月亮、星空和维度专属天空尚未接入。透明物体仍采用当前场景的 coverage 语义，不包含旧材质系统的折射与体积吸收；不能因此声明旧版所有场景外观已经等价。
+物理介质和高度映射固定为上述调优配置；设置页的光照组提供纬度和太阳黄经。气溶胶编辑器、天气、月亮和维度专属天空尚未接入。星图沿用旧 Prime 的天文投影与固定 NASA 资产，原版几何星星提取在接管后跳过。光学边界的折射、Beer 与未知 coverage 支持各自的显式范围，见[材质契约](materials.md)；这些能力不能外推为旧版所有场景外观等价。
 
 ## 资产
 
@@ -18,6 +18,14 @@
 - `assets/atmosphere/default.safetensors`：八轮、每状态 1536 个入射方向求解后的 optical depth、归一化 scattering source、incident mean、ground radiance、Rayleigh moments。前两者 f16，其余 f32，尺寸与旧版一致。
 
 两份资产编入 native 库，启动只校验和上传，不重新运行多散射求解器。运行时将命名介质数组按固定 GPU 布局连接一次；shader 不解析容器、没有运行时解压。离线工具按原计算依赖生成资产，工具特性不编入默认发行路径。再生成命令见 [CONTRIBUTING](../CONTRIBUTING.md#大气资产与无窗口验证)。
+
+## 星图资产与天空消费
+
+`assets/starmap/` 保留 NASA Deep Star Maps 2020 的 16K ICRF/J2000 星图与15层球面立体角加权 mip。BC6H资产已在离线工具中按旧源线性sRGB解释转换为D65线性Rec.2020；直接上传，无运行时转码或重复色域转换。原始EXR未声明primaries/white point，来源/编码/hash与独立credit见[manifest](../crates/prime-vulkan/assets/starmap/starmap_2020_16k.json)和[NASA声明](../licenses/NASA-DEEP-STAR-MAPS-2020-NOTICE.md)。完整链170.67MiB GPU常驻，初始化decoded CPU单stripe最多32MiB，全部170.67MiB staging可保留至完成；上传owner遵守独立fence或宿主serial回收。
+
+`AtmLighting`/`AtmEnvironment` 显式接收星图sampler与纬度、季节和scale常量。`atmSky` 返回大气天空×sky强度加星图LOD0×方向透射×`0.025×stars`，星光与sky强度独立，地球遮挡为零。纬度和太阳黄经沿用同一观测配置；星图的恒星时相位由当前太阳方向和太阳赤经得到，赤经缝使用wrap。
+
+raw、Offline和反射/折射后续miss在环境终点消费星图。RR仅第一相机射线直接miss省略星图，随后在重建后的原生输出分辨率用未jitter方向、最多8tap/mip滤波合成；真实首命中前景位、重建alpha和guide完成状态分别保持身份。该后合成不替代路径内的星光。合成顺序、coverage、滤波近似与显存/分发成本集中维护在[显示契约](display.md)。星图不会使现有SkyView/Aerial资源失效或改变太阳采样/PDF。
 
 ## 更新依赖
 

@@ -34,6 +34,13 @@ pub(super) struct Placements {
 }
 
 impl Placements {
+    pub fn instance_id(&self, slot: usize) -> Option<u64> {
+        match self.identities.get(slot)? {
+            Identity::Instance(id) => Some(*id),
+            Identity::Raw(_) => None,
+        }
+    }
+
     pub fn source(&self, id: u64) -> Option<&Instance> {
         self.members.get(&id).map(|m| &m.source)
     }

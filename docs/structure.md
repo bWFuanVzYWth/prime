@@ -22,7 +22,7 @@ crates/
 
 `prime_engine → prime_minecraft → prime_scene` 构成地形源输入链，`prime_engine → prime_vulkan → prime_scene` 承担渲染。`prime_abi` 不依赖业务 crate，C 头同时生成 Rust DTO 与 Java FFM；MC 适配 crate 不依赖 JVM、Fabric 或 Vulkan，只解释由宿主转录的版本化字段；它向场景核心交付闭合的 `CompiledSection`。GPU 不认识 section 或 MC 枚举。
 
-一个 `TerrainContext` 管理一个 renderer 的世界/资源世代、活动窗口、压缩源缓存、资源表和共享 session CPU 池的引用。没有全局异步队列、Java compiler 池或逐体素反向调用。每帧一批请求和一批响应；响应借用结束前全部 worker join。静态地形4³合批、动态分桶和 GPU 生命周期继续由原来的场景/渲染上下文负责。
+一个 `TerrainContext` 管理一个 renderer 的世界/资源世代、活动窗口、压缩源缓存、资源表和共享 session CPU 池的引用。没有全局异步队列、Java compiler 池或逐体素反向调用。section 源每帧一批请求和一批响应，颜色与群系是按需的显式批次；响应借用结束前全部 worker join。静态地形4³合批、动态分桶和 GPU 生命周期继续由原来的场景/渲染上下文负责。
 
 Java `ExclusiveTerrainCapture` 转录宿主事件并响应请求，`SectionSources` 转录 palette、bit storage 和已烘焙资源字段，不逐位置选择模型、求 tint、剔面或展开几何。它保留资源身份到协议 ID 的关联，实际模型字典与源缓存由 Rust 持有。原先的 `TerrainRouter` / `FluidRouter` 只保留在 CPU 测试源集中，作为旧协议的参考产物生成器，不进入生产 JAR。
 
@@ -35,6 +35,8 @@ Java `ExclusiveTerrainCapture` 转录宿主事件并响应请求，`SectionSourc
 本轮原型接管地形。实体/方块实体、普通 item、Fabric Mesh 与粒子保留各自的源入口和实际姿态回调，使用 typed instance / dynamic 批次；它们不能从 section 状态页还原。纹理源、相机和宿主 Vulkan 特性/句柄继续由对应 Java 版本绑定。
 
 两个安装包包含公共层的同一编译产物和同一 `prime_engine`；`verifyNativeJars` 验证字节和精确版本约束。每版使用独立 `run/` 和存档。协议与宿主集成分别见 [ABI](abi.md) 和 [架构](architecture.md)。
+
+星图资产、设备端曝光、线性显示及 HDR/FG 输出由 `prime_vulkan` 的独立资源 owner 持有。Java 公共层保存设置和显示标定值，版本绑定负责 GLFW/SDL 的实际显示器身份及 surface/Present 事件；菜单 HDR fallback 使用小型 `HdrSurface`，无需构造场景或上传 PT 固定资产。Streamline bridge 接管 SDK 及其公开的输入消费者完成协议，不把宿主提交完成等同于 FG 完成。具体数学与所有权见[显示](display.md)和[重建](reconstruction.md)。
 
 ## 矩形分解的接入范围
 

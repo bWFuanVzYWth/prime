@@ -9,12 +9,18 @@ public struct AtmEnvironment {
     public Sampler2D<float4> transmittance;
     public Sampler3D<float4> aerialRadiance;
     public Sampler3D<float4> aerialTransmittance;
+    public Sampler2D<float4> stars;
+    public float4 starControls;
 };
 public AtmLighting atmLighting(AtmEnvironment environment) {
-    return {environment.frames, environment.sky, environment.transmittance};
+    return {environment.frames, environment.sky, environment.transmittance, environment.stars,
+            environment.starControls};
 }
 public float3 atmSky(AtmEnvironment environment, float3 direction) {
     return atmSky(atmLighting(environment), direction);
+}
+public float3 atmSky(AtmEnvironment environment, float3 direction, float skyIntensity) {
+    return atmSky(atmLighting(environment), direction, skyIntensity);
 }
 public float3 atmDistantTransmittance(AtmEnvironment environment, float3 direction) {
     return atmDistantTransmittance(atmLighting(environment), direction);

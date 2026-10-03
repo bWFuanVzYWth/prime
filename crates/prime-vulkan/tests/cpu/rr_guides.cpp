@@ -1,4 +1,7 @@
 // Executes generated production Slang math on CPU; no Vulkan or window is created.
+// Slang retains this SPIR-V contraction qualifier in its C++ output; explicit fma
+// calls and -ffp-contract=off preserve the declared operation order on this target.
+#define precise
 #include "rr_guides.generated.cpp"
 #include <algorithm>
 #include <cmath>
@@ -145,6 +148,36 @@ static void pixel_motion_contracts() {
 }
 
 int main() {
+    // An independent double affine oracle covers translation, reflection, shear and nonuniform scale.
+    const F3 vertices[] = {{0.25f, -1, 2}, {3, 0.5f, -4}, {-2, 5, 0.125f}};
+    const F4 transforms[][3] = {{{1, 0, 0, 1.25f}, {0, 1, 0, -2}, {0, 0, 1, 10}},
+                                {{0, -2, 0.25f, 3}, {1, 0, 0, 4}, {0, 0, -1, 5}}};
+    for (const auto &rows : transforms)
+        for (F2 bary : {F2{0, 0}, F2{1, 0}, F2{0, 1}, F2{0.2f, 0.3f}}) {
+            const auto actual = rrCpuRigid_0(vertices[0], vertices[1], vertices[2], bary,
+                                             rows[0], rows[1], rows[2]);
+            double local[3];
+            const float *v0 = &vertices[0].x, *v1 = &vertices[1].x, *v2 = &vertices[2].x;
+            for (unsigned axis = 0; axis < 3; ++axis)
+                local[axis] = v0[axis] + double(bary.x) * (v1[axis] - v0[axis]) +
+                              double(bary.y) * (v2[axis] - v0[axis]);
+            for (unsigned axis = 0; axis < 3; ++axis) {
+                const float *row = &rows[axis].x;
+                const double expected = row[0] * local[0] + row[1] * local[1] +
+                                        row[2] * local[2] + row[3];
+                require(close((&actual.x)[axis], expected, 3e-6), "previous local barycentric affine point");
+            }
+        }
+    for (unsigned status = 0; status < 16; ++status)
+        require(rrCpuForeground_0(float(status) / 255) == ((status & 8) != 0),
+                "foreground is independent of guide completion and reflection status");
+    for (float viewZ : {0.01f, 0.1f, 1.0f, 100.0f, 1e6f}) {
+        const float a = 1e6f / (1e6f - 0.01f);
+        const double projected = (double(a) * viewZ - double(0.01f * a)) / viewZ;
+        require(close(rrCpuDeviceDepth_0(viewZ), projected), "visible device depth matches clip Z/W");
+    }
+    require(rrCpuDeviceDepth_0(0) == 1 && rrCpuDeviceDepth_0(-1) == 1,
+            "unobserved invalid depth uses finite far plane");
     pixel_motion_contracts();
     for (float aspect : {1.0f, 16.0f / 9.0f, 2.4f})
         for (float fov : {0.25f, 0.7f, 1.5f})

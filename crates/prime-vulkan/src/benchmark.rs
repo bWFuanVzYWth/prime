@@ -145,6 +145,8 @@ impl HostBenchmark {
             // Preserve this benchmark's declared budget across product default changes.
             state.renderer.as_mut().unwrap().configure(RenderSettings {
                 bounces: 4,
+                stars: 0.0,
+                auto_exposure_compensation: 0.0,
                 ..Default::default()
             })?;
         }
@@ -452,6 +454,11 @@ impl HostBenchmark {
                 .map_err(|e| error("Enqueue benchmark host submission", e))?;
         }
         let submit_ns = nanos(submit);
+        state
+            .renderer
+            .as_mut()
+            .unwrap()
+            .submission_accepted(serial)?;
         self.pending[slot] = serial;
         self.next_serial += 1;
         Ok(HostSample {

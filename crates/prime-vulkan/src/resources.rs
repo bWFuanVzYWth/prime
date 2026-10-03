@@ -84,6 +84,7 @@ impl Drop for InstanceOwner {
 
 enum RetiredResource {
     Acceleration(vk::AccelerationStructureKHR),
+    QueryPool(vk::QueryPool),
     Micromap(vk::MicromapEXT),
     Buffer(vk::Buffer, vk::DeviceMemory),
     Image(vk::Image, vk::ImageView, vk::DeviceMemory),
@@ -751,6 +752,25 @@ impl Context {
         .contains(vk::FormatFeatureFlags::SAMPLED_IMAGE_FILTER_LINEAR)
     }
 
+    pub fn supports_starmap(&self) -> bool {
+        self.supports_linear_sampling(vk::Format::BC6H_UFLOAT_BLOCK)
+            && unsafe {
+                self._instance
+                    .instance
+                    .get_physical_device_image_format_properties(
+                        self.physical,
+                        vk::Format::BC6H_UFLOAT_BLOCK,
+                        vk::ImageType::TYPE_2D,
+                        vk::ImageTiling::OPTIMAL,
+                        vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::TRANSFER_DST,
+                        vk::ImageCreateFlags::empty(),
+                    )
+            }
+            .is_ok_and(|p| {
+                p.max_extent.width >= 16384 && p.max_extent.height >= 8192 && p.max_mip_levels >= 15
+            })
+    }
+
     pub fn supports_storage_sampling(&self, format: vk::Format) -> bool {
         unsafe {
             self._instance
@@ -943,6 +963,21 @@ impl Context {
             self.retire(RetiredResource::Micromap(handle));
         }
     }
+    pub(crate) fn retire_query_pool(&self, handle: vk::QueryPool) {
+        if self.can_destroy() {
+            self.retire(RetiredResource::QueryPool(handle));
+        }
+    }
+    #[cfg(test)]
+    pub(crate) fn pending_acceleration_retirement(
+        &self,
+        handle: vk::AccelerationStructureKHR,
+    ) -> bool {
+        self.host.as_ref().is_some_and(|host| {
+            host.state.lock().unwrap_or_else(|p| p.into_inner()).retired.iter()
+                .any(|(_, resource)| matches!(resource, RetiredResource::Acceleration(value) if *value == handle))
+        })
+    }
     fn retire(&self, resource: RetiredResource) {
         if let Some(host) = &self.host
             && !host.finished.load(Ordering::Relaxed)
@@ -961,6 +996,7 @@ impl Context {
                 RetiredResource::Acceleration(handle) => self
                     .acceleration
                     .destroy_acceleration_structure(handle, None),
+                RetiredResource::QueryPool(handle) => self.device.destroy_query_pool(handle, None),
                 RetiredResource::Micromap(handle) => {
                     (self
                         .opacity_micromap
@@ -1665,7 +1701,6 @@ impl Drop for Acceleration {
     }
 }
 impl Acceleration {
-    #[cfg(test)]
     pub fn storage_bytes(&self) -> u64 {
         self.storage.as_ref().map_or(0, |s| s.size)
     }
@@ -1681,7 +1716,8 @@ impl Acceleration {
         counts: &[u32],
         allow_disable_micromaps: bool,
     ) -> Result<PreparedAcceleration<'a>, String> {
-        let mut flags = vk::BuildAccelerationStructureFlagsKHR::PREFER_FAST_TRACE;
+        let mut flags = vk::BuildAccelerationStructureFlagsKHR::PREFER_FAST_TRACE
+            | vk::BuildAccelerationStructureFlagsKHR::ALLOW_COMPACTION;
         if allow_disable_micromaps {
             flags |= vk::BuildAccelerationStructureFlagsKHR::ALLOW_DISABLE_OPACITY_MICROMAPS_EXT;
         }
@@ -1734,31 +1770,15 @@ impl Acceleration {
                 counts,
                 &mut sizes,
             );
-            let storage = arena.allocate(context, sizes.acceleration_structure_size, 256)?;
-            let handle = context
-                .acceleration
-                .create_acceleration_structure(
-                    &vk::AccelerationStructureCreateInfoKHR::default()
-                        .buffer(storage.buffer.buffer)
-                        .offset(storage.offset)
-                        .size(sizes.acceleration_structure_size)
-                        .ty(kind),
-                    None,
-                )
-                .map_err(|e| error("Create acceleration structure", e))?;
-            let result = Self {
-                context: context.clone(),
-                handle,
-                storage: Some(storage),
-                device_address: context
-                    .acceleration
-                    .get_acceleration_structure_device_address(
-                        &vk::AccelerationStructureDeviceAddressInfoKHR::default()
-                            .acceleration_structure(handle),
-                    ),
-            };
+            let result = Self::allocate(context, arena, sizes.acceleration_structure_size, kind)?;
             let scratch_size = sizes.build_scratch_size.max(sizes.update_scratch_size);
-            let scratch = arena.allocate(context, scratch_size, context.scratch_alignment)?;
+            let scratch = match arena.allocate(context, scratch_size, context.scratch_alignment) {
+                Ok(scratch) => scratch,
+                Err(error) => {
+                    result.retire(arena);
+                    return Err(error);
+                }
+            };
             Ok(PreparedAcceleration {
                 acceleration: result,
                 scratch: Some(scratch),
@@ -1773,6 +1793,63 @@ impl Acceleration {
                 kind,
                 flags,
             })
+        }
+    }
+
+    fn allocate(
+        context: &Arc<Context>,
+        arena: &mut Arena,
+        bytes: u64,
+        kind: vk::AccelerationStructureTypeKHR,
+    ) -> Result<Self, String> {
+        let storage = arena.allocate(context, bytes, 256)?;
+        let handle = match unsafe {
+            context.acceleration.create_acceleration_structure(
+                &vk::AccelerationStructureCreateInfoKHR::default()
+                    .buffer(storage.buffer.buffer)
+                    .offset(storage.offset)
+                    .size(bytes)
+                    .ty(kind),
+                None,
+            )
+        } {
+            Ok(handle) => handle,
+            Err(result) => {
+                arena.retire(storage);
+                return Err(error("Create acceleration structure", result));
+            }
+        };
+        Ok(Self {
+            context: context.clone(),
+            handle,
+            storage: Some(storage),
+            device_address: unsafe {
+                context
+                    .acceleration
+                    .get_acceleration_structure_device_address(
+                        &vk::AccelerationStructureDeviceAddressInfoKHR::default()
+                            .acceleration_structure(handle),
+                    )
+            },
+        })
+    }
+    pub fn compact_target(&self, arena: &mut Arena, bytes: u64) -> Result<Self, String> {
+        Self::allocate(
+            &self.context,
+            arena,
+            bytes,
+            vk::AccelerationStructureTypeKHR::BOTTOM_LEVEL,
+        )
+    }
+    pub fn record_compact_copy(&self, command: vk::CommandBuffer, target: &Self) {
+        unsafe {
+            self.context.acceleration.cmd_copy_acceleration_structure(
+                command,
+                &vk::CopyAccelerationStructureInfoKHR::default()
+                    .src(self.handle)
+                    .dst(target.handle)
+                    .mode(vk::CopyAccelerationStructureModeKHR::COMPACT),
+            );
         }
     }
 

@@ -5,7 +5,14 @@ import "atmosphere/view.slang";
 [[vk::binding(2, 1)]] Sampler2D<float4> atmosphereTransmittance;
 [[vk::binding(3, 1)]] Sampler3D<float4> atmosphereAerialRadiance;
 [[vk::binding(4, 1)]] Sampler3D<float4> atmosphereAerialTransmittance;
+[[vk::binding(5, 1)]] Sampler2D<float4> atmosphereStars;
+[[vk::binding(6, 1)]] ConstantBuffer<float4> atmosphereStarControls;
 AtmEnvironment atmosphereEnvironment() {
-    return {atmosphereFrames, atmosphereSky, atmosphereTransmittance, atmosphereAerialRadiance,
-            atmosphereAerialTransmittance};
+    return {atmosphereFrames,
+            atmosphereSky,
+            atmosphereTransmittance,
+            atmosphereAerialRadiance,
+            atmosphereAerialTransmittance,
+            atmosphereStars,
+            atmosphereStarControls};
 }

@@ -24,3 +24,9 @@ Prime PT migration: the same inputs are stored in named Safetensors arrays,
 with the unchanged default solver exposed as an offline asset tool.
 Runtime interfaces use prepared chart constants, hardware texture filtering
 and dependency-keyed caches.
+
+The earlier `shaders/model/atmosphere`, `shaders/entry/atmosphere` and
+`src/client/resources/prime/atmosphere` paths describe legacy Prime provenance.
+Prime PT maintains the adapted Slang modules in
+`crates/prime-vulkan/shaders/atmosphere` and the physical assets in
+`crates/prime-vulkan/assets/atmosphere`.

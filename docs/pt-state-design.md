@@ -98,11 +98,15 @@ CPU 证明必须说明生产者、覆盖域、未知情况和失效路径。当�
 
 ## PT 之外的状态与当前特化
 
-Offline 单样本当前使用 specialization ID4；场景能力使用 ID0/1/2，ID3 留给独立材质能力特化。CPU 的同一次 `samples_this_dispatch` 取值同时选择管线和写入 push 参数，确保单样本假设成立。单样本路径完成后才读取历史均值，消去均值和多样本循环身份覆盖整条路径的需要；多样本保持原逐样本在线均值、sequence 与随机域，仍有均值跨下一样本的消费者。当前 Offline 为单样本/多样本两组各六个场景变体；Realtime 的 K1按 surface/optical 能力去重为四个变体，K2沿用六个场景变体。raw/RR只创建所选入口组，post及RR显示为独立窄管线；这个数量不是未来设计上限或必须扩展的模板。
+Offline单样本使用specialization ID4；场景能力使用ID0/1/2。ID3仅在K1消费：bit0为RR稳定实例的前姿态运动，bit1为FG首次可见depth/motion；raw/Offline不读新增前姿态。CPU的同一次`samples_this_dispatch`取值同时选择管线和写入push参数，确保单样本假设成立。单样本路径完成后才读取历史均值；多样本保持原逐样本在线均值、sequence与随机域。当前Offline为单样本/多样本两组各六个场景变体；Realtime的K1按surface/optical能力去重为四个变体，K2沿用六个场景变体。raw/RR只创建所选入口组，FG切换按实际SDK能力重建K1特化。这个数量不是未来设计上限。
+
+FG guide 初始化直接消费 K1 push 中已验证的输入尺寸，depth/motion 的分配使用同一 extent，不按像素重复查询图像尺寸。HDR 呈现只读取并解码一次世界像素，线性值供 source-over 合成和可选 HUDless 共用；非合成分支不读取世界占位图。这些精简不增加持久状态、缓冲或同步，SPIR-V 指令/逻辑读取减少不等于驱动物理寄存器或整帧收益。修改后分别以实际产物与 GPU 图像行为验证，正式性能按完整测量边界解释。
 
 生产 Z-Sobol 当前显式调用固定 S=8 的构造，保留合法 R 范围及宽索引退路；不能由原生 1080p 使用单字索引推断所有尺寸都可删除宽路径。生产 Aerial-S 当前按已知 256 切片消费，与分配、更新和重建一致，避免动态尺寸查询被编译器提到路径入口；通用采样 API 仍按调用方纹理实际高度工作。改变生产资源布局必须同步修改生产者和消费者，具体规格由[大气文档](atmosphere.md)维护。
 
 显示参数只在路径后的post/显示消费。Realtime的几何PSR和guide遍历属于K1；K2只有一个按需传递的实际specular reflection次段距离职责，不访问完整guide。RR post消费当前/前相机、主depth、该距离及完成状态，补全无需额外光追的反射motion；它不恢复材质或路径状态。Offline仍只消费通用输运的radiance，单样本/多样本历史读写保持原顺序。共同返回类型或入口参数大小不等于所有字段始终占据GPR。
+
+星图、曝光、HDR和FG无HUD输出在PT之后消费；仅FG的首次可见guide复用K1现有主查询，不增加光追dispatch。RR选择重建/同帧raw后做星图与测光；Offline测光/显示直接读取FP32累积BDA。新增全图FP32写读、直方图、HDR快照和UI合成均是真实成本，详见[显示](display.md)。BDA是否启用由push中的32位标志声明；不在shader比较64位空指针，因此不新增`shaderInt64`设备要求。仅产物变小或消除能力要求不构成整帧提速证明。
 
 RR 的 input/output 尺寸、抖动、格式、运动和历史边界见[重建契约](reconstruction.md)。默认Performance降低内部像素和射线数，应与原生1920×1080基准区分；scratch、SL私有资源、重建和显示都是真实成本。
 

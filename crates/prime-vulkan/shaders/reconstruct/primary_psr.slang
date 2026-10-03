@@ -82,8 +82,8 @@ public bool primePrimaryPsrSurface(PrimePrimaryPsr state, float3 cameraPosition,
            dot(virtualNormal, virtualNormal) > 1e-12;
 }
 
-public bool primePrimaryPsrMotionKnown(PrimePrimaryPsr state, bool terminalStatic) {
-    // Known static proxy geometry; exact for fixed planar reflection chains, approximate
-    // for refracted target planes. Missing dynamic previous geometry remains unsupported.
-    return terminalStatic && (state.flags & PRIME_PRIMARY_PSR_MOTION) != 0;
+public bool primePrimaryPsrMotionKnown(PrimePrimaryPsr state, bool terminalKnown) {
+    // Fixed interface planes can unfold a known rigid terminal displacement.
+    // Refraction retains the declared target-plane approximation; moving interfaces are unknown.
+    return terminalKnown && (state.flags & PRIME_PRIMARY_PSR_MOTION) != 0;
 }

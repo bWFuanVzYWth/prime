@@ -6,6 +6,7 @@ mod placements;
 mod terrain;
 
 pub use objects::{GeometryUpdate, ObjectKey, Placement, Planner, ScenePlan};
+pub use placements::PlacementChange;
 pub use terrain::{
     TerrainGeometry, TerrainLimits, TerrainMember, TerrainPlan, TerrainPlanner, TerrainUpdate,
 };

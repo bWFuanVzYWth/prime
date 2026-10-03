@@ -109,7 +109,9 @@ fn run_impl(
         single_sample_pipelines: None,
         primary_pipelines: None,
         realtime_post: None,
+        realtime_linear_post: None,
         reconstruction_display: None,
+        reconstruction_linear: None,
     };
     unsafe {
         let types: Vec<_> = (0..if geometry.is_some() { 7 } else { 2 })

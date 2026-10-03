@@ -47,6 +47,11 @@ pub struct RenderSettings {
     pub opacity_micromap: bool,
     pub ray_reconstruction: bool,
     pub reconstruction_quality: ReconstructionQuality,
+    pub stars: f32,
+    pub auto_exposure_compensation: f32,
+    pub hdr: bool,
+    pub hdr_reference_white: u32,
+    pub frame_generation: bool,
 }
 impl Default for RenderSettings {
     fn default() -> Self {
@@ -67,15 +72,20 @@ impl Default for RenderSettings {
             opacity_micromap: true,
             ray_reconstruction: true,
             reconstruction_quality: ReconstructionQuality::Performance,
+            stars: 1.0,
+            auto_exposure_compensation: 0.6,
+            hdr: false,
+            hdr_reference_white: 0,
+            frame_generation: false,
         }
     }
 }
 impl RenderSettings {
-    pub const VERSION: u32 = 5;
-    pub const BYTES: usize = 72;
+    pub const VERSION: u32 = 6;
+    pub const BYTES: usize = 92;
     pub fn parse(bytes: &[u8]) -> Result<Self, String> {
         if bytes.len() != Self::BYTES {
-            return Err("Settings require exactly 72 bytes".into());
+            return Err("Settings require exactly 92 bytes".into());
         }
         let word = |offset| u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
         if word(0) != Self::VERSION {
@@ -125,6 +135,19 @@ impl RenderSettings {
                 3 => ReconstructionQuality::Performance,
                 4 => ReconstructionQuality::UltraPerformance,
                 _ => return Err("Unknown reconstruction quality".into()),
+            },
+            stars: f32::from_bits(word(72)),
+            auto_exposure_compensation: f32::from_bits(word(76)),
+            hdr: match word(80) {
+                0 => false,
+                1 => true,
+                _ => return Err("Unknown HDR setting".into()),
+            },
+            hdr_reference_white: word(84),
+            frame_generation: match word(88) {
+                0 => false,
+                1 => true,
+                _ => return Err("Unknown frame generation setting".into()),
             },
         };
         result.validate()?;
@@ -176,6 +199,19 @@ impl RenderSettings {
                 4 => ReconstructionQuality::UltraPerformance,
                 _ => return Err("Unknown reconstruction quality".into()),
             },
+            stars: s.stars,
+            auto_exposure_compensation: s.auto_exposure_compensation,
+            hdr: match s.hdr {
+                0 => false,
+                1 => true,
+                _ => return Err("Unknown HDR setting".into()),
+            },
+            hdr_reference_white: s.hdr_reference_white,
+            frame_generation: match s.frame_generation {
+                0 => false,
+                1 => true,
+                _ => return Err("Unknown frame generation setting".into()),
+            },
         };
         result.validate()?;
         Ok(result)
@@ -191,6 +227,9 @@ impl RenderSettings {
             || !(1.0 / 256.0..=256.0).contains(&self.sun)
             || !(1.0 / 256.0..=256.0).contains(&self.sky)
             || !(1.0..=4096.0).contains(&self.depth_range)
+            || !(0.0..=4.0).contains(&self.stars)
+            || !(0.0..=1.0).contains(&self.auto_exposure_compensation)
+            || self.hdr_reference_white > 10000
         {
             return Err("Renderer settings out of range or non-finite".into());
         }
@@ -201,6 +240,7 @@ impl RenderSettings {
             && self.astronomy == other.astronomy
             && self.sun == other.sun
             && self.sky == other.sky
+            && self.stars == other.stars
             && self.seed == other.seed
     }
 }
@@ -210,7 +250,7 @@ mod tests {
     use super::*;
     fn golden() -> Vec<u8> {
         [
-            5_u32,
+            6_u32,
             1,
             12,
             1,
@@ -228,6 +268,11 @@ mod tests {
             1,
             3,
             8,
+            1_f32.to_bits(),
+            0.6_f32.to_bits(),
+            0,
+            0,
+            0,
         ]
         .into_iter()
         .flat_map(u32::to_le_bytes)
@@ -253,7 +298,8 @@ mod tests {
             (0, 2),
             (0, 3),
             (0, 4),
-            (0, 6),
+            (0, 5),
+            (0, 7),
             (48, 91),
             (48, (-91i32) as u32),
             (52, 360),
@@ -268,6 +314,9 @@ mod tests {
             (68, 0),
             (68, 129),
             (68, u32::MAX),
+            (80, 2),
+            (84, 10001),
+            (88, 2),
         ] {
             let mut invalid = bytes.clone();
             invalid[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
@@ -369,7 +418,7 @@ mod tests {
     }
     #[test]
     fn rejects_nonfinite_or_out_of_range_floats() {
-        for offset in [16, 20, 24, 32, 36, 40] {
+        for offset in [16, 20, 24, 32, 36, 40, 72, 76] {
             for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -1.0, 8192.0] {
                 let mut invalid = golden();
                 invalid[offset..offset + 4].copy_from_slice(&value.to_le_bytes());

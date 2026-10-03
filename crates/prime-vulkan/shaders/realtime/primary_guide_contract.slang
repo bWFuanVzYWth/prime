@@ -12,13 +12,15 @@ public static const uint PRIME_PRIMARY_GUIDE_COMPANION = 1u << 13;
 public interface IPrimaryGuides {
     bool enabled();
     float2 sampleOffset(ZSobol sampler);
-    void initialize(uint2 pixel);
+    void initialize(uint2 pixel, uint2 inputExtent);
+    void foreground(PrimaryParameters camera, uint2 pixel, float2 sampleUv, float3 position,
+                    float3 previousPosition, bool previousPositionKnown);
     void interfaceSpecular(uint2 pixel, PrimePbrVertex material, float3 view, float4 incident,
                            float4 transmitted);
     void reflectionPending(uint2 pixel);
     void surface(PrimaryParameters camera, uint2 pixel, float2 sampleUv, SurfacePoint surface,
                  PrimePbrVertex material, float3 direction, float4 incident, float4 transmitted,
-                 bool staticGeometry, PrimePrimaryPsr psr);
+                 float3 previousPosition, bool previousPositionKnown, PrimePrimaryPsr psr);
     void environment(PrimaryParameters camera, uint2 pixel, float2 sampleUv, float3 direction,
                      PrimePrimaryPsr psr);
     void unresolved(uint2 pixel, uint flags);
@@ -31,14 +33,16 @@ public struct NoPrimaryGuides : IPrimaryGuides {
     public float2 sampleOffset(ZSobol sampler) {
         return sampler.sample2D(0);
     }
-    public void initialize(uint2 pixel) {}
+    public void initialize(uint2 pixel, uint2 inputExtent) {}
+    public void foreground(PrimaryParameters camera, uint2 pixel, float2 sampleUv, float3 position,
+                           float3 previousPosition, bool previousPositionKnown) {}
     public void interfaceSpecular(uint2 pixel, PrimePbrVertex material, float3 view,
                                   float4 incident, float4 transmitted) {}
     public void reflectionPending(uint2 pixel) {}
     public void surface(PrimaryParameters camera, uint2 pixel, float2 sampleUv,
                         SurfacePoint surface, PrimePbrVertex material, float3 direction,
-                        float4 incident, float4 transmitted, bool staticGeometry,
-                        PrimePrimaryPsr psr) {}
+                        float4 incident, float4 transmitted, float3 previousPosition,
+                        bool previousPositionKnown, PrimePrimaryPsr psr) {}
     public void environment(PrimaryParameters camera, uint2 pixel, float2 sampleUv,
                             float3 direction, PrimePrimaryPsr psr) {}
     public void unresolved(uint2 pixel, uint flags) {}

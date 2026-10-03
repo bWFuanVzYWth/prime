@@ -11,6 +11,8 @@ template <class T> T vk_symbol(const char *name);
 std::atomic_uint32_t validation_errors{};
 bool abort_on_validation_error{true};
 bool omit_specular_distance{};
+VkInstance dispatch_instance{};
+VkDevice dispatch_device{};
 
 int evaluate_frame(VkPhysicalDevice physical, VkDevice device, uint32_t family, void *context,
                    PrimeSlSize size) {
@@ -244,6 +246,19 @@ int evaluate_frame(VkPhysicalDevice physical, VkDevice device, uint32_t family, 
 }
 
 template <class T> T vk_symbol(const char *name) {
+    if (bootstrapped) {
+        auto get_instance = reinterpret_cast<PFN_vkGetInstanceProcAddr>(
+                GetProcAddress(bootstrapped->module, "vkGetInstanceProcAddr"));
+        auto get_device = reinterpret_cast<PFN_vkGetDeviceProcAddr>(
+                GetProcAddress(bootstrapped->module, "vkGetDeviceProcAddr"));
+        const bool physical_function = std::strncmp(name, "vkGetPhysicalDevice", 19) == 0;
+        auto address =
+                dispatch_device && !physical_function ? get_device(dispatch_device, name) : nullptr;
+        if (!address)
+            address = get_instance(dispatch_instance, name);
+        if (address)
+            return reinterpret_cast<T>(address);
+    }
     auto pointer = reinterpret_cast<T>(GetProcAddress(vulkan_loader(), name));
     if (!pointer)
         throw std::runtime_error(name);
@@ -263,7 +278,8 @@ VkBool32 VKAPI_CALL validation(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
 int main(int argc, char **argv) try {
     if (prime_sl_abi_version() != 2)
         throw std::runtime_error("Streamline GPU test requires bridge ABI v2");
-    bool omit_write = false, api13 = false, init_only = false, synchronization2 = true;
+    bool omit_write = false, api13 = false, init_only = false, synchronization2 = true,
+         interposed = false;
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--omit-write-without-format") == 0)
             omit_write = true;
@@ -281,8 +297,20 @@ int main(int argc, char **argv) try {
             synchronization2 = true;
         else if (std::strcmp(argv[i], "--omit-synchronization2") == 0)
             synchronization2 = false;
+        else if (std::strcmp(argv[i], "--interposed") == 0)
+            interposed = true;
         else
             throw std::runtime_error("Unknown test argument");
+    }
+    if (interposed) {
+        // The pinned interposer checks only driver-global extensions and rejects layer-only
+        // VK_EXT_validation_features. Khronos' documented setting enables the same sync checks.
+        if (!SetEnvironmentVariableA("VK_LAYER_VALIDATE_SYNC", "1"))
+            throw std::runtime_error("Cannot enable strict synchronization validation");
+        int result = prime_sl_bootstrap();
+        std::printf("prime_sl_bootstrap=%d error=%s\n", result, prime_sl_last_error());
+        if (result)
+            return 4;
     }
     auto create_instance = vk_symbol<PFN_vkCreateInstance>("vkCreateInstance");
     auto enumerate = vk_symbol<PFN_vkEnumeratePhysicalDevices>("vkEnumeratePhysicalDevices");
@@ -290,9 +318,6 @@ int main(int argc, char **argv) try {
     auto families = vk_symbol<PFN_vkGetPhysicalDeviceQueueFamilyProperties>(
             "vkGetPhysicalDeviceQueueFamilyProperties");
     auto get_features = vk_symbol<PFN_vkGetPhysicalDeviceFeatures2>("vkGetPhysicalDeviceFeatures2");
-    auto create_device = vk_symbol<PFN_vkCreateDevice>("vkCreateDevice");
-    auto destroy_device = vk_symbol<PFN_vkDestroyDevice>("vkDestroyDevice");
-    auto destroy_instance = vk_symbol<PFN_vkDestroyInstance>("vkDestroyInstance");
     VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
     app.pApplicationName = "Prime Streamline headless attachment test";
     app.apiVersion = api13 ? VK_API_VERSION_1_3 : VK_API_VERSION_1_2;
@@ -328,12 +353,12 @@ int main(int argc, char **argv) try {
     VkValidationFeaturesEXT validation_features{VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT};
     validation_features.enabledValidationFeatureCount = 1;
     validation_features.pEnabledValidationFeatures = &synchronization;
-    debug.pNext = &validation_features;
+    debug.pNext = interposed ? nullptr : &validation_features;
     VkInstanceCreateInfo ici{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
     ici.pApplicationInfo = &app;
     ici.enabledLayerCount = 1;
     ici.ppEnabledLayerNames = layers;
-    ici.enabledExtensionCount = 2;
+    ici.enabledExtensionCount = interposed ? 1 : 2;
     ici.ppEnabledExtensionNames = instance_extensions;
     ici.pNext = &debug;
     VkInstance instance{};
@@ -341,6 +366,9 @@ int main(int argc, char **argv) try {
     std::printf("vkCreateInstance=%d\n", int(vr));
     if (vr)
         return 1;
+    dispatch_instance = instance;
+    auto create_device = vk_symbol<PFN_vkCreateDevice>("vkCreateDevice");
+    auto destroy_instance = vk_symbol<PFN_vkDestroyInstance>("vkDestroyInstance");
     uint32_t count = 0;
     enumerate(instance, &count, nullptr);
     std::vector<VkPhysicalDevice> physical(count);
@@ -402,6 +430,8 @@ int main(int argc, char **argv) try {
             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
     VkPhysicalDeviceSynchronization2Features enabled_synchronization2{
             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES};
+    VkPhysicalDevicePrivateDataFeatures enabled_private_data{
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIVATE_DATA_FEATURES};
     if (api13) {
         enabled13.privateData = VK_TRUE;
         enabled13.synchronization2 = synchronization2 ? VK_TRUE : VK_FALSE;
@@ -410,6 +440,11 @@ int main(int argc, char **argv) try {
         enabled_synchronization2.synchronization2 = VK_TRUE;
         enabled12.pNext = &enabled_synchronization2;
         extensions.push_back(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME);
+    }
+    if (interposed && !api13) {
+        enabled_private_data.privateData = VK_TRUE;
+        enabled_private_data.pNext = enabled12.pNext;
+        enabled12.pNext = &enabled_private_data;
     }
     std::printf(
             "unformatted_storage writeEnabled=%u readEnabled=%u readSupported=%u writeSupported=%u\n",
@@ -431,6 +466,8 @@ int main(int argc, char **argv) try {
         destroy_instance(instance, nullptr);
         return 3;
     }
+    dispatch_device = device;
+    auto destroy_device = vk_symbol<PFN_vkDestroyDevice>("vkDestroyDevice");
     PrimeSlInit init{reinterpret_cast<uint64_t>(instance), reinterpret_cast<uint64_t>(selected),
                      reinterpret_cast<uint64_t>(device), family, 0};
     void *context{};
@@ -447,6 +484,12 @@ int main(int argc, char **argv) try {
         std::printf("prime_sl_destroy=%d\n", destroyed);
         if (!result)
             result = destroyed;
+    }
+    if (interposed) {
+        int shutdown = prime_sl_frame(4, 0);
+        std::printf("prime_sl_frame(shutdown)=%d\n", shutdown);
+        if (!result)
+            result = shutdown;
     }
     destroy_device(device, nullptr);
     destroy_messenger(instance, messenger, nullptr);

@@ -40,6 +40,9 @@ import "display/prime_drt.slang";
     }
     uint pixel = id.y * frame.dimensions.x + id.x;
     accumulation[pixel] = float4(mean, 1);
+    // Bit 31 skips the fused SDR transform when the GPU exposure/HDR display consumes history.
+    if ((asuint(frame.displayExtra.w) & 0x80000000u) != 0)
+        return;
     PrimeDRTParameters display = {frame.display.x, frame.display.y, frame.display.z,
                                   frame.display.w, frame.displayExtra.x};
     uint3 encoded = uint3(saturate(primeDRT(mean, display)) * 255.0 + 0.5);

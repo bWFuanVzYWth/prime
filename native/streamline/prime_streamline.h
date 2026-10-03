@@ -79,13 +79,35 @@ typedef struct PrimeSlFrame {
     PrimeSlImage images[PRIME_SL_IMAGE_COUNT];
 } PrimeSlFrame;
 
+typedef struct PrimeSlFgFrame {
+    const PrimeSlFrame *constants;
+    uint64_t command_buffer;
+    // First-visible normalized device depth, first-visible pixel motion, actual
+    // post-processed HUD-less color, and R8_UNORM UI coverage. GENERAL, immutable
+    // through real Present and its published SDK input-completion fence.
+    PrimeSlImage images[4];
+    uint32_t back_buffer_count;
+    uint32_t back_buffer_format;
+} PrimeSlFgFrame;
+
 uint32_t prime_sl_abi_version(void);
+// Process-owned early initialization, before host Vulkan instance/device/surface creation.
+// Installs RR/FG/PCL/Reflex feature requests; actual support is checked against the host adapter.
+int32_t prime_sl_bootstrap(void);
+// 0: begin frame/Reflex sleep/simulation start, 1: simulation end/render start,
+// 2: render end, 3: completion-proven FG suspend, 4: shutdown before host device destruction.
+int32_t prime_sl_frame(uint32_t action, uint32_t enabled);
 int32_t prime_sl_create(const PrimeSlInit *init, void **output);
 // Quality: 0=DLAA, 1=Quality, 2=Balanced, 3=Performance, 4=UltraPerformance.
 // Every mode is explicitly configured to DLSS Ray Reconstruction preset F.
 int32_t prime_sl_configure(void *context, uint32_t output_width, uint32_t output_height,
                            uint32_t quality, PrimeSlSize *render_size);
 int32_t prime_sl_evaluate(void *context, const PrimeSlFrame *frame);
+uint32_t prime_sl_fg_supported(void *context);
+// +1 exclusively means an explicit unsupported capability/extent. SDK eErrorIO
+// (also numerically 1) maps to -101 and retains its diagnostic text.
+int32_t prime_sl_fg_prepare(void *context, const PrimeSlFgFrame *frame);
+int32_t prime_sl_fg_suspend(void *context);
 int32_t prime_sl_destroy(void *context);
 // Replaces one real vkQueuePresentKHR invocation and preserves its VkResult.
 // Safe on the host present thread; serialized with context operations.
