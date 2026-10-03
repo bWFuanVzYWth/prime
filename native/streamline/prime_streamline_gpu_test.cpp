@@ -468,6 +468,19 @@ int main(int argc, char **argv) try {
     }
     dispatch_device = device;
     auto destroy_device = vk_symbol<PFN_vkDestroyDevice>("vkDestroyDevice");
+    if (interposed) {
+        // Exercise the title-frame registration boundary before any world/RR owner.
+        const int present_init = initialize_present(*bootstrapped);
+        std::printf("initialize_present(before world)=%d mode=%d error=%s\n", present_init,
+                    int(bootstrapped->present_mode), prime_sl_last_error());
+        if (present_init) {
+            prime_sl_frame(4, 0);
+            destroy_device(device, nullptr);
+            destroy_messenger(instance, messenger, nullptr);
+            destroy_instance(instance, nullptr);
+            return 3;
+        }
+    }
     PrimeSlInit init{reinterpret_cast<uint64_t>(instance), reinterpret_cast<uint64_t>(selected),
                      reinterpret_cast<uint64_t>(device), family, 0};
     void *context{};

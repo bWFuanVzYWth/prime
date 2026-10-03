@@ -23,7 +23,8 @@ fn allocate_handle() -> Result<u64, String> {
         .map_err(|_| "handle identity exhausted".into())
 }
 
-/// Routes a real Vulkan present; its VkResult is returned unchanged.
+/// Routes one host Vulkan present; returns SDK status merged with reported API errors.
+/// Loaded frame generation can report an asynchronous error on a later call.
 /// # Safety
 /// `queue` is a live VkQueue and `present_info` points to a valid VkPresentInfoKHR
 /// with all referenced arrays/handles alive until this synchronous call returns.

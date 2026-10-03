@@ -109,7 +109,8 @@ uint32_t prime_sl_fg_supported(void *context);
 int32_t prime_sl_fg_prepare(void *context, const PrimeSlFgFrame *frame);
 int32_t prime_sl_fg_suspend(void *context);
 int32_t prime_sl_destroy(void *context);
-// Replaces one real vkQueuePresentKHR invocation and preserves its VkResult.
+// Replaces one host vkQueuePresentKHR invocation. Loaded FG can present asynchronously;
+// returns SDK status merged with reported underlying API errors (possibly from a prior call).
 // Safe on the host present thread; serialized with context operations.
 int32_t prime_sl_present(uint64_t queue, uint64_t present_info);
 // Thread-local diagnostic text; copy before the next bridge call on this thread.

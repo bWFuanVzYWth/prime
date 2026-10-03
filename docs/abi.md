@@ -127,7 +127,7 @@ Position 为 f32×3，UV 为 f32×2。局部原型和显式原始网格可输出
 
 flags 的 bit0 表示已在这台逻辑设备启用 `VK_EXT_opacity_micromap` 的 `micromap` 和 synchronization2；bit1 表示实际启用 Streamline 所需的 NVX binary import、NVX image view handle、KHR push descriptor、KHR buffer device address、KHR synchronization2 及 timelineSemaphore/descriptorIndexing/BDA、synchronization2、shaderStorageImageExtendedFormats、shaderStorageImageWriteWithoutFormat 能力，其他位必须为零。宿主只在 `vkCreateDevice` 成功且实际创建集合包含扩展与特性后发布；26.2/26.3 本身要求 `VK_KHR_synchronization2`。物理支持不等于已启用，flags=0 保留原始 PT 路径，Rust 不补开借用设备的能力。OMM 和 RR 用户设置与设备能力独立；具体兼容范围见 [OMM 契约](opacity-micromaps.md)与[重建契约](reconstruction.md)。
 
-`prime_streamline_present(queue:u64, present_info:u64)->i32` 同步包住真实 `vkQueuePresentKHR`，原样返回 VkResult。结构体指针及其引用数组只借用到返回；未初始化 RR 或非目标队列直接调用原 Vulkan。这个入口不消费场景 session，不把一次 Present 等同于 GPU 完成证明。
+`prime_streamline_present(queue:u64, present_info:u64)->i32` 包住一次宿主 `vkQueuePresentKHR` 调用。安装 interposer 后，标题/加载帧也使用 bootstrap 绑定的进程入口，不依赖世界或 RR owner；返回 SDK 状态与公开 Present/acquire 错误回调的合并 VkResult，设备丢失优先于其他错误。加载的 FG 插件即使关闭 FG 也可能异步呈现；晚到错误在后续调用交付，成功返回不证明物理呈现完成，也不要求同步写回 `pResults`。结构体指针及引用数组按宿主调用合同借用，不为异步路径注入栈上结果指针。未安装 interposer 的 manual RR 路径仍包住一次原 Vulkan 调用与 common hooks。这个入口不消费场景 session，不把一次 Present 等同于 GPU 完成证明；具体错误及同步回退边界见[native 桥接](../native/streamline/README.md#frame-generation-and-present)。
 
 每帧调用 `prime_record(handle, &frame, &target)`，`PrimeRecordTarget` 具名携带 command、image、view 和 serial。command 是已开始录制、尚未结束的宿主 primary command buffer；目标为带 STORAGE 用途、GENERAL layout 的 RGBA8_UNORM 主颜色图像及其 view，尺寸必须等于 frame。serial 是将包含此 command 的实际提交完成值，同一 session 每个 serial 最多录制一次。宿主在同队列依次提交，并在所有命令完成后 signal timeline 到该 serial；Rust 自己的描述符槽与退休资源依赖此保证。
 

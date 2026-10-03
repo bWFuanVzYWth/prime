@@ -3,8 +3,10 @@
 #include "prime_streamline.cpp"
 
 #include <cassert>
+#include <cstdlib>
 #include <limits>
 #include <map>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -27,6 +29,11 @@ sl::Result evaluation_result = sl::Result::eOk;
 VkResult present_result = VK_SUCCESS;
 VkResult swapchain_result = VK_SUCCESS;
 bool publish_present_result = true;
+const VkPresentInfoKHR *seen_present_info{};
+VkResult callback_result = VK_SUCCESS;
+int fg_options_calls{};
+sl::Result function_result = sl::Result::eOk;
+VkResult options_callback_result = VK_SUCCESS;
 bool emit_error{};
 uint32_t expected_token = 123;
 sl::DLSSGOptions seen_fg;
@@ -128,16 +135,43 @@ VkResult mock_after() {
 }
 VkResult VKAPI_CALL mock_present(VkQueue, const VkPresentInfoKHR *info) {
     ++presents;
+    seen_present_info = info;
     if (info && info->pResults && publish_present_result)
         info->pResults[0] = swapchain_result;
+    if (callback_result != VK_SUCCESS) {
+        sl::APIError error{};
+        error.vkRes = callback_result;
+        assert(seen_fg.onErrorCallback);
+        seen_fg.onErrorCallback(error);
+    }
     return present_result;
 }
 sl::Result mock_fg_options(const sl::ViewportHandle &, const sl::DLSSGOptions &options) {
+    ++fg_options_calls;
     seen_fg = options;
+    if (options_callback_result != VK_SUCCESS) {
+        sl::APIError error{};
+        error.vkRes = options_callback_result;
+        assert(options.onErrorCallback);
+        options.onErrorCallback(error);
+    }
     if (options.mode == sl::DLSSGMode::eOff)
         retirement.push_back(2);
     return fg_io_failure == (options.mode == sl::DLSSGMode::eOff ? 6 : 3) ? sl::Result::eErrorIO
                                                                           : sl::Result::eOk;
+}
+sl::Result mock_feature_function(sl::Feature feature, const char *name, void *&function) {
+    assert(feature == sl::kFeatureDLSS_G && !std::strcmp(name, "slDLSSGSetOptions"));
+    function = function_result == sl::Result::eOk ? reinterpret_cast<void *>(mock_fg_options)
+                                                  : nullptr;
+    return function_result;
+}
+
+void report_present_error(VkResult result) {
+    sl::APIError error{};
+    error.vkRes = result;
+    assert(seen_fg.onErrorCallback);
+    seen_fg.onErrorCallback(error);
 }
 sl::Result mock_fg_state(const sl::ViewportHandle &, sl::DLSSGState &state,
                          const sl::DLSSGOptions *options) {
@@ -224,6 +258,8 @@ PrimeSlFrame make_frame(const Context &ctx) {
 } // namespace
 
 int main() {
+    _set_error_mode(_OUT_TO_STDERR);
+    _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
     assert(prime_sl_abi_version() == 2);
     assert(sizeof(PrimeSlFrame) == 904);
     void *output = reinterpret_cast<void *>(1);
@@ -348,6 +384,38 @@ int main() {
     ctx->marker = mock_marker;
     ctx->set_options = mock_options;
     ctx->evaluate = mock_evaluate;
+    // First title Present occurs before prime_sl_create, RR configuration or any FG frame.
+    active = nullptr;
+    ctx->fg_options = nullptr;
+    ctx->get_function = mock_feature_function;
+    VkPresentInfoKHR title_info{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
+    title_info.swapchainCount = 1;
+    const auto original_title = title_info;
+    present_result = VK_SUCCESS;
+    publish_present_result = false;
+    int prior_presents = presents;
+    assert(prime_sl_present(50, reinterpret_cast<uint64_t>(&title_info)) == VK_SUCCESS);
+    assert(presents == prior_presents + 1 && seen_present_info == &title_info &&
+           !std::memcmp(&title_info, &original_title, sizeof(title_info)));
+    assert(ctx->present_mode == PresentMode::Asynchronous && !ctx->fg_enabled &&
+           seen_fg.mode == sl::DLSSGMode::eOff && seen_fg.onErrorCallback == on_present_error);
+    int prior_options_calls = fg_options_calls;
+    assert(prime_sl_present(50, reinterpret_cast<uint64_t>(&title_info)) == VK_SUCCESS);
+    assert(fg_options_calls == prior_options_calls); // No steady per-frame option reset.
+    // SDK callback can run after a host call returned, on a different thread.
+    std::thread delayed([] { report_present_error(VK_ERROR_OUT_OF_DATE_KHR); });
+    delayed.join();
+    prior_presents = presents;
+    assert(prime_sl_present(50, reinterpret_cast<uint64_t>(&title_info)) ==
+           VK_ERROR_OUT_OF_DATE_KHR);
+    assert(presents == prior_presents + 1);
+    assert(prime_sl_present(50, reinterpret_cast<uint64_t>(&title_info)) == VK_SUCCESS);
+    report_present_error(VK_ERROR_DEVICE_LOST);
+    report_present_error(VK_SUBOPTIMAL_KHR); // A later warning cannot erase device loss.
+    assert(prime_sl_present(50, reinterpret_cast<uint64_t>(&title_info)) == VK_ERROR_DEVICE_LOST);
+    publish_present_result = true;
+    retirement.clear();
+    active = ctx;
     ctx->configured = true;
     ctx->size = {960, 540};
     ctx->options = make_options(1920, 1080, 3);
@@ -373,6 +441,7 @@ int main() {
     frame.jitter[0] += 0.25f;
     assert(prime_sl_fg_prepare(ctx, &fg) < 0 && constants_calls == prior_constants_calls + 1);
     frame.jitter[0] -= 0.25f;
+    ctx->present_mode = PresentMode::Uninitialized; // FG may prepare before the first Present.
     fg_io_failure = 4;
     assert(prime_sl_fg_prepare(ctx, &fg) == -101 && ctx->fg_enabled &&
            ctx->fg_tag_token == ctx->frame_token);
@@ -390,14 +459,18 @@ int main() {
     assert(seen_fg.queueParallelismMode ==
            sl::DLSSGQueueParallelismMode::eBlockPresentingClientQueue);
     assert(seen_fg.enableUserInterfaceRecomposition == sl::Boolean::eTrue);
+    assert(seen_fg.onErrorCallback == on_present_error);
     present_result = VK_SUCCESS;
     swapchain_result = VK_SUBOPTIMAL_KHR;
+    callback_result = swapchain_result;
     VkPresentInfoKHR present_info{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
     VkResult caller_result = VK_SUCCESS;
     present_info.swapchainCount = 1;
     present_info.pResults = &caller_result;
     auto original_info = present_info;
+    prior_options_calls = fg_options_calls;
     assert(prime_sl_present(50, reinterpret_cast<uint64_t>(&present_info)) == VK_SUBOPTIMAL_KHR);
+    assert(fg_options_calls == prior_options_calls && seen_fg.mode == sl::DLSSGMode::eOn);
     assert(caller_result == VK_SUBOPTIMAL_KHR &&
            !std::memcmp(&present_info, &original_info, sizeof(present_info)));
     assert(before == 4 && after == 4); // Interposer owns the mandatory hooks exactly once.
@@ -408,15 +481,36 @@ int main() {
     for (VkResult result :
          {VK_SUCCESS, VK_SUBOPTIMAL_KHR, VK_ERROR_OUT_OF_DATE_KHR, VK_ERROR_DEVICE_LOST}) {
         swapchain_result = result;
+        callback_result = result;
         assert(prime_sl_present(50, reinterpret_cast<uint64_t>(&present_info)) == result);
     }
     present_result = VK_ERROR_DEVICE_LOST;
     swapchain_result = VK_SUBOPTIMAL_KHR;
+    callback_result = swapchain_result;
     assert(prime_sl_present(50, reinterpret_cast<uint64_t>(&present_info)) == VK_ERROR_DEVICE_LOST);
     present_result = VK_SUCCESS;
     publish_present_result = false;
+    callback_result = VK_SUCCESS;
+    caller_result = VK_ERROR_UNKNOWN;
+    prior_presents = presents;
+    assert(prime_sl_present(50, reinterpret_cast<uint64_t>(&present_info)) == VK_SUCCESS);
+    assert(presents == prior_presents + 1 && seen_present_info == &present_info &&
+           caller_result == VK_SUCCESS);
+    publish_present_result = true;
+    for (VkResult result :
+         {VK_SUBOPTIMAL_KHR, VK_ERROR_OUT_OF_DATE_KHR, VK_ERROR_DEVICE_LOST, VK_ERROR_UNKNOWN}) {
+        swapchain_result = result;
+        assert(prime_sl_present(50, reinterpret_cast<uint64_t>(&present_info)) == result);
+        assert(caller_result == result); // Available caller output survives without a callback.
+    }
+    publish_present_result = false;
+    // Real driver failure wins over a positive SDK result, including a callback during Present.
+    present_result = VK_SUBOPTIMAL_KHR;
+    callback_result = VK_ERROR_OUT_OF_DATE_KHR;
     assert(prime_sl_present(50, reinterpret_cast<uint64_t>(&present_info)) ==
-           VK_ERROR_INITIALIZATION_FAILED);
+           VK_ERROR_OUT_OF_DATE_KHR);
+    callback_result = VK_SUCCESS;
+    present_result = VK_SUCCESS;
     publish_present_result = true;
     fg_wait_result = VK_TIMEOUT;
     assert(prime_sl_fg_suspend(ctx) == VK_TIMEOUT && ctx->fg_enabled);
@@ -424,6 +518,7 @@ int main() {
     fg_wait_result = VK_SUCCESS;
     retirement.clear();
     assert(prime_sl_fg_suspend(ctx) == 0 && !ctx->fg_enabled);
+    assert(seen_fg.onErrorCallback == on_present_error); // OFF must retain API error routing.
     assert((retirement == std::vector<int>{1, 2, 4, 3}));
     assert(prime_sl_fg_prepare(ctx, &fg) == 0 && ctx->fg_enabled);
     retirement.clear();
@@ -470,6 +565,54 @@ int main() {
     fg.images[3].image = fg.images[2].image;
     assert(prime_sl_fg_prepare(ctx, &fg) < 0 && !ctx->fg_enabled);
     assert(prime_sl_destroy(ctx) == 0 && active == nullptr && shutdowns == 1);
+    // Only a missing FG context proves the pinned SDK has no asynchronous FG hooks.
+    ctx->present_mode = PresentMode::Uninitialized;
+    ctx->fg_options = nullptr;
+    function_result = sl::Result::eErrorFeatureMissing;
+    present_result = VK_SUCCESS;
+    present_info.pResults = &caller_result;
+    for (VkResult result : {VK_SUCCESS, VK_SUBOPTIMAL_KHR, VK_ERROR_OUT_OF_DATE_KHR,
+                            VK_ERROR_DEVICE_LOST, VK_ERROR_UNKNOWN}) {
+        swapchain_result = result;
+        assert(prime_sl_present(50, reinterpret_cast<uint64_t>(&present_info)) == result);
+        assert(caller_result == result && seen_present_info != &present_info);
+    }
+    assert(ctx->present_mode == PresentMode::Synchronous);
+    present_result = VK_ERROR_OUT_OF_DATE_KHR;
+    swapchain_result = VK_ERROR_DEVICE_LOST;
+    assert(prime_sl_present(50, reinterpret_cast<uint64_t>(&present_info)) == VK_ERROR_DEVICE_LOST);
+    present_result = VK_ERROR_DEVICE_LOST;
+    swapchain_result = VK_ERROR_OUT_OF_DATE_KHR;
+    assert(prime_sl_present(50, reinterpret_cast<uint64_t>(&present_info)) == VK_ERROR_DEVICE_LOST);
+    present_result = VK_SUCCESS;
+    publish_present_result = false;
+    caller_result = VK_SUBOPTIMAL_KHR;
+    assert(prime_sl_present(50, reinterpret_cast<uint64_t>(&present_info)) ==
+           VK_ERROR_INITIALIZATION_FAILED);
+    assert(caller_result == VK_SUBOPTIMAL_KHR);
+    publish_present_result = true;
+    for (auto failure : {sl::Result::eErrorFeatureNotSupported, sl::Result::eErrorNotInitialized,
+                         sl::Result::eErrorIO}) {
+        ctx->present_mode = PresentMode::Uninitialized;
+        function_result = failure;
+        prior_presents = presents;
+        assert(prime_sl_present(50, reinterpret_cast<uint64_t>(&present_info)) ==
+               VK_ERROR_INITIALIZATION_FAILED);
+        assert(presents == prior_presents);
+    }
+    function_result = sl::Result::eOk;
+    fg_io_failure = 6; // OFF callback registration failure is not a successful Present.
+    options_callback_result = VK_ERROR_DEVICE_LOST;
+    prior_presents = presents;
+    assert(prime_sl_present(50, reinterpret_cast<uint64_t>(&present_info)) ==
+           VK_ERROR_INITIALIZATION_FAILED);
+    assert(presents == prior_presents);
+    options_callback_result = VK_SUCCESS;
+    fg_io_failure = 0;
+    publish_present_result = false;
+    assert(prime_sl_present(50, reinterpret_cast<uint64_t>(&present_info)) == VK_ERROR_DEVICE_LOST);
+    assert(presents == prior_presents + 1);
+    assert(prime_sl_present(50, reinterpret_cast<uint64_t>(&present_info)) == VK_SUCCESS);
     assert(prime_sl_frame(4, 0) == 0 && shutdowns == 2 && !ctx->initialized);
     bootstrapped = nullptr;
     delete ctx;

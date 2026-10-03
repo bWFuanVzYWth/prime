@@ -128,17 +128,34 @@ and quarantine images. The engine never accesses or manages NGX private images.
 
 Host actions delimit simulation, Reflex pacing, render submission and actual
 Present. Interposed presentation invokes hooks once, including when FG is
-inactive: Java's ordinary KHR dispatch still uses the installed interposer.
-Active FG uses the native wrapper for PCL Present markers. Late RR attachment
+inactive. Java binds the process-owned native Present entry during bootstrap,
+so title/loading frames do not require a world or RR owner. Native caches the
+interposer's exported Present function; FG frames also use PCL Present markers. Late RR attachment
 uses resolved common before/after callbacks around one driver call. No synthetic
 Present advances SDK bookkeeping.
 
 The pinned interposer overwrites the driver's aggregate result in after hooks.
-Both Java and native wrappers use a local single-swapchain `VkPresentInfoKHR`
-copy with scratch `pResults`, preserving the caller's descriptor. SDK errors
-retain priority; otherwise actual suboptimal/out-of-date/device-lost results
-survive. An unwritten result, including skipped Present without driver status,
-fails closed rather than inventing success. Actual FG Present, UI quality,
+Loaded DLSS-G can take over Present asynchronously even when FG is off. That
+path receives the original borrowed descriptor: synchronous `pResults` writes
+are not required, and no stack scratch result is injected. After host device
+creation, the first Present registers `DLSSGOptions::onErrorCallback` once in
+OFF mode; subsequent ON/OFF options preserve the callback. It stores reported
+underlying Present/acquire results in a process-owned atomic without taking the
+API mutex or referencing a world context. Native merges SDK status with pending
+errors received before/during the call. Later callbacks are delivered on a later
+Present; without frame identity, they are not attributed to a particular frame.
+Device loss has highest priority, then the first negative result, then a reported
+nonzero status. Each accepted call invokes the interposer once and adds no GPU wait.
+When the caller already supplies `pResults`, a written synchronous result also
+participates in that merge. If the SDK leaves it unwritten, the bridge publishes
+the merged SDK acceptance/error status there, without claiming physical completion.
+
+Only `eErrorFeatureMissing` establishes absence of FG hooks in the pinned SDK.
+That synchronous branch uses one local descriptor copy with scratch `pResults`
+to recover the driver result; an unwritten result remains an explicit failure.
+Other callback-registration failures do not imply synchronous presentation and
+are reported as initialization failure. A successful asynchronous SDK return
+does not prove that the physical Present has completed. Actual FG Present, UI quality,
 pacing and resize remain manual game acceptance; no-window mocks do not prove
 these outcomes.
 
@@ -154,7 +171,11 @@ Tests cover RR mode/preset/alpha and guides, one-time shared constants, FG
 formats/tags/options, Reflex/PCL markers, public-fence timeout retention, tag
 clearing, unavailable extents, all seven SDK I/O failure boundaries, host shutdown
 and actual Present result precedence. They do not prove runtime quality or game
-performance.
+performance. Startup tests additionally cover the title path without a world,
+unwritten asynchronous results, cross-thread delayed errors, callback retention
+through ON/OFF, and the strictly gated synchronous fallback. The interposed
+initialization-only fixture registers the real SDK callback before RR creation;
+it creates no window and does not execute the DLSS model or actual Present.
 
 The real SDK fixture requires NVIDIA RTX and Khronos validation. It evaluates
 960×540 to native 1920×1080 Performance/F, then checks every RGB half after actual

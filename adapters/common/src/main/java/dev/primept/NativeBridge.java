@@ -260,7 +260,7 @@ public final class NativeBridge implements AutoCloseable {
         return vulkanPresent != null;
     }
 
-    /** Borrows the host present descriptor only for this call; returns the actual Vulkan result. */
+    /** Borrows the host descriptor for one call; returns SDK status merged with API errors. */
     public static int presentVulkan(long queue, long presentInfo) {
         try {
             return (int)vulkanPresent.invokeExact(queue, presentInfo);

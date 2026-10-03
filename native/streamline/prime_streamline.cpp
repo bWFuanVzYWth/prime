@@ -6,6 +6,7 @@
 #include <vulkan/vulkan.h>
 
 #include <algorithm>
+#include <atomic>
 #include <array>
 #include <cmath>
 #include <cstdio>
@@ -32,6 +33,27 @@ thread_local char error_text[512]{};
 thread_local bool evaluating{};
 thread_local bool evaluation_logged_error{};
 std::mutex api_mutex;
+// SDK Present/acquire callbacks may run on its private thread while api_mutex is held.
+// This storage belongs to the process, not a world Context or a borrowed descriptor.
+std::atomic<int32_t> pending_present_result{VK_SUCCESS};
+
+VkResult combine_present_results(VkResult first, VkResult second) {
+    if (first == VK_ERROR_DEVICE_LOST || second == VK_ERROR_DEVICE_LOST)
+        return VK_ERROR_DEVICE_LOST;
+    if (first < VK_SUCCESS)
+        return first;
+    if (second < VK_SUCCESS)
+        return second;
+    return first == VK_SUCCESS ? second : first;
+}
+
+void on_present_error(const sl::APIError &error) {
+    const auto result = static_cast<VkResult>(error.vkRes);
+    auto previous = pending_present_result.load(std::memory_order_relaxed);
+    while (!pending_present_result.compare_exchange_weak(
+            previous, combine_present_results(static_cast<VkResult>(previous), result),
+            std::memory_order_relaxed)) {}
+}
 
 void log_message(sl::LogType type, const char *message) {
     if (evaluating && type == sl::LogType::eError) {
@@ -57,6 +79,7 @@ template <typename T> bool symbol(HMODULE module, const char *name, T *&result) 
 
 using BeforePresent = VkResult(VkQueue, const VkPresentInfoKHR *, bool &);
 using AfterPresent = VkResult();
+enum class PresentMode { Uninitialized, Synchronous, Asynchronous };
 
 struct Context {
     HMODULE module{};
@@ -65,6 +88,7 @@ struct Context {
     bool configured{};
     bool interposed{};
     PFN_vkQueuePresentKHR interposed_present{};
+    PresentMode present_mode{};
     VkDevice device{};
     PFN_vkWaitSemaphores wait_semaphores{};
     bool fg_supported{}, fg_enabled{}, reflex_enabled{};
@@ -202,7 +226,37 @@ int32_t initialize_context(Context &ctx, bool interposed) {
     LOAD(evaluate, slEvaluateFeature);
     LOAD(free_resources, slFreeResources);
 #undef LOAD
+    if (interposed && !symbol(ctx.module, "vkQueuePresentKHR", ctx.interposed_present))
+        return fail("Missing Streamline Vulkan Present export");
     return initialize_preferences(ctx, interposed);
+}
+
+int32_t initialize_present(Context &ctx) {
+    if (ctx.present_mode != PresentMode::Uninitialized)
+        return 0;
+    if (!ctx.fg_options) {
+        void *function{};
+        const auto result = ctx.get_function(sl::kFeatureDLSS_G, "slDLSSGSetOptions", function);
+        // The pinned plugin manager removes a failed/missing FG context before registering
+        // its hooks. Other failures (including unsupported) do not prove synchronous Present.
+        if (result == sl::Result::eErrorFeatureMissing) {
+            ctx.present_mode = PresentMode::Synchronous;
+            return 0;
+        }
+        if (check(result, "slGetFeatureFunction(Present errors)"))
+            return -1;
+        ctx.fg_options = reinterpret_cast<PFun_slDLSSGSetOptions *>(function);
+        if (!ctx.fg_options)
+            return fail("Missing DLSSG Present error options");
+    }
+    // Called only at the first real Present: host device/plugin creation is complete,
+    // even if no world/RR owner exists yet. Subsequent ON/OFF calls retain this callback.
+    sl::DLSSGOptions options;
+    options.onErrorCallback = on_present_error;
+    if (check(ctx.fg_options(ctx.viewport, options), "slDLSSGSetOptions(Present errors)"))
+        return -1;
+    ctx.present_mode = PresentMode::Asynchronous;
+    return 0;
 }
 
 void copy_matrix(sl::float4x4 &destination, const float *source) {
@@ -370,6 +424,7 @@ int32_t suspend_fg(Context &ctx) {
             return fail("DLSS FG input completion is unresolved", static_cast<int32_t>(status));
     }
     sl::DLSSGOptions options;
+    options.onErrorCallback = on_present_error;
     if ((result = check(ctx.fg_options(ctx.viewport, options), "slDLSSGSetOptions(OFF)")))
         return result;
     if (ctx.fg_tag_token) {
@@ -561,11 +616,6 @@ extern "C" int32_t prime_sl_create(const PrimeSlInit *init, void **output) {
                     !symbol(ctx->module, "slSetTagForFrame", ctx->set_tags))
                     ctx->fg_supported = false;
             }
-            PFN_vkGetDeviceProcAddr interposed_proc{};
-            if (!symbol(ctx->module, "vkGetDeviceProcAddr", interposed_proc) ||
-                !(ctx->interposed_present = reinterpret_cast<PFN_vkQueuePresentKHR>(
-                          interposed_proc(info.device, "vkQueuePresentKHR"))))
-                return fail("Cannot retrieve interposed Vulkan Present");
         }
         active = ctx;
         if (owned)
@@ -731,6 +781,7 @@ extern "C" int32_t prime_sl_fg_prepare(void *context, const PrimeSlFgFrame *fram
         if (result)
             return error(result);
         sl::DLSSGOptions options;
+        options.onErrorCallback = on_present_error;
         options.mode = sl::DLSSGMode::eOn;
         options.numFramesToGenerate = 1;
         options.numBackBuffers = frame->back_buffer_count;
@@ -758,6 +809,7 @@ extern "C" int32_t prime_sl_fg_prepare(void *context, const PrimeSlFgFrame *fram
         ctx.fg_enabled = true; // Options may allocate resources even if the following call fails.
         if ((result = check(ctx.fg_options(ctx.viewport, options), "slDLSSGSetOptions(ON)")))
             return error(result);
+        ctx.present_mode = PresentMode::Asynchronous;
         constexpr sl::BufferType types[] = {sl::kBufferTypeDepth, sl::kBufferTypeMotionVectors,
                                             sl::kBufferTypeHUDLessColor, sl::kBufferTypeUIAlpha};
         std::array<sl::Resource, 4> resources;
@@ -819,26 +871,47 @@ extern "C" int32_t prime_sl_present(uint64_t queue, uint64_t present_info) {
     auto info = reinterpret_cast<const VkPresentInfoKHR *>(present_info);
     // Interposer already owns all mandatory lifecycle hooks. Never invoke common hooks twice.
     if (context && context->interposed) {
+        if (!info || info->swapchainCount != 1 || initialize_present(*context))
+            return VK_ERROR_INITIALIZATION_FAILED;
         mark(*context, sl::PCLMarker::eRenderSubmitEnd);
         mark(*context, sl::PCLMarker::ePresentStart);
-        if (!info || info->swapchainCount != 1)
-            return VK_ERROR_INITIALIZATION_FAILED;
-        // The pinned interposer overwrites the driver's aggregate result in its after hooks.
-        // Keep the caller's descriptor intact and recover the actual per-swapchain result.
-        VkPresentInfoKHR copy = *info;
-        VkResult swapchain_result = VK_ERROR_UNKNOWN;
-        copy.pResults = &swapchain_result;
-        const VkResult sdk_result = present(native_queue, &copy);
-        if (info->pResults)
-            info->pResults[0] = swapchain_result;
-        mark(*context, sl::PCLMarker::ePresentEnd);
-        if (sdk_result < VK_SUCCESS)
-            return sdk_result;
-        if (swapchain_result == VK_ERROR_UNKNOWN) {
-            fail("Interposed Present did not publish the actual swapchain result");
-            return VK_ERROR_INITIALIZATION_FAILED;
+        VkResult result;
+        if (context->present_mode == PresentMode::Synchronous) {
+            // No FG hook exists. Recover the synchronous driver's result before the common
+            // after hook overwrites the SDK aggregate; this scratch cannot escape the call.
+            VkPresentInfoKHR copy = *info;
+            VkResult swapchain_result = VK_RESULT_MAX_ENUM;
+            copy.pResults = &swapchain_result;
+            const VkResult sdk_result = present(native_queue, &copy);
+            if (info->pResults && swapchain_result != VK_RESULT_MAX_ENUM)
+                info->pResults[0] = swapchain_result;
+            result = swapchain_result == VK_RESULT_MAX_ENUM
+                             ? (sdk_result < VK_SUCCESS ? sdk_result
+                                                        : VK_ERROR_INITIALIZATION_FAILED)
+                             : combine_present_results(sdk_result, swapchain_result);
+        } else {
+            // Loaded FG can present asynchronously even when OFF. pResults need not be
+            // written at return, so never inject a borrowed stack result into that path.
+            const auto previous = static_cast<VkResult>(
+                    pending_present_result.exchange(VK_SUCCESS, std::memory_order_relaxed));
+            // An existing caller-owned output can provide a synchronous result. It is not
+            // required: the ordinary host passes null, and an async SDK may leave it unwritten.
+            if (info->pResults)
+                info->pResults[0] = VK_RESULT_MAX_ENUM;
+            const VkResult sdk_result = present(native_queue, info);
+            const auto current = static_cast<VkResult>(
+                    pending_present_result.exchange(VK_SUCCESS, std::memory_order_relaxed));
+            result =
+                    combine_present_results(combine_present_results(sdk_result, previous), current);
+            if (info->pResults) {
+                if (info->pResults[0] != VK_RESULT_MAX_ENUM)
+                    result = combine_present_results(result, info->pResults[0]);
+                else
+                    info->pResults[0] = result; // SDK acceptance/error status, not completion.
+            }
         }
-        return swapchain_result == VK_SUCCESS ? sdk_result : swapchain_result;
+        mark(*context, sl::PCLMarker::ePresentEnd);
+        return result;
     }
     return present_with_hooks(active, present, native_queue, info);
 }

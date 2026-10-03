@@ -12,7 +12,7 @@ import java.lang.invoke.MethodHandle;
 /** Process-owned SDK initialization before Minecraft creates any Vulkan objects. */
 public final class StreamlineBootstrap {
     private static boolean installed;
-    private static MethodHandle frame;
+    private static MethodHandle frame, present;
 
     private StreamlineBootstrap() {}
 
@@ -38,14 +38,27 @@ public final class StreamlineBootstrap {
             if (status != 0)
                 throw new IllegalStateException("Early Streamline initialization failed: " +
                                                 status);
-            setVulkanLoader.accept(interposer.toString());
             frame = PrimeAbi.bind(lookup, "prime_streamline_frame");
+            present = PrimeAbi.bind(lookup, "prime_streamline_present");
+            setVulkanLoader.accept(interposer.toString());
             installed = true;
         } catch (RuntimeException | Error failure) {
             throw failure;
         } catch (Throwable failure) {
             throw new IllegalStateException("Cannot initialize the Streamline Vulkan interposer",
                                             failure);
+        }
+    }
+
+    /** Present is process-owned and available before a world renderer attaches. */
+    public static int present(long queue, long presentInfo) {
+        try {
+            return (int)present.invokeExact(queue, presentInfo);
+        } catch (RuntimeException | Error failure) {
+            throw failure;
+        } catch (Throwable failure) {
+            throw new IllegalStateException(
+                    "Cannot present through the Streamline Vulkan interposer", failure);
         }
     }
 
