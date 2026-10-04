@@ -42,6 +42,12 @@ float sphereCosineBound(float c, float sinBound, float cosBound) {
     return c >= cosBound ? 1.0
                          : clamp(c * cosBound + sqrt(max(1.0 - c * c, 0.0)) * sinBound, 0.0, 1.0);
 }
+float2 sphereCosineBoundPair(float c, float sinBound, float cosBound) {
+    // Opposite lobes share their tangent term; keep each bound's original arithmetic.
+    float tangent = sqrt(max(1.0 - c * c, 0.0)) * sinBound;
+    return float2(c >= cosBound ? 1.0 : clamp(c * cosBound + tangent, 0.0, 1.0),
+                  -c >= cosBound ? 1.0 : clamp(-c * cosBound + tangent, 0.0, 1.0));
+}
 float2 sphereNodeMetrics(SphereNode node, SphereReceiver receiver) {
     float3 delta = node.centroid - receiver.position;
     float d2 = dot(delta, delta), radius = node.radius;
@@ -54,30 +60,38 @@ float2 sphereNodeMetrics(SphereNode node, SphereReceiver receiver) {
         float rec = dot(receiver.normal, receiver.normal) > 0.0
                             ? sphereCosineBound(dot(wi, receiver.normal), sinBound, cosBound)
                             : 1.0;
-        float3 d = -wi;
-        uint mode = node.direction >> 30;
-        float emission = 1.0;
-        if (mode == 2) {
-            emission = 0.0;
-            for (uint i = 0; i < 6; ++i) {
-                float c = d[i / 2] * ((i & 1u) == 0 ? 1.0 : -1.0);
-                emission += float((node.direction >> (5u * i)) & 31u) / 31.0 *
-                            sphereCosineBound(c, sinBound, cosBound);
+        angular = 0.0;
+        if (rec != 0.0) {
+            float3 d = -wi;
+            uint mode = node.direction >> 30;
+            float emission = 1.0;
+            if (mode == 2) {
+                float2 x = sphereCosineBoundPair(d.x, sinBound, cosBound);
+                float2 y = sphereCosineBoundPair(d.y, sinBound, cosBound);
+                float2 z = sphereCosineBoundPair(d.z, sinBound, cosBound);
+                // Preserve +X,-X,+Y,-Y,+Z,-Z association; backend FP contraction can differ.
+                emission = 0.0;
+                emission += float(node.direction & 31u) / 31.0 * x.x;
+                emission += float((node.direction >> 5) & 31u) / 31.0 * x.y;
+                emission += float((node.direction >> 10) & 31u) / 31.0 * y.x;
+                emission += float((node.direction >> 15) & 31u) / 31.0 * y.y;
+                emission += float((node.direction >> 20) & 31u) / 31.0 * z.x;
+                emission += float((node.direction >> 25) & 31u) / 31.0 * z.y;
+                emission = min(emission, 1.0);
+            } else if (mode < 2) {
+                float c = dot(primeUnpackLightEmissionAxis(node.direction), d);
+                if (mode == 1)
+                    c = abs(c);
+                float coneSin = float((node.direction >> 20) & 1023u) / 1023.0;
+                float coneCos = sqrt(max(1.0 - coneSin * coneSin, 0.0));
+                float sinTotal = coneSin * cosBound + coneCos * sinBound;
+                float cosTotal = coneCos * cosBound - coneSin * sinBound;
+                emission = cosTotal <= 0.0 ? 1.0 : sphereCosineBound(c, sinTotal, cosTotal);
+                if (mode == 1)
+                    emission *= 0.5;
             }
-            emission = min(emission, 1.0);
-        } else if (mode < 2) {
-            float c = dot(primeUnpackLightEmissionAxis(node.direction), d);
-            if (mode == 1)
-                c = abs(c);
-            float coneSin = float((node.direction >> 20) & 1023u) / 1023.0;
-            float coneCos = sqrt(max(1.0 - coneSin * coneSin, 0.0));
-            float sinTotal = coneSin * cosBound + coneCos * sinBound;
-            float cosTotal = coneCos * cosBound - coneSin * sinBound;
-            emission = cosTotal <= 0.0 ? 1.0 : sphereCosineBound(c, sinTotal, cosTotal);
-            if (mode == 1)
-                emission *= 0.5;
+            angular = clamp(rec * emission, 0.0, 1.0);
         }
-        angular = clamp(rec * emission, 0.0, 1.0);
     }
     // Preserve the historical centroid-distance metric; only angle estimation changes.
     return float2(d2, max(node.power, 0.0) * (1.0 / 256.0 + 255.0 / 256.0 * angular));

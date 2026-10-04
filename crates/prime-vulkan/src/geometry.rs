@@ -183,6 +183,7 @@ pub(super) struct LightSamplingSnapshot {
         prime_scene::settings::LightSampling,
     )>,
     pub blas: Vec<vk::AccelerationStructureKHR>,
+    pub local_depths: [u64; 28],
 }
 
 impl Geometry {
@@ -366,6 +367,17 @@ impl Geometry {
 
     #[cfg(test)]
     pub(super) fn light_sampling_snapshot(&self) -> LightSamplingSnapshot {
+        let mut local_depths = [0; 28];
+        for (_, page) in self.light_sources.values() {
+            if let Some(tree) = &page.tree {
+                for (total, count) in local_depths
+                    .iter_mut()
+                    .zip(crate::light_sphere_cpu::leaf_depths(&tree.paths))
+                {
+                    *total += count;
+                }
+            }
+        }
         LightSamplingSnapshot {
             method: self.light_sampling,
             dirty: self.sampler_dirty,
@@ -382,6 +394,7 @@ impl Geometry {
                 .values()
                 .map(|cluster| cluster.acceleration.handle)
                 .collect(),
+            local_depths,
         }
     }
 

@@ -3,6 +3,28 @@
 //! Direction/SAOH construction is derived from Prime b35438684203200b6ab8c0b19977bd06625faaea.
 use prime_scene::surface::Emitter;
 
+#[cfg(all(test, feature = "shader-tests"))]
+pub(crate) fn register_tree_build() -> &'static str {
+    static STRATEGY: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+    STRATEGY.get_or_init(|| match std::env::var("PRIME_REGISTER_TREE_BUILD") {
+        Err(std::env::VarError::NotPresent) => "saoh",
+        Ok(value) if value == "saoh" => "saoh",
+        Ok(value) if value == "balanced" => "balanced",
+        _ => panic!("PRIME_REGISTER_TREE_BUILD must be saoh or balanced"),
+    })
+}
+
+#[cfg(test)]
+pub(crate) fn leaf_depths(paths: &[u32]) -> [u64; 28] {
+    let mut histogram = [0; 28];
+    for &path in paths {
+        if path != u32::MAX {
+            histogram[(path >> 27) as usize] += 1;
+        }
+    }
+    histogram
+}
+
 pub(crate) const SELECTORS: u32 = 1 << 24;
 
 fn radius(bounds: [[f32; 3]; 2], center: [f32; 3]) -> f32 {
@@ -386,8 +408,48 @@ fn split(s: &mut [Source], depth: u32) -> usize {
     }
     middle
 }
+
+#[cfg(test)]
+fn split_balanced(s: &mut [Source]) -> usize {
+    let mut lower = [f32::INFINITY; 3];
+    let mut upper = [f32::NEG_INFINITY; 3];
+    for source in s.iter() {
+        for axis in 0..3 {
+            lower[axis] = lower[axis].min(source.center[axis]);
+            upper[axis] = upper[axis].max(source.center[axis]);
+        }
+    }
+    let extent: [f32; 3] = std::array::from_fn(|axis| upper[axis] - lower[axis]);
+    let longest = if extent[0] >= extent[1] && extent[0] >= extent[2] {
+        0
+    } else if extent[1] >= extent[2] {
+        1
+    } else {
+        2
+    };
+    // IDs break equal-centroid ties: the resulting ordering is deterministic.
+    s.sort_unstable_by(|a, b| {
+        a.center[longest]
+            .total_cmp(&b.center[longest])
+            .then(a.index.cmp(&b.index))
+    });
+    s.len() / 2
+}
+
 impl Tree {
-    fn build(mut source: Vec<Source>, capacity: usize, world: bool) -> Self {
+    fn build(source: Vec<Source>, capacity: usize, world: bool) -> Self {
+        #[cfg(all(test, feature = "shader-tests"))]
+        if register_tree_build() == "balanced" {
+            return Self::build_with::<true>(source, capacity, world);
+        }
+        Self::build_with::<false>(source, capacity, world)
+    }
+
+    fn build_with<const BALANCED: bool>(
+        mut source: Vec<Source>,
+        capacity: usize,
+        world: bool,
+    ) -> Self {
         let mut nodes = Vec::with_capacity(source.len() * 2 - 1);
         nodes.push(Node::default());
         let mut tree = Self {
@@ -395,10 +457,19 @@ impl Tree {
             paths: vec![u32::MAX; capacity],
             bounds: [[0.0; 3]; 2],
         };
-        tree.bounds = tree.populate(&mut source, 0, 0, 0, world).0;
+        tree.bounds = tree.populate::<BALANCED>(&mut source, 0, 0, 0, world).0;
+        #[cfg(all(test, feature = "shader-tests"))]
+        if world {
+            eprintln!(
+                "register tree: scope=world strategy={} leaves={} leaf_depths={:?}",
+                if BALANCED { "balanced" } else { "saoh" },
+                source.len(),
+                leaf_depths(&tree.paths),
+            );
+        }
         tree
     }
-    fn populate(
+    fn populate<const BALANCED: bool>(
         &mut self,
         s: &mut [Source],
         at: usize,
@@ -442,12 +513,20 @@ impl Tree {
             node.child = LEAF | s[0].index;
             self.paths[s[0].index as usize] = depth << 27 | trail;
         } else {
+            #[cfg(test)]
+            let middle = if BALANCED {
+                split_balanced(s)
+            } else {
+                split(s, depth)
+            };
+            #[cfg(not(test))]
             let middle = split(s, depth);
             node.child = self.nodes.len() as u32;
             self.nodes.extend([Node::default(); 2]);
             let (a, b) = s.split_at_mut(middle);
-            let (_, ad) = self.populate(a, node.child as usize, trail, depth + 1, world);
-            let (_, bd) = self.populate(
+            let (_, ad) =
+                self.populate::<BALANCED>(a, node.child as usize, trail, depth + 1, world);
+            let (_, bd) = self.populate::<BALANCED>(
                 b,
                 node.child as usize + 1,
                 trail | 1 << depth,
@@ -665,6 +744,98 @@ mod tests {
                     node.leaves,
                     tree.nodes[child].leaves + tree.nodes[child + 1].leaves
                 );
+            }
+        }
+    }
+
+    fn balanced_sources(count: usize, coincident: bool) -> Vec<Source> {
+        (0..count)
+            .map(|i| {
+                let center = if coincident {
+                    [0.; 3]
+                } else {
+                    [(i * 13 % 17) as f32, (i * 7 % 11) as f32, i as f32]
+                };
+                Source {
+                    bounds: [center.map(|v| v - 0.5), center.map(|v| v + 0.5)],
+                    center,
+                    power: (i + 1) as f32,
+                    index: (i * 3 + 2) as u32,
+                    direction: Direction::normal([0., 0., 1.], false),
+                    represented_direction: None,
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn sphere_balanced_tree_has_unique_sparse_leaves_and_minimal_depth_span() {
+        for count in [1, 2, 3, 5, 7, 8, 9, 17, 31, 32, 33, 65] {
+            for coincident in [false, true] {
+                for world in [false, true] {
+                    let tree = Tree::build_with::<true>(
+                        balanced_sources(count, coincident),
+                        count * 3 + 2,
+                        world,
+                    );
+                    assert_topology(&tree);
+                    assert_eq!(tree.nodes.len(), count * 2 - 1);
+                    assert_eq!(tree.nodes[0].leaves as usize, count);
+                    let ids: std::collections::BTreeSet<_> = tree
+                        .nodes
+                        .iter()
+                        .filter(|n| n.child & LEAF != 0)
+                        .map(|n| n.child & !LEAF)
+                        .collect();
+                    assert_eq!(ids.len(), count);
+                    assert_eq!(ids, (0..count).map(|i| (i * 3 + 2) as u32).collect());
+                    let histogram = leaf_depths(&tree.paths);
+                    assert_eq!(histogram.iter().sum::<u64>(), count as u64);
+                    let low = (usize::BITS - 1 - count.leading_zeros()) as usize;
+                    let high = low + usize::from(!count.is_power_of_two());
+                    for (depth, leaves) in histogram.into_iter().enumerate() {
+                        assert!(leaves == 0 || (low..=high).contains(&depth));
+                    }
+                    for node in &tree.nodes {
+                        if node.child & LEAF == 0 {
+                            let child = node.child as usize;
+                            assert_eq!(tree.nodes[child].leaves, node.leaves / 2);
+                            assert_eq!(tree.nodes[child + 1].leaves, node.leaves - node.leaves / 2);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn sphere_balanced_tree_integer_paths_preserve_support_and_total_mass() {
+        for count in [3, 5, 17, 33, 65] {
+            let tree =
+                Tree::build_with::<true>(balanced_sources(count, false), count * 3 + 2, false);
+            for p in [0.0, 1e-20, 0.17, 0.5, 1.0 - 1e-6, 1.0] {
+                let mut total = 0;
+                for (id, &path) in tree.paths.iter().enumerate() {
+                    if path == u32::MAX {
+                        continue;
+                    }
+                    let mut at = 0;
+                    let mut mass = SELECTORS;
+                    for depth in 0..path >> 27 {
+                        let child = tree.nodes[at].child as usize;
+                        let left = ((mass as f32 * p).round() as u32).clamp(
+                            tree.nodes[child].leaves,
+                            mass - tree.nodes[child + 1].leaves,
+                        );
+                        let second = (path >> depth) & 1 != 0;
+                        mass = if second { mass - left } else { left };
+                        at = child + usize::from(second);
+                    }
+                    assert_eq!(tree.nodes[at].child, LEAF | id as u32);
+                    assert!(mass > 0);
+                    total += mass;
+                }
+                assert_eq!(total, SELECTORS);
             }
         }
     }

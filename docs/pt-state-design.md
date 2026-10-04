@@ -100,6 +100,8 @@ CPU 证明必须说明生产者、覆盖域、未知情况和失效路径。当�
 
 Grid、功率Tree与TreeSphere均为独立编译产物，CPU在创建或帧边界切换时选择；稳态没有GPU方法分派。TreeSphere的32B节点评分和实际整数区间PDF重放见[shader契约](shaders.md#采样域)。它仅在K2/Offline续接之后增加三个浮点分量的`previousLightNormal`，跨后续最近交点查询保存，到发光命中MIS重放前驱proposal时消费；K1和其他采样变体没有该字段。这是新增外部活跃值，不能由节点大小或小样板选光耗时推断完整PT的寄存器、查询保存成本或帧率。
 
+TreeSphere世界六瓣评分按正负同轴复用切向角度项，保留六项累加顺序；接收侧球界cosine为零时省去发射方向评分，仍应用原功率floor。前向选择与反向PDF使用同一评分与整数区间函数。局部终端继续按实际quad两半几何求界，不增加矩形或轴向假设；数学复用不构成GPU逐位等价、spill减少或整帧提速的证明。
+
 为了在游戏内切换而保留已发布几何，`SurfaceMesh.lights`与`LightPage.source`共享`Arc<LightTree>`，灯页另以`Arc<Buffer>`共享不可变GPU发光记录。CPU原灯源在灯页存活期间保留；它包含发光面positions等80B逻辑记录及32B原功率树节点，不持有全部quads，也不复制同一灯源。对于N个灯、`2N−1`个节点，逻辑数据约`144N−32`B，另有Vec容量、Arc和管理开销；同一Arc由上游仍持有时不重复计费。原先可随临时SurfaceMesh销毁的灯数据现在延长驻留，不能称为零额外内存。所选方法的CPU摘要、路径和GPU表另计，切换时新旧资源还会短时共存。
 
 切换先由Java提交并等待旧宿主工作完成，native沿现有模式重建路径退休管线、RR和输出。下一active host record按已发布灯页的稳定key重建所选局部节点与世界表，复用emitter buffer，替换所有cluster和light_sources中的页引用，再更新目录灯字段及global header；灯表上传和目录拷贝的可见性仍由原队列屏障证明。sampler dirty使冻结Offline也执行这一次准备，完成前不dispatch。灯字段更新不修改目录实例，不因采样方式本身重建BLAS/TLAS、重新取得宿主源或重新编译全场景；正常待更新几何仍受原预算管理。Buffer及旧表按实际提交完成值回收，失败继续隔离session。

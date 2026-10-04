@@ -189,73 +189,41 @@ impl HostBenchmark {
                 "Frozen realtime baseline requires Offline dispatch with one sample".into(),
             );
         }
-        let pipeline = renderer.pipeline.as_mut().unwrap();
-        let device = &renderer.context.device;
-        let spirv = ash::util::read_spv(&mut Cursor::new(bytes))
-            .map_err(|e| format!("Read frozen realtime SPIR-V: {e}"))?;
-        unsafe {
-            let shader = device
-                .create_shader_module(&vk::ShaderModuleCreateInfo::default().code(&spirv), None)
-                .map_err(|e| error("Create frozen realtime shader", e))?;
-            let mut replacements = Vec::with_capacity(6);
-            let created = (|| {
-                let entries = [0, 1, 2].map(|constant_id| vk::SpecializationMapEntry {
-                    constant_id,
-                    offset: constant_id * 4,
-                    size: 4,
-                });
-                for features in [
-                    [0_u32, 0, 0],
-                    [1, 0, 0],
-                    [2, 0, 0],
-                    [2, 1, 0],
-                    [2, 0, 1],
-                    [2, 1, 1],
-                ] {
-                    let data = features.map(u32::to_le_bytes);
-                    let specialization = vk::SpecializationInfo::default()
-                        .map_entries(&entries)
-                        .data(data.as_flattened());
-                    let stage = vk::PipelineShaderStageCreateInfo::default()
-                        .stage(vk::ShaderStageFlags::COMPUTE)
-                        .module(shader)
-                        .name(c"main")
-                        .specialization_info(&specialization);
-                    match device.create_compute_pipelines(
-                        vk::PipelineCache::null(),
-                        &[vk::ComputePipelineCreateInfo::default()
-                            .stage(stage)
-                            .layout(pipeline.layout)],
-                        None,
-                    ) {
-                        Ok(values) => replacements.push(values[0]),
-                        Err((partial, e)) => {
-                            for value in partial {
-                                device.destroy_pipeline(value, None);
-                            }
-                            return Err(error("Create frozen realtime pipeline", e));
-                        }
-                    }
-                }
-                Ok(())
-            })();
-            device.destroy_shader_module(shader, None);
-            if let Err(message) = created {
-                for value in replacements {
-                    device.destroy_pipeline(value, None);
-                }
-                return Err(message);
-            }
-            for (target, replacement) in pipeline.pipelines.iter_mut().zip(replacements) {
-                device.destroy_pipeline(std::mem::replace(target, replacement), None);
-            }
-            if let Some(single) = pipeline.single_sample_pipelines.take() {
-                for value in single {
-                    device.destroy_pipeline(value, None);
-                }
-            }
-        }
-        Ok(())
+        renderer.install_transport_reference(bytes)
+    }
+
+    #[cfg(all(test, feature = "shader-tests"))]
+    pub(super) fn install_transport_reference(&mut self, bytes: &[u8]) -> Result<(), String> {
+        self.drain()?;
+        self.state
+            .as_mut()
+            .unwrap()
+            .renderer
+            .as_mut()
+            .unwrap()
+            .install_transport_reference(bytes)
+    }
+
+    #[cfg(all(test, feature = "shader-tests"))]
+    pub(super) fn fixture_ready(&self, scene: &Scene) -> bool {
+        self.state
+            .as_ref()
+            .unwrap()
+            .renderer
+            .as_ref()
+            .unwrap()
+            .fixture_ready(scene)
+    }
+
+    #[cfg(all(test, feature = "shader-tests"))]
+    pub(super) fn fixture_geometry_summary(&self) -> (u64, usize, usize, usize, [u64; 28]) {
+        self.state
+            .as_ref()
+            .unwrap()
+            .renderer
+            .as_ref()
+            .unwrap()
+            .fixture_geometry_summary()
     }
 
     #[cfg(all(test, feature = "shader-tests"))]
@@ -568,6 +536,111 @@ impl HostBenchmark {
 
 fn nanos(start: Instant) -> u64 {
     start.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64
+}
+
+#[cfg(all(test, feature = "shader-tests"))]
+impl Renderer {
+    /// Call after render/drain completion. The fixture declares one nonempty group per Cell.
+    pub(super) fn fixture_ready(&self, scene: &Scene) -> bool {
+        !self.failed
+            && self.pending_temporal_serial == 0
+            && self.geometry.as_ref().is_some_and(|geometry| {
+                !geometry.needs_update(scene.into())
+                    && scene
+                        .ready_terrain
+                        .iter()
+                        .all(|cell| geometry.static_slot(*cell).is_some())
+            })
+    }
+
+    pub(super) fn fixture_geometry_summary(&self) -> (u64, usize, usize, usize, [u64; 28]) {
+        let geometry = self.geometry.as_ref().unwrap();
+        let snapshot = geometry.light_sampling_snapshot();
+        let lamps = snapshot.pages.iter().map(|p| p.2.emitters.len()).sum();
+        (
+            geometry.triangle_count,
+            snapshot.blas.len(),
+            snapshot.pages.len(),
+            lamps,
+            snapshot.local_depths,
+        )
+    }
+
+    /// Replace the current mode's transport bank after its submitted consumers finish.
+    /// The caller supplies SPIR-V matching the current mode, layout and light method.
+    pub(super) fn install_transport_reference(&mut self, bytes: &[u8]) -> Result<(), String> {
+        if self.failed || self.pending_temporal_serial != 0 {
+            return Err("Cannot replace transport on a failed or unsubmitted renderer".into());
+        }
+        self.context.wait_host_idle()?;
+        let pipeline = self.pipeline.as_mut().unwrap();
+        let device = &self.context.device;
+        let spirv = ash::util::read_spv(&mut Cursor::new(bytes))
+            .map_err(|e| format!("Read frozen transport SPIR-V: {e}"))?;
+        unsafe {
+            let shader = device
+                .create_shader_module(&vk::ShaderModuleCreateInfo::default().code(&spirv), None)
+                .map_err(|e| error("Create frozen transport shader", e))?;
+            let mut replacements = Vec::with_capacity(6);
+            let created = (|| {
+                let entries = [0, 1, 2].map(|constant_id| vk::SpecializationMapEntry {
+                    constant_id,
+                    offset: constant_id * 4,
+                    size: 4,
+                });
+                for features in [
+                    [0_u32, 0, 0],
+                    [1, 0, 0],
+                    [2, 0, 0],
+                    [2, 1, 0],
+                    [2, 0, 1],
+                    [2, 1, 1],
+                ] {
+                    let data = features.map(u32::to_le_bytes);
+                    let specialization = vk::SpecializationInfo::default()
+                        .map_entries(&entries)
+                        .data(data.as_flattened());
+                    let stage = vk::PipelineShaderStageCreateInfo::default()
+                        .stage(vk::ShaderStageFlags::COMPUTE)
+                        .module(shader)
+                        .name(c"main")
+                        .specialization_info(&specialization);
+                    match device.create_compute_pipelines(
+                        vk::PipelineCache::null(),
+                        &[vk::ComputePipelineCreateInfo::default()
+                            .stage(stage)
+                            .layout(pipeline.layout)],
+                        None,
+                    ) {
+                        Ok(values) => replacements.push(values[0]),
+                        Err((partial, e)) => {
+                            for value in partial {
+                                device.destroy_pipeline(value, None);
+                            }
+                            return Err(error("Create frozen transport pipeline", e));
+                        }
+                    }
+                }
+                Ok(())
+            })();
+            device.destroy_shader_module(shader, None);
+            if let Err(message) = created {
+                for value in replacements {
+                    device.destroy_pipeline(value, None);
+                }
+                return Err(message);
+            }
+            for (target, replacement) in pipeline.pipelines.iter_mut().zip(replacements) {
+                device.destroy_pipeline(std::mem::replace(target, replacement), None);
+            }
+            if let Some(single) = pipeline.single_sample_pipelines.take() {
+                for value in single {
+                    device.destroy_pipeline(value, None);
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Drop for HostBenchmark {

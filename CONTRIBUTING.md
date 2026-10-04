@@ -144,6 +144,14 @@ cargo test -p prime_engine --no-default-features --lib --locked
 
 TreeSphere的CPU拓扑、叶数、路径和保守球界使用 `cargo test -p prime_vulkan --lib light_sphere --locked`；目录灯字段更新不改变实例/槽位使用 `cargo test -p prime_vulkan --lib static_directory --locked`。生产Slang整数支持、前向/反向PDF及面中心/边缘边界可用 `cargo test -p prime_vulkan --features shader-tests --lib --locked gpu_sphere_tree_integer_support_forward_reverse_and_geometry_boundaries -- --ignored --nocapture --test-threads=1` 执行无窗口GPU夹具，正确性检查另启用Vulkan与同步validation。这些检查不能代替两版游戏的菜单切换、完整PT质量和性能验收。
 
+完整输运的冻结shader对照使用 `register_tests::dump_transport_equivalence` 与 `register_tests::steady_transport_matrix`，显式设置 `PRIME_REGISTER_LIGHT_SAMPLING=grid|tree|sphere` 和 `PRIME_REGISTER_REFERENCE_SPV`。后者须为同模式、采样方法及当前ABI编译的产物，测试接口不自动验证这些条件。两臂都安装各自冻结产物：图像入口统一使用Offline通用bank，避免与内置single-sample特化混作性能对照。任一变量启用时，两入口明确关闭RR/OMM，使用Native、无星图及自动曝光补偿；它们不测量DLSS模型。
+
+图像入口以 `PRIME_REGISTER_DUMP` 指定目录，保留20夹具×4预算的原始FP32图像；预算变更只更新push constant与采样历史，冻结bank只安装一次。时间入口以 `PRIME_REGISTER_CSV` 指定文件，可设 `PRIME_REGISTER_WARMUP`、`PRIME_REGISTER_SAMPLES` 和逗号分隔的 `PRIME_REGISTER_CASES`；固定原生1920×1080、4路径顶点及种子，保留预热和全部帧。GPU时间覆盖实际整份录制，不能当成K2单段时间；夹具光源树较浅，不证明真实世界深树或RR的性能。独占GPU、验证关闭并交替运行两臂，另保留工具链、源码与产物哈希和设备配置。
+
+可选 `PRIME_REGISTER_LIGHT_DISTRIBUTION` 指向光源分布导出目录，使用其数字CSV `emitters.csv` 与 `receivers.csv` 第一接收点，替代默认夹具。按原尺度构造outline发光quad、粗糙白色接收面及Cell灯页，不读取代理可见性表；缺少原世界遮挡与材质，不能称为完整存档渲染。入口预加载至生产几何不再有待更新工作且全部源Cell已有发布槽位，每次录制都等待GPU完成；记录源面数、实际发布三角形/灯数、输入哈希和预加载次数，未完成则失败，正式序列从零开始。生产编译器可合并共面发光面，源计数不是发布计数目标。加载成本与稳态时间分别记录。
+
+`PRIME_REGISTER_TREE_BUILD=saoh|balanced` 仅在上述 `shader-tests` 无窗口测试中选择TreeSphere构树方式，默认沿用SAOH。balanced按最长质心轴等分真实叶子，在世界层与每个页内分别平衡，不增加虚拟灯或GPU方法分支；各层叶深为floor/ceil(log2 N)，组合深度仍随页灯数变化。metadata记录策略和实际local叶深分布，日志记录每次world构树的叶深分布；局部路径统计在预加载后、正式计时前扫描一次，不计作生产开销。拓扑改变会改变proposal及收敛，必须另测质量；该测试选项不进入游戏设置或生产构建。
+
 Grid/功率Tree的合成CPU对比需显式运行 `cargo test -p prime_vulkan --release --lib cpu_sampler_comparison --locked -- --ignored --nocapture`。默认CSV保存在 `artifacts/light-sampler-restoration/cpu-comparison.csv`，保留全部轮次和共同源准备成本；不包含TreeSphere、Vulkan上传、GPU时间或画面质量。生产三种方式按前文同场景录制步骤分别验收。
 
 ### Streamline / DLSS RR
