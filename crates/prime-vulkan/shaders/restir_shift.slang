@@ -44,7 +44,7 @@ module restir_shift;
         uint2 neighbor = uint2(restirNeighbor(parameters, pairing, id.xy, i));
         RestirPrimary primary = parameters.primary[offset];
         PathReservoir reservoir = parameters.current[restirOffset(neighbor, extent)];
-        float3 wo = -restirPrimaryDirection(resources.frame, id.xy);
+        float3 wo = -restirPrimaryDirection(resources.frame, id.xy, resources.sampleJitter);
         RestirReplayData replay;
         uint address = parameters.retraceOffsets[3u * offset + i];
         if (address != 0xffffffffu)

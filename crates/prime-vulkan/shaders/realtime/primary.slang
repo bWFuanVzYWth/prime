@@ -326,9 +326,13 @@ PrimePrimaryGuideSeed primePrimaryLighting<Guides, Environment>(
 
 void primePrimaryGuideWalk<Guides>(TraceScene resources, PrimaryParameters parameters, uint2 pixel,
                                    ZSobol sampler, float2 sampleUv, PrimePrimaryGuideSeed seed,
-                                   Guides guides) where Guides : IPrimaryGuides {
-    float coneSpread =
-            surfaceFeatures >= 2 ? 2.0 * parameters.position.w / float(parameters.sampling.y) : 0.0;
+                                   Guides guides, float guideConeSpread = -1.0) where Guides
+    : IPrimaryGuides {
+    float coneSpread = guideConeSpread >= 0.0
+                               ? guideConeSpread
+                               : (surfaceFeatures >= 2 ? 2.0 * parameters.position.w /
+                                                                 float(parameters.sampling.y)
+                                                       : 0.0);
     for (uint bounce = seed.bounce; bounce < parameters.config.y; ++bounce) {
         SurfaceHit hit = traceClosest(resources, seed.origin, seed.direction,
                                       sampler.bits1D(1u + 4u * bounce), seed.coneWidth, coneSpread);
@@ -392,4 +396,79 @@ public void primeTracePrimary<Guides, Environment>(TraceScene resources, Environ
         seed = primePrimaryLoadSeed(parameters, index, 7);
         primePrimaryGuideWalk(resources, parameters, pixel, sampler, sampleUv, seed, guides);
     }
+}
+
+// ReSTIR already owns the primary query. This independent geometry-only producer starts at
+// that exact resolved hit and never invokes the ordinary PT lighting/landing path.
+// commonAddress borrows a dead 64B/pixel replay region until generate completes.
+public bool primeTraceGuidesFromPrimary<Guides>(TraceScene resources, PrimaryParameters parameters,
+                                                uint2 pixel, float2 sampleUv, float3 direction,
+                                                SurfaceHit hit, Guides guides) where Guides
+    : IPrimaryGuides {
+    guides.initialize(pixel, parameters.sampling.xy);
+    PrimePrimaryPsr psr = primePrimaryPsrInitial();
+    if (!hit.found) {
+        guides.environment(parameters, pixel, sampleUv, direction, psr);
+        return false;
+    }
+    guides.foreground(parameters, pixel, sampleUv, hit.surface.position, hit.previousPosition,
+                      hit.previousPositionKnown);
+    SurfacePoint surface = hit.surface;
+    if (dot(surface.normal, direction) > 0.0)
+        surface.normal = -surface.normal;
+    PrimePbrVertex material = primePrimaryMaterial(hit, direction);
+    float mediumIor = hit.thin ? 1.0 : hit.incident.x;
+    float4 incident = hit.optical && !hit.thin ? hit.incident : float4(mediumIor, 0, 0, 0);
+    float4 transmitted =
+            hit.thin ? (hit.incident.x > hit.transmitted.x ? hit.incident : hit.transmitted)
+                     : hit.transmitted;
+    if (!primePbrVertexIsDiscreteOnly(material, incident, transmitted)) {
+        guides.surface(parameters, pixel, sampleUv, surface, material, direction, incident,
+                       transmitted, hit.previousPosition, hit.previousPositionKnown, psr);
+        return true;
+    }
+    if (!primePathHasContinuation(0u, parameters.config.y)) {
+        guides.unresolved(pixel, psr.flags);
+        return false;
+    }
+    PrimePbrGuideDirection next = primePbrDeltaGuideDirection(material, -direction, surface.normal,
+                                                              incident.x, transmitted.x);
+    if (!next.geometricValid) {
+        guides.unresolved(pixel, psr.flags);
+        return false;
+    }
+    if (hit.optical && !next.totalInternalReflection) {
+        guides.interfaceSpecular(pixel, material, -direction, incident, transmitted);
+        psr.flags |= PRIME_PRIMARY_PSR_INTERFACE_SPECULAR;
+    }
+    PrimePrimaryGuideSeed mainSeed = primePrimaryNextGuide(
+            surface, material, 0.0, 0u, incident, transmitted, next, psr, hit.staticGeometry);
+    bool companion = false;
+    uint index = pixel.y * parameters.sampling.x + pixel.x;
+    if ((psr.flags & PRIME_PRIMARY_PSR_INTERFACE_SPECULAR) != 0) {
+        PrimePbrGuideDirection reflected = primePbrReflectionGuideDirection(
+                material, -direction, surface.normal, incident, transmitted);
+        guides.reflectionPending(pixel);
+        if (reflected.geometricValid) {
+            PrimePrimaryGuideSeed reflection =
+                    primePrimaryNextGuide(surface, material, 0.0, 0u, incident, transmitted,
+                                          reflected, psr, hit.staticGeometry);
+            reflection.psr.flags |= PRIME_PRIMARY_GUIDE_REFLECTION;
+            primePrimaryStoreSeed(parameters, index, reflection);
+            companion = true;
+        } else {
+            guides.unresolved(pixel, PRIME_PRIMARY_GUIDE_REFLECTION);
+        }
+    }
+    ZSobol sampler = makeZSobolS8(pixel, parameters.sampling.z & 0xffu, parameters.config.x,
+                                  parameters.sampling.w ^ (parameters.sampling.z >> 8));
+    // The ReSTIR point profile uses LOD0 for both its estimator and independent guide suffixes.
+    primePrimaryGuideWalk(resources, parameters, pixel, sampler, sampleUv, mainSeed, guides, 0.0);
+    if (companion) {
+        // Only one suffix seed remains live across traversal; no second full hit/BSDF survives.
+        mainSeed = primePrimaryLoadSeed(parameters, index);
+        primePrimaryGuideWalk(resources, parameters, pixel, sampler, sampleUv, mainSeed, guides,
+                              0.0);
+    }
+    return false;
 }

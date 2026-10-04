@@ -63,6 +63,31 @@ fn main() {
             &["PRIME_RESTIR_MATERIAL_ONLY=1"],
         );
     }
+    for (suffix, defines) in [
+        ("", vec!["PRIME_RESTIR_RR=1"]),
+        ("_tree", vec!["PRIME_RESTIR_RR=1", "PRIME_LIGHT_TREE=1"]),
+        (
+            "_tree_sphere",
+            vec![
+                "PRIME_RESTIR_RR=1",
+                "PRIME_LIGHT_TREE=1",
+                "PRIME_LIGHT_TREE_SPHERE=1",
+            ],
+        ),
+    ] {
+        compile_defines(
+            &compiler,
+            "shaders/restir_generate_rr.slang",
+            &format!("restir_generate_rr{suffix}.spv"),
+            &defines,
+        );
+    }
+    compile_defines(
+        &compiler,
+        "shaders/restir_resolve.slang",
+        "restir_resolve_rr.spv",
+        &["PRIME_RESTIR_MATERIAL_ONLY=1", "PRIME_RESTIR_RR=1"],
+    );
     for name in ["indirect", "spatial"] {
         compile(
             &compiler,
@@ -179,6 +204,7 @@ fn main() {
             "primary",
             "primary_rr",
             "restir_adapter",
+            "restir_history",
         ] {
             compile(
                 &compiler,
@@ -203,6 +229,20 @@ fn main() {
             "restir_adapter_tree_sphere.spv",
             &["PRIME_LIGHT_TREE=1", "PRIME_LIGHT_TREE_SPHERE=1"],
         );
+        for (suffix, defines) in [
+            ("_tree", vec!["PRIME_LIGHT_TREE=1"]),
+            (
+                "_tree_sphere",
+                vec!["PRIME_LIGHT_TREE=1", "PRIME_LIGHT_TREE_SPHERE=1"],
+            ),
+        ] {
+            compile_defines(
+                &compiler,
+                "tests/shaders/restir_history.slang",
+                &format!("restir_history{suffix}.spv"),
+                &defines,
+            );
+        }
     }
 }
 

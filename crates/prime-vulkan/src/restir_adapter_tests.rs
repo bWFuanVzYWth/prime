@@ -18,8 +18,6 @@ impl Drop for TestPipeline {
 }
 
 fn self_shift(renderer: &Renderer, count: u32) -> Vec<[u32; 32]> {
-    let context = &renderer.context;
-    let layout = renderer.pipeline.as_ref().unwrap().layout;
     let code = match renderer.settings.light_sampling {
         LightSampling::Grid => {
             include_bytes!(concat!(env!("OUT_DIR"), "/restir_adapter.spv")).as_slice()
@@ -31,6 +29,17 @@ fn self_shift(renderer: &Renderer, count: u32) -> Vec<[u32; 32]> {
             include_bytes!(concat!(env!("OUT_DIR"), "/restir_adapter_tree_sphere.spv")).as_slice()
         }
     };
+    run_probe(renderer, count, code, [count, 0, 0, 0])
+}
+
+pub(super) fn run_probe(
+    renderer: &Renderer,
+    count: u32,
+    code: &[u8],
+    push: [u32; 4],
+) -> Vec<[u32; 32]> {
+    let context = &renderer.context;
+    let layout = renderer.pipeline.as_ref().unwrap().layout;
     let spirv = ash::util::read_spv(&mut Cursor::new(code)).unwrap();
     let handle = unsafe {
         let module = context
@@ -64,7 +73,9 @@ fn self_shift(renderer: &Renderer, count: u32) -> Vec<[u32; 32]> {
     )
     .unwrap();
     let production_uniform = renderer.restir.as_ref().unwrap().uniform_for_test(0);
-    let mut constants = production_uniform.read(400).unwrap();
+    let mut constants = production_uniform
+        .read(restir::UNIFORM_BYTES as usize)
+        .unwrap();
     constants[384..392].copy_from_slice(&destination.address().to_le_bytes());
     let test_uniform =
         Buffer::upload(context, &constants, vk::BufferUsageFlags::UNIFORM_BUFFER).unwrap();
@@ -72,7 +83,7 @@ fn self_shift(renderer: &Renderer, count: u32) -> Vec<[u32; 32]> {
     let update_uniform = |buffer: &Buffer| unsafe {
         let info = [vk::DescriptorBufferInfo::default()
             .buffer(buffer.buffer)
-            .range(400)];
+            .range(restir::UNIFORM_BYTES)];
         context.device.update_descriptor_sets(
             &[vk::WriteDescriptorSet::default()
                 .dst_set(set)
@@ -83,7 +94,7 @@ fn self_shift(renderer: &Renderer, count: u32) -> Vec<[u32; 32]> {
         );
     };
     update_uniform(&test_uniform);
-    let push = [count, 0, 0, 0].map(u32::to_le_bytes);
+    let push = push.map(u32::to_le_bytes);
     context
         .submit_named("restir_adapter_self_shift", |command| unsafe {
             context.device.cmd_bind_pipeline(
@@ -138,7 +149,7 @@ fn self_shift(renderer: &Renderer, count: u32) -> Vec<[u32; 32]> {
         .collect()
 }
 
-fn lamp() -> prime_scene::surface::SurfaceFace {
+pub(super) fn lamp() -> prime_scene::surface::SurfaceFace {
     let mut lamp = face(3.);
     lamp.geometry.positions = [[12., 8., 3.], [12., 10., 3.], [14., 10., 3.], [14., 8., 3.]];
     lamp.emission = Emission {
@@ -149,7 +160,7 @@ fn lamp() -> prime_scene::surface::SurfaceFace {
     lamp
 }
 
-fn fixtures() -> Vec<(&'static str, Scene)> {
+pub(super) fn fixtures() -> Vec<(&'static str, Scene)> {
     let mut rear = face(6.);
     rear.geometry.positions.reverse();
     let mut mapped_rear = rear.clone();

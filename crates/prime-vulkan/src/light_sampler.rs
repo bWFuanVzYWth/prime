@@ -72,6 +72,17 @@ impl LightSampler {
         }
     }
 
+    pub fn history_pages(&self) -> impl ExactSizeIterator<Item = Option<(u64, u32)>> + '_ {
+        let count = match &self.tables {
+            Tables::Grid(grid) => grid.history_page_count(),
+            Tables::Tree(tree) => tree.history_page_count(),
+        };
+        (0..count).map(|index| match &self.tables {
+            Tables::Grid(grid) => grid.history_page(index),
+            Tables::Tree(tree) => tree.history_page(index),
+        })
+    }
+
     pub fn header_address(&self) -> u64 {
         match &self.tables {
             Tables::Grid(grid) => grid.header_address(),

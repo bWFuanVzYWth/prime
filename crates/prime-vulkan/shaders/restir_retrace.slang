@@ -40,6 +40,8 @@ module restir_retrace;
     PathReservoir reservoir;
     uint2 destination = pixel;
     if (pass.phase == 0u) {
+        // Workload validated previous primary and source RC before queueing; metadata is
+        // immutable between workload and these retrace consumers.
         uint2 previous = uint2(parameters.reprojection[offset]);
         uint previousOffset = restirOffset(previous, extent);
         if (item.y == 0u) {
@@ -57,6 +59,6 @@ module restir_retrace;
         primary = parameters.primary[offset];
         reservoir = parameters.current[restirOffset(neighbor, extent)];
     }
-    float3 wo = -restirPrimaryDirection(resources.frame, destination);
+    float3 wo = -restirPrimaryDirection(resources.frame, destination, resources.sampleJitter);
     parameters.retrace[id.x] = restirReplay(resources, primary, wo, reservoir);
 }

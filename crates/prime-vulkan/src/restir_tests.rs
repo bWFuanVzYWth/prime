@@ -100,8 +100,6 @@ fn gpu_restir_independent_pipeline_preserves_primary_and_history_boundaries() {
     let config = RenderSettings {
         view: DiagnosticView::LinearDepth,
         depth_range: 8.,
-        ray_reconstruction: true,
-        frame_generation: true,
         ..settings(RenderMode::Realtime)
     };
     let mut renderer = renderer(config);
@@ -117,13 +115,6 @@ fn gpu_restir_independent_pipeline_preserves_primary_and_history_boundaries() {
     assert!(pipeline.single_sample_pipelines.is_none());
     assert!(pipeline.realtime_post.is_none());
     assert!(renderer.reconstruction.is_none());
-    assert!(
-        renderer
-            .reconstruction_error
-            .as_ref()
-            .unwrap()
-            .contains("native raw")
-    );
     let fixture = scene(1, vec![face(0.)]);
     let mut camera = camera();
     for (sequence, temporal) in [(10, false), (11, true)] {
@@ -144,30 +135,18 @@ fn gpu_restir_independent_pipeline_preserves_primary_and_history_boundaries() {
         );
         assert!(!renderer.output.as_ref().unwrap().has_path_trace_scratch());
     }
-    let layout = renderer.pipeline.as_ref().unwrap().layout;
-    renderer
-        .configure(RenderSettings {
-            ray_reconstruction: false,
-            frame_generation: false,
-            ..config
-        })
-        .unwrap();
-    assert_eq!(
-        renderer.pipeline.as_ref().unwrap().layout,
-        layout,
-        "unsupported reconstruction controls must not rebuild ReSTIR pipelines"
-    );
     camera.position[0] += 0.1;
     renderer.render(&fixture, &camera, 31, 17, 12).unwrap();
     assert!(
         renderer.restir.as_ref().unwrap().temporal_this_frame,
         "camera motion should reproject accepted history"
     );
-    let changed = scene(2, vec![face(-1.)]);
+    let mut changed = scene(2, vec![face(-1.)]);
+    changed.resources = fixture.resources;
     let pixels = renderer.render(&changed, &camera, 31, 17, 13).unwrap();
     assert!(
-        !renderer.restir.as_ref().unwrap().temporal_this_frame,
-        "geometry publication must invalidate history"
+        renderer.restir.as_ref().unwrap().temporal_this_frame,
+        "geometry publication must leave rejection to individual historical identities"
     );
     assert!(
         pixels
@@ -207,21 +186,22 @@ fn gpu_restir_independent_pipeline_preserves_primary_and_history_boundaries() {
     environment.world_y += 1000.;
     renderer.set_environment(environment).unwrap();
     renderer.render(&changed, &camera, 17, 31, 17).unwrap();
-    assert!(!renderer.restir.as_ref().unwrap().temporal_this_frame);
+    assert!(renderer.restir.as_ref().unwrap().temporal_this_frame);
     renderer.render(&changed, &camera, 17, 31, 18).unwrap();
     assert!(renderer.restir.as_ref().unwrap().temporal_this_frame);
     environment.sun_direction = [1., 0., 0.];
     renderer.set_environment(environment).unwrap();
     renderer.render(&changed, &camera, 17, 31, 19).unwrap();
     assert!(
-        !renderer.restir.as_ref().unwrap().temporal_this_frame,
-        "changed sun radiance must invalidate stored suffix radiance"
+        renderer.restir.as_ref().unwrap().temporal_this_frame,
+        "changed sun radiance must update stored suffix radiance without resetting history"
     );
     renderer.set_environment(environment).unwrap();
     renderer.render(&changed, &camera, 17, 31, 20).unwrap();
     assert!(renderer.restir.as_ref().unwrap().temporal_this_frame);
 
     let mut dynamic = scene(3, vec![]);
+    dynamic.resources = changed.resources;
     let corners = face(0.).geometry.positions;
     dynamic.dynamic.revision = 1;
     dynamic.dynamic.triangles = [[0, 1, 2], [0, 2, 3]]
@@ -253,8 +233,35 @@ fn gpu_restir_independent_pipeline_preserves_primary_and_history_boundaries() {
     dynamic.dynamic.revision += 1;
     renderer.render(&dynamic, &camera, 31, 17, 23).unwrap();
     assert!(
+        renderer.restir.as_ref().unwrap().temporal_this_frame,
+        "dynamic geometry changes must reject only affected path identities"
+    );
+    camera.vertical_fov_radians *= 1.3;
+    renderer.render(&dynamic, &camera, 31, 17, 101).unwrap();
+    assert!(
+        renderer.restir.as_ref().unwrap().temporal_this_frame,
+        "FOV change and nonzero sequence gap must preserve accepted history"
+    );
+    let mut updated = renderer.settings;
+    updated.seed = updated.seed.wrapping_add(17);
+    renderer.configure(updated).unwrap();
+    renderer.render(&dynamic, &camera, 31, 17, 102).unwrap();
+    let state = renderer.restir.as_ref().unwrap();
+    assert!(state.temporal_this_frame && !state.dynamic_update_this_frame);
+    updated.sky *= 2.;
+    updated.sun *= 2.;
+    renderer.configure(updated).unwrap();
+    renderer.render(&dynamic, &camera, 31, 17, 103).unwrap();
+    let state = renderer.restir.as_ref().unwrap();
+    assert!(state.temporal_this_frame && state.dynamic_update_this_frame);
+    renderer.render(&dynamic, &camera, 31, 17, 104).unwrap();
+    assert!(!renderer.restir.as_ref().unwrap().dynamic_update_this_frame);
+    updated.bounces += 1;
+    renderer.configure(updated).unwrap();
+    renderer.render(&dynamic, &camera, 31, 17, 105).unwrap();
+    assert!(
         !renderer.restir.as_ref().unwrap().temporal_this_frame,
-        "dynamic geometry change must invalidate history"
+        "changed path domain must restart history"
     );
 }
 
@@ -566,7 +573,7 @@ fn gpu_restir_realtime_illuminated_history_grows_and_resets_actual_reservoirs() 
         auto_exposure_compensation: 0.1,
         ..settings(RenderMode::Realtime)
     });
-    let fixture = illuminated_scene(1);
+    let mut fixture = illuminated_scene(1);
     let mut camera = camera();
     let mut first_mean = 0.;
     let mut last_mean = 0.;
@@ -636,17 +643,97 @@ fn gpu_restir_realtime_illuminated_history_grows_and_resets_actual_reservoirs() 
         last_mean > first_mean + 4.,
         "temporal history did not contribute actual GPU candidates: first={first_mean}, last={last_mean}"
     );
+    // A different complete terrain cell changes the scene publication without replacing
+    // the visible room's source pages. Read actual GPU reservoirs, not just a host flag.
+    let far_origin = [64., 0., 0.];
+    let far_cell = prime_scene::spatial::Cell::containing(far_origin).unwrap();
+    fixture.ready_terrain.insert(far_cell);
+    fixture.meshes.insert(
+        (2, 0),
+        prime_scene::scene::SceneMesh {
+            revision: 1,
+            flags: 0,
+            origin: far_origin,
+            triangles: prime_scene::geometry::MeshGeometry::Surfaces(Arc::new(
+                prime_scene::surface::SurfaceMesh::from_resolved(1, vec![face(0.)]).unwrap(),
+            )),
+        },
+    );
+    fixture.revision = 2;
+    for sequence in 13..=18 {
+        match sequence {
+            14 => {
+                let corners = face(0.).geometry.positions;
+                fixture.dynamic.origin = [80., 0., 0.];
+                fixture.dynamic.revision = 1;
+                fixture.dynamic.triangles = [[0, 1, 2], [0, 2, 3]]
+                    .map(|indices| prime_scene::Triangle {
+                        positions: indices.map(|index| corners[index]),
+                        colors: [[0.7, 0.8, 0.9, 1.]; 3],
+                        uvs: [[0.; 2]; 3],
+                        texture_id: 0,
+                        flags: 0,
+                    })
+                    .to_vec()
+                    .into();
+            }
+            15 => {
+                fixture.dynamic.origin[0] += 1.;
+                fixture.dynamic.revision += 1;
+            }
+            16 => {
+                fixture
+                    .textures
+                    .insert(77, realtime_tests::texture(1, 1, vec![255; 4]));
+                fixture.revision += 1;
+            }
+            17 => {
+                fixture.meshes.remove(&(2, 0));
+                fixture.ready_terrain.remove(&far_cell);
+                fixture.revision += 1;
+            }
+            18 => {
+                fixture.anchor = [64., 0., 0.];
+                camera.position[0] -= 64.;
+            }
+            _ => {}
+        }
+        renderer
+            .render(&fixture, &camera, 31, 17, sequence)
+            .unwrap();
+        assert!(renderer.restir.as_ref().unwrap().temporal_this_frame);
+        assert!(
+            inspect(&renderer, sequence, false) > 4.,
+            "local update {sequence} discarded unaffected room history"
+        );
+    }
+    let mut environment = renderer.environment;
+    environment.sun_direction = [1., 0., 0.];
+    renderer.set_environment(environment).unwrap();
+    renderer.render(&fixture, &camera, 31, 17, 19).unwrap();
+    assert!(renderer.restir.as_ref().unwrap().temporal_this_frame);
+    assert!(inspect(&renderer, 19, false) > 4.);
     renderer.reset_world().unwrap();
-    renderer.render(&fixture, &camera, 31, 17, 13).unwrap();
-    inspect(&renderer, 13, true);
-    renderer.render(&fixture, &camera, 31, 17, 14).unwrap();
-    assert!(inspect(&renderer, 14, false) > first_mean);
+    renderer.render(&fixture, &camera, 31, 17, 20).unwrap();
+    inspect(&renderer, 20, true);
+    renderer.render(&fixture, &camera, 31, 17, 21).unwrap();
+    assert!(inspect(&renderer, 21, false) > first_mean);
     camera.position[0] += 0.05;
-    renderer.render(&fixture, &camera, 31, 17, 15).unwrap();
-    inspect(&renderer, 15, false);
-    let changed = illuminated_scene(2);
-    renderer.render(&changed, &camera, 31, 17, 16).unwrap();
-    inspect(&renderer, 16, true);
+    renderer.render(&fixture, &camera, 31, 17, 22).unwrap();
+    inspect(&renderer, 22, false);
+    let mut changed = illuminated_scene(2);
+    changed.resources = fixture.resources;
+    camera.position[0] += 64.;
+    renderer.render(&changed, &camera, 31, 17, 23).unwrap();
+    assert!(renderer.restir.as_ref().unwrap().temporal_this_frame);
+    inspect(&renderer, 23, true);
+    changed.epoch += 1;
+    renderer.render(&changed, &camera, 31, 17, 24).unwrap();
+    assert!(
+        !renderer.restir.as_ref().unwrap().temporal_this_frame,
+        "a new scene epoch cannot reuse the old identity watermark"
+    );
+    inspect(&renderer, 24, true);
     let output = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../artifacts/restir-pt");
     std::fs::write(output.join("temporal-reservoir-history.csv"), report).unwrap();
 }

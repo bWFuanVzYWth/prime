@@ -173,7 +173,7 @@ $env:VK_LAYER_VALIDATE_SYNC = '1'
 cargo test -p prime_vulkan --features shader-tests --lib --locked gpu_restir -- --ignored --nocapture --test-threads=1
 ```
 
-`scripts/test-restir-layout.py` 接收构建生成的 `restir_*.spv` 文件列表，使用实际 SPIR-V 验证 BDA stride、uniform 偏移与能力声明；需要 `spirv-val`，逻辑设备必须启用 `scalarBlockLayout`。上述小场景和数学验证不能证明完整游戏收敛或与 Falcor 的性能差距。两版游戏按前文启动命令手动检查三后端切换、固定环境的时间复用、太阳/源更新的失效、材质和离线收敛。
+`scripts/test-restir-layout.py` 接收构建生成的 `restir_*.spv` 文件列表，使用实际 SPIR-V 验证 BDA stride、uniform 偏移与能力声明；需要 `spirv-val`，逻辑设备必须启用 `scalarBlockLayout`。上述小场景和数学验证不能证明完整游戏收敛或与 Falcor 的性能差距。两版游戏按前文启动命令手动检查三后端切换、RR/DLAA与超分、太阳持续推进、局部编辑/实体运动/纹理动画时的时间复用、遮挡显露和光照更新，以及材质与离线收敛。
 
 ### Streamline / DLSS RR
 

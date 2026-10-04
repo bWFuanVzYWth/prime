@@ -316,11 +316,8 @@ impl Renderer {
     ) -> Result<Self, String> {
         settings.validate()?;
         let cpu_profile = CpuProfile::default();
-        let mut reconstruction_error = (settings.integrator == Integrator::RestirPt)
-            .then(|| restir::RAW_PROFILE_MESSAGE.to_owned());
-        let reconstruction = (settings.integrator == Integrator::PathTrace
-            && settings.mode == RenderMode::Realtime
-            && settings.ray_reconstruction)
+        let mut reconstruction_error = None;
+        let reconstruction = (settings.mode == RenderMode::Realtime && settings.ray_reconstruction)
             .then(|| reconstruction::Reconstruction::new(&context, &mut reconstruction_error))
             .flatten();
         let energy_lut = openpbr::EnergyLut::new(&context)?;
@@ -591,7 +588,7 @@ impl Renderer {
             if resources.revision != previous {
                 self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
                 if let Some(restir) = &mut self.restir {
-                    restir.invalidate();
+                    restir.lighting_changed();
                 }
             }
         } else {
@@ -643,12 +640,21 @@ impl Renderer {
     pub fn configure(&mut self, settings: RenderSettings) -> Result<(), String> {
         settings.validate()?;
         let sampler_changed = settings.light_sampling != self.settings.light_sampling;
-        let reconstruction_controls = settings.integrator == Integrator::PathTrace;
+        let domain_changed = settings.integrator != self.settings.integrator
+            || settings.bounces != self.settings.bounces
+            || sampler_changed;
+        let transport_changed = !settings.transport_matches(self.settings);
+        let lighting_changed = settings.astronomy != self.settings.astronomy
+            || settings.sun != self.settings.sun
+            || settings.sky != self.settings.sky
+            || settings.stars != self.settings.stars;
+        let preserve_updated_lighting = settings.mode == RenderMode::Realtime
+            && (settings.integrator == Integrator::RestirPt || self.reconstruction.is_some());
         let reset_temporal = settings.mode != self.settings.mode
-            || !settings.transport_matches(self.settings)
-            || reconstruction_controls
-                && (settings.ray_reconstruction != self.settings.ray_reconstruction
-                    || settings.reconstruction_quality != self.settings.reconstruction_quality);
+            || domain_changed
+            || transport_changed && !preserve_updated_lighting
+            || settings.ray_reconstruction != self.settings.ray_reconstruction
+            || settings.reconstruction_quality != self.settings.reconstruction_quality;
         if self.failed || self.pending_temporal_serial != 0 {
             return Err("Cannot configure a failed renderer".into());
         }
@@ -669,10 +675,9 @@ impl Renderer {
         if settings.integrator != self.settings.integrator
             || sampler_changed
             || settings.mode != self.settings.mode
-            || reconstruction_controls
-                && (settings.mode == RenderMode::Realtime
-                    && settings.ray_reconstruction != self.settings.ray_reconstruction
-                    || settings.frame_generation != self.settings.frame_generation)
+            || settings.mode == RenderMode::Realtime
+                && settings.ray_reconstruction != self.settings.ray_reconstruction
+            || settings.frame_generation != self.settings.frame_generation
         {
             self.failed = true;
             self.context.wait_host_idle()?;
@@ -682,10 +687,8 @@ impl Renderer {
             drop(self.restir.take());
             self.fg_prepared = false;
             self.context.completed_serial()?; // Drain the retired images/buffers using completed host work.
-            self.reconstruction_error = (settings.integrator == Integrator::RestirPt)
-                .then(|| restir::RAW_PROFILE_MESSAGE.to_owned());
-            self.reconstruction = (settings.integrator == Integrator::PathTrace
-                && settings.mode == RenderMode::Realtime
+            self.reconstruction_error = None;
+            self.reconstruction = (settings.mode == RenderMode::Realtime
                 && settings.ray_reconstruction)
                 .then(|| {
                     reconstruction::Reconstruction::new(
@@ -710,13 +713,12 @@ impl Renderer {
             self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
             self.samples = 0;
             self.failed = false;
-        } else if !settings.transport_matches(self.settings)
-            || reconstruction_controls
-                && settings.mode == RenderMode::Realtime
+        } else if transport_changed
+            || settings.mode == RenderMode::Realtime
                 && settings.reconstruction_quality != self.settings.reconstruction_quality
         {
             self.samples = 0;
-            if let Some(rr) = &mut self.reconstruction {
+            if reset_temporal && let Some(rr) = &mut self.reconstruction {
                 rr.reset();
             }
         }
@@ -731,6 +733,8 @@ impl Renderer {
         }
         if reset_temporal && let Some(restir) = &mut self.restir {
             restir.invalidate();
+        } else if lighting_changed && let Some(restir) = &mut self.restir {
+            restir.lighting_changed();
         }
         self.display = display;
         if settings.mode != self.settings.mode {
@@ -830,7 +834,7 @@ impl Renderer {
             let restir_changed = self.environment.sun_direction != environment.sun_direction
                 || self.environment.eye_radius_km() != environment.eye_radius_km();
             if restir_changed && let Some(restir) = &mut self.restir {
-                restir.invalidate();
+                restir.lighting_changed();
             }
             self.environment = environment;
         }
@@ -1048,6 +1052,18 @@ impl Renderer {
                     .geometry
                     .as_ref()
                     .is_none_or(|g| g.occlusion_resources_changed());
+                if self
+                    .geometry
+                    .as_ref()
+                    .is_some_and(|g| !g.history_owner_matches(scene))
+                {
+                    if let Some(restir) = &mut self.restir {
+                        restir.invalidate();
+                    }
+                    if let Some(rr) = &mut self.reconstruction {
+                        rr.reset();
+                    }
+                }
                 self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
                 let published_changed = if let Some(geometry) = &mut self.geometry
                     && geometry.same_owner(scene)
@@ -1061,6 +1077,9 @@ impl Renderer {
                     // End the previous CPU owner before constructing another cache domain.
                     if let Some(rr) = &mut self.reconstruction {
                         rr.reset();
+                    }
+                    if let Some(restir) = &mut self.restir {
+                        restir.invalidate();
                     }
                     // Borrowed GPU resources still retire by their recorded completion serials.
                     self.geometry.take();
@@ -1077,9 +1096,9 @@ impl Renderer {
                 };
                 if source_changed || published_changed {
                     self.samples = 0;
-                    if let Some(restir) = &mut self.restir {
-                        restir.invalidate();
-                    }
+                }
+                if published_changed && let Some(restir) = &mut self.restir {
+                    restir.lighting_changed();
                 }
                 if self.geometry.as_ref().unwrap().static_occlusion_changed
                     || resource_occlusion_changed
@@ -1101,7 +1120,7 @@ impl Renderer {
             if dynamic_changed {
                 self.samples = 0;
                 if let Some(restir) = &mut self.restir {
-                    restir.invalidate();
+                    restir.lighting_changed();
                 }
             }
             if occlusion_changed {
@@ -1179,6 +1198,9 @@ impl Renderer {
                     self.settings.light_sampling,
                     &self.energy_lut,
                 )?);
+                if let Some(restir) = &mut self.restir {
+                    restir.invalidate();
+                }
                 self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
                 eprintln!("[Prime PT] DLSS RR setup failed; using native raw output: {message}");
                 self.reconstruction_error = Some(message);
@@ -1349,7 +1371,10 @@ impl Renderer {
         }
         let frame = self.transport_frame(bottom_up);
         let output = self.output.as_ref().unwrap();
-        let extent = [output.width, output.height];
+        let extent = self
+            .reconstruction
+            .as_ref()
+            .map_or([output.width, output.height], |rr| rr.input_extent());
         let accumulation = output.accumulation.as_ref().map_or(0, Buffer::address);
         let linear = self.needs_linear_display();
         let (instances, terrain_count) = self
@@ -1357,6 +1382,13 @@ impl Renderer {
             .as_mut()
             .unwrap()
             .shader_instance_input(&self.context, slot)?;
+        let geometry = self.geometry.as_mut().unwrap();
+        let identity = geometry.shader_history_identity(&self.context, slot)?;
+        let anchor = geometry.anchor();
+        let jitter = self
+            .reconstruction
+            .as_ref()
+            .map_or([0.; 2], |rr| rr.jitter(self.frame_seed));
         if self.restir.is_none() {
             self.restir = Some(restir::State::new(&self.context)?);
         }
@@ -1371,6 +1403,9 @@ impl Renderer {
             self.settings.mode == RenderMode::Realtime,
             linear,
             self.frame_seed,
+            jitter,
+            anchor,
+            identity,
         )
     }
 
@@ -1571,13 +1606,22 @@ impl Renderer {
         }
     }
 
+    #[cfg(all(test, feature = "shader-tests"))]
+    pub(super) fn dispatch_restir_for_test(&self, command: vk::CommandBuffer) {
+        self.dispatch_restir(command, 0);
+    }
+
     fn dispatch_restir(&self, command: vk::CommandBuffer, slot: usize) {
         let pipeline = self.pipeline.as_ref().unwrap();
         let passes = pipeline.restir.as_ref().unwrap();
         let state = self.restir.as_ref().unwrap();
         let output = self.output.as_ref().unwrap();
         let variant = self.geometry.as_ref().map_or(0, Geometry::shader_variant);
-        let groups = [output.width.div_ceil(8), output.height.div_ceil(8)];
+        let extent = self
+            .reconstruction
+            .as_ref()
+            .map_or([output.width, output.height], |rr| rr.input_extent());
+        let groups = [extent[0].div_ceil(8), extent[1].div_ceil(8)];
         let realtime = self.settings.mode == RenderMode::Realtime;
         let queue = state.queue_buffer();
         if !realtime {
@@ -1601,7 +1645,13 @@ impl Renderer {
                     vk::PipelineBindPoint::COMPUTE,
                     selected,
                 );
-                let push = [phase, sample, 0, 0].map(u32::to_le_bytes);
+                let push = [
+                    phase,
+                    sample,
+                    u32::from(phase == 0 && state.dynamic_update_this_frame),
+                    0,
+                ]
+                .map(u32::to_le_bytes);
                 self.context.device.cmd_push_constants(
                     command,
                     pipeline.layout,
@@ -2087,9 +2137,11 @@ impl Renderer {
         )?;
         let view = self.output.as_ref().unwrap().image.as_ref().unwrap().view;
         self.prepare_restir(0, false)?;
-        let selected = if self.settings.integrator == Integrator::PathTrace
+        let linear_output = self.needs_linear_display();
+        let selected = if (self.settings.integrator == Integrator::PathTrace
+            || self.reconstruction.is_some())
             && self.settings.mode == RenderMode::Realtime
-            && self.needs_linear_display()
+            && linear_output
         {
             self.output.as_ref().unwrap().linear.as_ref().unwrap().view
         } else {
@@ -2110,7 +2162,22 @@ impl Renderer {
         context.submit_named("diagnostic_render", |command| unsafe {
             self.before_frame(command);
             self.dispatch(command, 0, false);
-            recorded = self.record_display(command, 0, view, false);
+            if let Some(rr) = &mut self.reconstruction {
+                recorded = rr.evaluate_and_display(
+                    command,
+                    self.pipeline.as_ref().unwrap(),
+                    0,
+                    0,
+                    self.display,
+                    self.settings.view,
+                    self.settings.depth_range,
+                    false,
+                    linear_output,
+                );
+            }
+            if recorded.is_ok() {
+                recorded = self.record_display(command, 0, view, false);
+            }
             let barrier = [vk::ImageMemoryBarrier::default()
                 .image(image)
                 .old_layout(vk::ImageLayout::GENERAL)
@@ -2336,7 +2403,8 @@ impl Renderer {
         let started = cpu.start();
         let linear_output = self.needs_linear_display();
         self.prepare_restir(slot, true)?;
-        let selected = if self.settings.integrator == Integrator::PathTrace
+        let selected = if (self.settings.integrator == Integrator::PathTrace
+            || self.reconstruction.is_some())
             && linear_output
             && self.settings.mode == RenderMode::Realtime
         {

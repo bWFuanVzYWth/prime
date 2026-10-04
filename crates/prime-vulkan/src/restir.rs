@@ -4,8 +4,7 @@ use super::{Buffer, Context, FRAME_SLOTS, Image, LightSampling, RenderMode, Shad
 use ash::vk;
 use std::{io::Cursor, sync::Arc};
 
-pub(super) const UNIFORM_BYTES: u64 = 400;
-pub(super) const RAW_PROFILE_MESSAGE: &str = "ReSTIR PT Enhanced point profile uses native raw output; PSR, ray reconstruction and frame generation are not integrated";
+pub(super) const UNIFORM_BYTES: u64 = 464;
 
 const SCENE_FEATURES: [[u32; 3]; 6] = [
     [0, 0, 0],
@@ -53,6 +52,8 @@ impl Pipelines {
         layout: vk::PipelineLayout,
         method: LightSampling,
         mode: RenderMode,
+        reconstruction: bool,
+        frame_generation: bool,
     ) -> Result<Self, String> {
         let mut result = Self {
             context: context.clone(),
@@ -65,7 +66,7 @@ impl Pipelines {
             spatial: vk::Pipeline::null(),
             resolve: [vk::Pipeline::null(); 6],
         };
-        let create_group = |bytes: &[u8]| -> Result<[vk::Pipeline; 6], String> {
+        let create_group = |bytes: &[u8], motion: u32| -> Result<[vk::Pipeline; 6], String> {
             let module = shader_module(context, bytes)?;
             let mut pipelines = [vk::Pipeline::null(); 6];
             for (pipeline, features) in pipelines.iter_mut().zip(SCENE_FEATURES) {
@@ -75,6 +76,7 @@ impl Pipelines {
                     module.handle,
                     Some(features),
                     mode == RenderMode::Offline,
+                    motion,
                 ) {
                     Ok(created) => *pipeline = created,
                     Err(message) => {
@@ -103,20 +105,35 @@ impl Pipelines {
                 }
             };
         }
-        result.generate = create_group(sampler_binary!("restir_generate"))?;
-        result.workload = create_group(include_bytes!(concat!(
-            env!("OUT_DIR"),
-            "/restir_workload.spv"
-        )))?;
-        result.retrace = create_group(sampler_binary!("restir_retrace"))?;
-        result.shift = create_group(sampler_binary!("restir_shift"))?;
+        result.generate = create_group(
+            if reconstruction {
+                sampler_binary!("restir_generate_rr")
+            } else {
+                sampler_binary!("restir_generate")
+            },
+            if reconstruction {
+                1 | (u32::from(frame_generation) << 1)
+            } else {
+                0
+            },
+        )?;
+        result.workload = create_group(
+            include_bytes!(concat!(env!("OUT_DIR"), "/restir_workload.spv")),
+            0,
+        )?;
+        result.retrace = create_group(sampler_binary!("restir_retrace"), 0)?;
+        result.shift = create_group(sampler_binary!("restir_shift"), 0)?;
         if mode == RenderMode::Realtime {
-            result.temporal = create_group(sampler_binary!("restir_temporal"))?;
+            result.temporal = create_group(sampler_binary!("restir_temporal"), 0)?;
         }
-        result.resolve = create_group(include_bytes!(concat!(
-            env!("OUT_DIR"),
-            "/restir_resolve.spv"
-        )))?;
+        result.resolve = create_group(
+            if reconstruction {
+                include_bytes!(concat!(env!("OUT_DIR"), "/restir_resolve_rr.spv"))
+            } else {
+                include_bytes!(concat!(env!("OUT_DIR"), "/restir_resolve.spv"))
+            },
+            0,
+        )?;
         for (target, bytes) in [
             (
                 &mut result.indirect,
@@ -128,7 +145,7 @@ impl Pipelines {
             ),
         ] {
             let module = shader_module(context, bytes)?;
-            *target = create(context, layout, module.handle, None, false)?;
+            *target = create(context, layout, module.handle, None, false, 0)?;
         }
         Ok(result)
     }
@@ -154,6 +171,7 @@ fn create(
     module: vk::ShaderModule,
     features: Option<[u32; 3]>,
     offline: bool,
+    motion: u32,
 ) -> Result<vk::Pipeline, String> {
     let entries = [0, 1, 2, 3, 4].map(|id| vk::SpecializationMapEntry {
         constant_id: id,
@@ -162,8 +180,15 @@ fn create(
     });
     let selected = features.unwrap_or_default();
     // Geometry::shader_variant indexes the same surface/local-light/optical variants as PT.
-    // ReSTIR reprojects primary hits directly and does not consume the RR motion-guide channel.
-    let data = [selected[0], selected[1], selected[2], 0, u32::from(offline)].map(u32::to_le_bytes);
+    // Only the RR primary observer consumes accepted-pose/visible-guide motion metadata.
+    let data = [
+        selected[0],
+        selected[1],
+        selected[2],
+        motion,
+        u32::from(offline),
+    ]
+    .map(u32::to_le_bytes);
     let specialization = vk::SpecializationInfo::default()
         .map_entries(&entries)
         .data(data.as_flattened());
@@ -275,6 +300,12 @@ struct History {
     previous: [u8; 128],
     pending: Option<[u8; 128]>,
     pending_realtime: bool,
+    jitter: [f32; 2],
+    anchor: [f64; 3],
+    revision: u32,
+    pending_jitter: [f32; 2],
+    pending_anchor: [f64; 3],
+    pending_revision: u32,
 }
 impl Default for History {
     fn default() -> Self {
@@ -284,6 +315,12 @@ impl Default for History {
             previous: [0; 128],
             pending: None,
             pending_realtime: false,
+            jitter: [0.; 2],
+            anchor: [0.; 3],
+            revision: 0,
+            pending_jitter: [0.; 2],
+            pending_anchor: [0.; 3],
+            pending_revision: 0,
         }
     }
 }
@@ -297,6 +334,9 @@ impl History {
             self.previous = frame;
             self.primary_bank ^= 1;
             self.valid = self.pending_realtime;
+            self.jitter = self.pending_jitter;
+            self.anchor = self.pending_anchor;
+            self.revision = self.pending_revision;
         }
     }
 }
@@ -308,6 +348,8 @@ pub(super) struct State {
     scratch: Option<Scratch>,
     history: History,
     pub temporal_this_frame: bool,
+    pub dynamic_update_this_frame: bool,
+    lighting_changed: bool,
 }
 impl State {
     pub fn new(context: &Arc<Context>) -> Result<Self, String> {
@@ -344,6 +386,8 @@ impl State {
             scratch: None,
             history: Default::default(),
             temporal_this_frame: false,
+            dynamic_update_this_frame: false,
+            lighting_changed: false,
         })
     }
     pub fn invalidate(&mut self) {
@@ -355,7 +399,13 @@ impl State {
         self.scratch = None;
     }
     pub fn commit(&mut self) {
+        if self.history.pending.is_some() {
+            self.lighting_changed = false;
+        }
         self.history.commit();
+    }
+    pub fn lighting_changed(&mut self) {
+        self.lighting_changed = true;
     }
     #[allow(clippy::too_many_arguments)]
     pub fn prepare(
@@ -370,6 +420,9 @@ impl State {
         realtime: bool,
         linear: bool,
         sequence: u32,
+        jitter: [f32; 2],
+        anchor: [f64; 3],
+        identity: crate::geometry::HistoryIdentityInput,
     ) -> Result<(), String> {
         if self
             .scratch
@@ -379,15 +432,25 @@ impl State {
             self.scratch = Some(Scratch::new(context, extent)?);
             self.invalidate();
         }
+        let mut previous = self.history.previous;
+        for i in 0..3 {
+            let start = 4 * i;
+            let position = f32::from_le_bytes(previous[start..start + 4].try_into().unwrap());
+            previous[start..start + 4].copy_from_slice(
+                &((f64::from(position) + self.history.anchor[i] - anchor[i]) as f32).to_le_bytes(),
+            );
+        }
         if sequence == 0 {
             self.invalidate();
         }
         let scratch = self.scratch.as_ref().unwrap();
         self.temporal_this_frame = realtime && self.history.valid;
+        self.dynamic_update_this_frame = self.temporal_this_frame
+            && (self.lighting_changed || identity.revision != self.history.revision);
         let mut bytes = [0_u8; UNIFORM_BYTES as usize];
         bytes[..128].copy_from_slice(&frame);
         bytes[128..256].copy_from_slice(if self.temporal_this_frame {
-            &self.history.previous
+            &previous
         } else {
             &frame
         });
@@ -427,9 +490,41 @@ impl State {
         {
             *target = value.to_le_bytes();
         }
+        let previous_jitter = if self.temporal_this_frame {
+            self.history.jitter
+        } else {
+            jitter
+        };
+        for (target, value) in bytes[400..416]
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .zip(jitter.into_iter().chain(previous_jitter))
+        {
+            *target = value.to_le_bytes();
+        }
+        for (target, address) in bytes[416..440]
+            .as_chunks_mut::<8>()
+            .0
+            .iter_mut()
+            .zip(identity.addresses)
+        {
+            *target = address.to_le_bytes();
+        }
+        for (target, value) in bytes[448..464]
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .zip(identity.counts.into_iter().chain([self.history.revision]))
+        {
+            *target = value.to_le_bytes();
+        }
         self.uniforms[slot].write(&bytes)?;
         self.history.pending = Some(frame);
         self.history.pending_realtime = realtime;
+        self.history.pending_jitter = jitter;
+        self.history.pending_anchor = anchor;
+        self.history.pending_revision = identity.revision;
         Ok(())
     }
     pub fn descriptors(
@@ -503,17 +598,29 @@ mod tests {
         let mut history = History::default();
         history.pending = Some([7; 128]);
         history.pending_realtime = true;
+        history.pending_jitter = [0.125, -0.25];
+        history.pending_anchor = [32., 16., -64.];
+        history.pending_revision = 42;
         assert!(!history.valid);
         assert_eq!(history.primary_bank, 0);
         history.commit();
         assert!(history.valid);
         assert_eq!(history.primary_bank, 1);
         assert_eq!(history.previous, [7; 128]);
+        assert_eq!(history.jitter, [0.125, -0.25]);
+        assert_eq!(history.anchor, [32., 16., -64.]);
+        assert_eq!(history.revision, 42);
         history.pending = Some([9; 128]);
+        history.pending_jitter = [-0.375, 0.333];
+        history.pending_anchor = [64.; 3];
+        history.pending_revision = 57;
         history.invalidate();
         history.commit();
         assert!(!history.valid);
         assert_eq!(history.previous, [7; 128]);
+        assert_eq!(history.jitter, [0.125, -0.25]);
+        assert_eq!(history.anchor, [32., 16., -64.]);
+        assert_eq!(history.revision, 42);
         assert_eq!(history.primary_bank, 1);
         history.pending = Some([11; 128]);
         history.pending_realtime = false;

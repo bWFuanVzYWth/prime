@@ -29,21 +29,24 @@
 module restir_workload;
 #include "restir/bindings.slang"
 
-int2 previousPixel(RestirScene resources, SurfaceHit hit) {
+int2 previousPixel(RestirScene resources, RestirPrimary primary, SurfaceHit hit) {
     if (!hit.found || parameters.control.y == 0u)
         return int2(-1);
     Frame previous = parameters.previousFrame;
-    // Accepted temporal validity proves that published geometry, placement, source and
-    // anchor are unchanged. Thus the actual current hit is also its previous position,
-    // including stationary dynamic instances; no unsupported host motion is inferred.
-    float3 delta = hit.surface.position - previous.position.xyz;
+    // Prefer a proved rigid correspondence. Raw stationary dynamic hits can also use
+    // their current point when the owning slot predates the accepted scene watermark.
+    if (!hit.previousPositionKnown && !restirHistoryHitValid(resources, primary.hit))
+        return int2(-1);
+    float3 point = hit.previousPositionKnown ? hit.previousPosition : hit.surface.position;
+    float3 delta = point - previous.position.xyz;
     float z = dot(delta, previous.forward.xyz);
     if (!(z > 0.0))
         return int2(-1);
     float2 screen =
             float2(dot(delta, previous.right.xyz) / (z * previous.forward.w * previous.position.w),
                    -dot(delta, previous.up.xyz) / (z * previous.position.w));
-    float2 location = (screen * 0.5 + 0.5) * float2(previous.dimensions.xy);
+    float2 location =
+            (screen * 0.5 + 0.5) * float2(previous.dimensions.xy) - parameters.sampleJitter.zw;
     if (any(!isfinite(location)) || any(location < 0.0) ||
         any(location >= float2(previous.dimensions.xy)))
         return int2(-1);
@@ -59,17 +62,21 @@ int2 previousPixel(RestirScene resources, SurfaceHit hit) {
         offset = restirOffset(id.xy, extent);
         RestirScene resources = restirScene();
         RestirPrimary primary = parameters.primary[offset];
-        float3 wo = -restirPrimaryDirection(resources.frame, id.xy);
+        float3 wo = -restirPrimaryDirection(resources.frame, id.xy, resources.sampleJitter);
         SurfaceHit hit = restirLoadHit(resources, primary.hit, wo, primary.coverageSeed, 0.0);
         NeighborValidMask mask = {0u, parameters.current[offset].M};
         for (uint i = 0; i < 3; ++i)
             parameters.retraceOffsets[3u * offset + i] = 0xffffffffu;
         if (pass.phase == 0u) {
-            int2 pixel = previousPixel(resources, hit);
+            int2 pixel = previousPixel(resources, primary, hit);
             parameters.reprojection[offset] = pixel;
             if (primary.hit.isValid() && restirInBounds(pixel, extent)) {
                 uint previousOffset = restirOffset(uint2(pixel), extent);
-                if (parameters.previousPrimary[previousOffset].hit.isValid()) {
+                HitInfo previousHit = parameters.previousPrimary[previousOffset].hit;
+                PathReservoir history = parameters.history[previousOffset];
+                if (previousHit.isValid() && restirHistoryHitValid(resources, previousHit) &&
+                    (!history.reconnectionHit.isValid() ||
+                     restirHistoryHitValid(resources, history.reconnectionHit))) {
                     mask.data = 1u;
                     candidateMask =
                             uint(parameters.current[offset].pathFlags.rcVertexLength() > 1) |
@@ -89,7 +96,8 @@ int2 previousPixel(RestirScene resources, SurfaceHit hit) {
                 RestirPrimary neighbor = parameters.primary[neighborOffset];
                 if (!neighbor.hit.isValid())
                     continue;
-                float3 neighborWo = -restirPrimaryDirection(resources.frame, uint2(pixel));
+                float3 neighborWo = -restirPrimaryDirection(resources.frame, uint2(pixel),
+                                                            resources.sampleJitter);
                 SurfaceHit neighborHit = restirLoadHit(resources, neighbor.hit, neighborWo,
                                                        neighbor.coverageSeed, 0.0);
                 float neighborDistance =

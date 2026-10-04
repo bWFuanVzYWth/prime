@@ -30,11 +30,12 @@ module restir_temporal;
 #include "restir/bindings.slang"
 
 PrecomputedShiftData temporalShift(RestirScene resources, RestirPrimary primary, float3 wo,
-                                   inout PathReservoir source, uint replayAddress) {
+                                   inout PathReservoir source, uint replayAddress,
+                                   bool updateSuffix = false) {
     RestirReplayData replay = replayAddress != 0xffffffffu
                                       ? parameters.retrace[replayAddress]
                                       : restirDirectReplayData(resources, primary, wo);
-    return restirShift(resources, primary, wo, source, replay);
+    return restirShift(resources, primary, wo, source, replay, updateSuffix);
 }
 [numthreads(8, 8, 1)] void main(uint3 id : SV_DispatchThreadID) {
     uint2 extent = parameters.frame.dimensions.xy;
@@ -47,6 +48,8 @@ PrecomputedShiftData temporalShift(RestirScene resources, RestirPrimary primary,
     uint previousOffset = restirOffset(previousPixel, extent);
     PathReservoir canonical = parameters.current[offset];
     PathReservoir temporal = parameters.history[previousOffset];
+    RestirScene resources = restirScene();
+    // Workload validated both history identities; metadata is immutable until this consumer.
     temporal.M = min(20.0, temporal.M);
     float canonicalWeight;
     {
@@ -54,7 +57,8 @@ PrecomputedShiftData temporalShift(RestirScene resources, RestirPrimary primary,
         // precompute write/read. Its inverse mapping must not mutate the canonical source.
         PathReservoir inverseSource = canonical;
         RestirScene previousScene = restirScene(true);
-        float3 previousWo = -restirPrimaryDirection(previousScene.frame, previousPixel);
+        float3 previousWo = -restirPrimaryDirection(previousScene.frame, previousPixel,
+                                                    previousScene.sampleJitter);
         PrecomputedShiftData inverse =
                 temporalShift(previousScene, parameters.previousPrimary[previousOffset], previousWo,
                               inverseSource, parameters.retraceOffsets[3u * offset]);
@@ -62,11 +66,10 @@ PrecomputedShiftData temporalShift(RestirScene resources, RestirPrimary primary,
                 canonical.M, temporal.M, PathRISState::toScalar(canonical.integrand),
                 PathRISState::toScalar(inverse.pathThroughput) * inverse.Jacobian);
     }
-    RestirScene resources = restirScene();
-    float3 wo = -restirPrimaryDirection(resources.frame, id.xy);
+    float3 wo = -restirPrimaryDirection(resources.frame, id.xy, resources.sampleJitter);
     PrecomputedShiftData forward =
             temporalShift(resources, parameters.primary[offset], wo, temporal,
-                          parameters.retraceOffsets[3u * offset + 1u]);
+                          parameters.retraceOffsets[3u * offset + 1u], pass.reserved0 != 0u);
     float temporalWeight = temporalNeighborWeight(
             canonical.M, temporal.M, PathRISState::toScalar(temporal.integrand),
             PathRISState::toScalar(forward.pathThroughput) * forward.Jacobian);

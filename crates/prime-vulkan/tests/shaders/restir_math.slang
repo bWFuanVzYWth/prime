@@ -4,6 +4,7 @@ import "restir/rng.slang";
 import "restir/reservoir.slang";
 import "restir/pairwise.slang";
 import "restir/paired_neighbors.slang";
+import "restir/identity.slang";
 
 [[vk::binding(0, 0)]] StructuredBuffer<uint4> inputs;
 [[vk::binding(1, 0)]] RWStructuredBuffer<uint4> outputs;
@@ -86,6 +87,9 @@ import "restir/paired_neighbors.slang";
         merged.merge(b.integrand, 2.f, b, sg, .6f);
         merged.finalizeReservoirWeight();
         outputs[i] = asuint(float4(merged.integrand * merged.weight, merged.M));
+    } else if (config.x == 8u) {
+        uint4 record = inputs[i];
+        outputs[i] = uint4(restirHistoryRecordValid(record.xy, record.z, record.w), 0, 0, 0);
     } else if (config.x == 7u) {
         ReSTIRPathFlags flags = {};
         flags.tryInsertBounceTypesBeforeRcVertex(i & 63u, true);

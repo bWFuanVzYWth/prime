@@ -14,7 +14,10 @@ use crate::{FRAME_SLOTS, uint};
 use ash::vk;
 use prime_scene::translation::BatchLimits;
 use prime_scene::{instances::InstanceInput, scene::Scene};
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 struct Object {
     build: PreparedAcceleration<'static>,
@@ -22,6 +25,7 @@ struct Object {
     capacity: u32,
     count: u32,
     opaque: bool,
+    texture_dependencies: BTreeSet<u32>,
 }
 #[derive(Clone, Copy, Default, PartialEq)]
 struct OcclusionMaterial {
@@ -59,6 +63,12 @@ pub(crate) struct Objects {
     tlas_update: bool,
     pub instances: Vec<vk::AccelerationStructureInstanceKHR>,
     pub changed_instances: Vec<usize>,
+    // Semantic edits before accepted-motion metadata settling adds its own dirty rows.
+    pub history_changed_instances: Vec<usize>,
+    pub history_scene_changed: bool,
+    history_identity_enabled: bool,
+    history_source: Option<[u64; 4]>,
+    history_dynamic_origin: [f64; 3],
     pub triangle_count: u64,
     pub rebuilt: u32,
 }
@@ -103,6 +113,11 @@ impl Objects {
             tlas_update: false,
             instances: Vec::new(),
             changed_instances: Vec::new(),
+            history_changed_instances: Vec::new(),
+            history_scene_changed: false,
+            history_identity_enabled: false,
+            history_source: None,
+            history_dynamic_origin: [0.0; 3],
             triangle_count: 0,
             rebuilt: 0,
         })
@@ -121,6 +136,23 @@ impl Objects {
     ) -> Result<ObjectChanges, String> {
         let started = cpu.start();
         let mut plan = self.planner.plan(scene, source)?;
+        let history_source = [
+            scene.epoch,
+            source.resource_revision,
+            source.instance_revision,
+            scene.dynamic.revision,
+        ];
+        let pure_rebase = self.anchor != scene.anchor
+            && self.history_source == Some(history_source)
+            && self.history_dynamic_origin == scene.dynamic.origin;
+        self.history_changed_instances.clear();
+        self.history_scene_changed = plan.placements_changed && !pure_rebase;
+        if self.history_identity_enabled && !pure_rebase {
+            self.history_changed_instances
+                .extend(plan.changes.iter().map(|change| change.slot));
+        }
+        self.history_source = Some(history_source);
+        self.history_dynamic_origin = scene.dynamic.origin;
         self.anchor = scene.anchor;
         if self.motion_enabled {
             self.motion.prepare(&self.planner, &plan, source, scene);
@@ -232,8 +264,8 @@ impl Objects {
         self.material_bytes.clear();
         let mut copies: BTreeMap<vk::Buffer, Vec<vk::BufferCopy>> = BTreeMap::new();
         let mut offset = 0;
-        for (item, &(key, allocation, count, capacity, replace)) in
-            plan.geometry.iter().zip(&locations)
+        for ((item, &(key, allocation, count, capacity, replace)), packing) in
+            plan.geometry.iter().zip(&locations).zip(&plans)
         {
             let size = crate::packing::stride(0) as u64;
             copies
@@ -251,6 +283,8 @@ impl Objects {
                 .triangles(item)
                 .iter()
                 .all(|triangle| triangle.flags == 0);
+            let mut texture_dependencies = BTreeSet::new();
+            packing.texture_dependencies(&mut texture_dependencies);
             if replace {
                 let build = Acceleration::prepare_with_flags(
                     context,
@@ -276,12 +310,14 @@ impl Objects {
                         capacity,
                         count,
                         opaque,
+                        texture_dependencies,
                     },
                 );
             } else {
                 let object = self.objects.get_mut(&key).unwrap();
                 object.count = count;
                 object.opaque = opaque;
+                object.texture_dependencies = texture_dependencies;
                 object.build.ensure_scratch(builds)?;
             }
         }
@@ -500,6 +536,32 @@ impl Objects {
             self.motion = motion::History::default();
             self.motion_enabled = enabled;
         }
+    }
+
+    pub fn history_primitive_count(&self, slot: usize) -> u32 {
+        self.objects[&self.planner.placement(slot).key].count * 2
+    }
+
+    // Called only for nonempty texture support events. Prototype dependencies were
+    // captured at packing time; instance overrides replace the inherited texture.
+    pub fn history_support_slots<'a>(
+        &'a self,
+        changed: &'a BTreeSet<u32>,
+    ) -> impl Iterator<Item = (usize, u32)> + 'a {
+        (0..self.planner.placement_count()).filter_map(move |slot| {
+            let placement = self.planner.placement(slot);
+            let object = &self.objects[&placement.key];
+            crate::textures::history_support::placement_depends_on(
+                placement.texture_id,
+                &object.texture_dependencies,
+                changed,
+            )
+            .then_some((slot, object.count * 2))
+        })
+    }
+
+    pub fn enable_history_identity(&mut self) {
+        self.history_identity_enabled = true;
     }
 
     /// Only an actual ordered submission promotes a prepared rigid pose to history.

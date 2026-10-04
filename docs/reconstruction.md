@@ -22,9 +22,9 @@ Streamline 是进程级状态，一次只允许一个 Prime RR owner。游戏在
 
 ## 图像和坐标合同
 
-实时采用 K1主表面/delta/guides → K2主要输运 → post 三段。RR的K1写入主表面guides及首纯delta透明面的独立反射运动；K2只可能完成一个已移交的实际反射次段距离。`realtime_rr.slang` 合成FP32 prefix+tail、执行原相机空气段aerial与清洗，写入noisy color，并补全其余像素的反射运动。原始实时不分配RR图像，Offline不进入这两个实时PT kernel。阶段布局见[PT设计](pt-state-design.md)。
+普通 PT 实时采用 K1主表面/delta/guides → K2主要输运 → post 三段。RR的K1写入主表面guides及首纯delta透明面的独立反射运动；K2只可能完成一个已移交的实际反射次段距离。`realtime_rr.slang` 合成FP32 prefix+tail、执行原相机空气段aerial与清洗，写入noisy color，并补全其余像素的反射运动。原始实时不分配RR图像，Offline不进入这两个实时PT kernel。阶段布局见[PT设计](pt-state-design.md)。[ReSTIR PT](restir-pt.md) 在自身生成阶段共享首交点并发布同合同的独立规范 guides，在 resolve 写入最终重采样 radiance 与 aerial；不执行普通 PT 的照明阶段。
 
-RR主射线在像素中心加CPU Halton帧采样偏移；Streamline接收投影位移，XY均为采样偏移的相反数，单位是输入像素。相机矩阵不含抖动；coverage与照明的其余随机域继续由Z-Sobol产生。guide从同一主射线和coverage开始，之后按确定的几何事件选择独立终点，不随照明的首透明0.5分支或roulette改变。
+RR主射线在像素中心加CPU Halton帧采样偏移；Streamline接收投影位移，XY均为采样偏移的相反数，单位是输入像素。相机矩阵不含抖动；普通 PT 的 coverage 与照明随机域继续由 Z-Sobol 产生。ReSTIR 保留原 TinyUniform RNG 与路径 seed/位置哈希 coverage；首 guide 共享实际首交点及所选材质，独立 guide 后缀使用既有 Z-Sobol coverage 域。guide 从同一主射线开始，之后按确定的几何事件选择独立终点，不随照明的首透明0.5分支或roulette改变。
 
 | Binding | 图像/常量 | 格式与语义 |
 | --- | --- | --- |
@@ -70,13 +70,13 @@ K1 从真实 object-to-world/world-to-object 得到前帧物理点，静态光�
 
 ## 历史、同步与成本
 
-首次帧、尺寸/质量/模式/开关变化、源 owner 替换、采样序列中断、camera cut 和输运设置改变使历史失效。正常相机运动使用重投影；scene anchor 变化先对前相机精确重定位，再计算相对运动。曝光/primeDRT 改变不重置场景线性历史。
+首次帧、尺寸/质量/模式/开关变化、源 owner/epoch 或纹理资源 owner/generation 替换、明确采样序列重启、积分器/顶点预算/光源采样方式变化使历史失效。非零序列编号有间隔或随机 seed 变化仍使用最近一次实际接受的前帧。相机平移、旋转和 FOV 改变使用重投影与 guide 完成状态；不以距离/角度阈值推断整个画面已改变。scene anchor 变化先对前相机精确重定位，再计算相对运动。局部源、纹理和实时天文/太阳/天空/星光更新保留重建历史；曝光/primeDRT 改变不重置场景线性历史。
 
 输入/输出图像跨帧复用，同一宿主队列的写后读、读后写依赖覆盖 K1 → K2 → compose → RR → 显示及下一帧；K1的prefix/guide写入、K2距离写入和post完成状态/反射运动写入都必须对后续消费可见。可变描述符和144B常量按宿主 timeline 完成槽复用。录制返回与 `encoder.execute` 不提交时间历史：两版实际 `Submission.close` 成功接受对应 serial 后才同时提交相机与实例姿态；未提交/失败录制不推进。纯姿态变化的元数据在接受后另有一次回归当前姿态的稀疏 settle 更新，稳态不扫描全实例。
 
 RR 稳态没有像素读回、额外应用队列提交或逐帧 CPU 等待。重新配置/释放 RR 私有资源前等待其最后真实使用 serial；SDK 调用失败也可能已经录制命令，不能立即释放。无法取得完成证明时保留 SDK owner、DLL 和 GPU 资源。FG 另有 SDK Present 消费者，不能用世界 serial 代替其完成证明。
 
-七个SDK输入共44 B/内部像素；内部距离2 B与状态1 B另计，合计47 B/内部像素，输出8 B/输出像素。新增specular motion图为4 B/内部像素，约2.07 MB/960×540或8.29 MB/1920×1080。默认Performance在1920×1080输出下，显式图像约40.95 MB；DLAA原生1080p约114.05 MB，均为十进制MB，不含240B/内部像素的RR scratch、分配对齐、SDK内部历史/暂存、原有场景与宿主目标。FG 的可见 depth/motion 另加8 B/内部像素；实例运动元数据由48B增至96B，原始/离线 shader 特化不消费前态字段。显示、HUDless 和覆盖图的完整成本另见[显示合同](display.md)。
+七个SDK输入共44 B/内部像素；内部距离2 B与状态1 B另计，合计47 B/内部像素，输出8 B/输出像素。新增specular motion图为4 B/内部像素，约2.07 MB/960×540或8.29 MB/1920×1080。默认Performance在1920×1080输出下，显式图像约40.95 MB；DLAA原生1080p约114.05 MB，均为十进制MB，不含普通 PT 的240B/内部像素RR scratch、ReSTIR 的屏幕状态、分配对齐、SDK内部历史/暂存、原有场景与宿主目标。ReSTIR 的64B/内部像素反射 seed 在生成阶段借用尚无消费者的 replay 区，不新增常驻全屏 buffer。FG 的可见 depth/motion 另加8 B/内部像素；实例运动元数据由48B增至96B，原始/离线 shader 特化不消费前态字段。显示、HUDless 和覆盖图的完整成本另见[显示合同](display.md)。
 
 全图写读、独立guide后缀、仿射投影、重建和显示都是真实成本；物理寄存器、保存流量与整帧收益仍须测量。降低分辨率会减少PT射线数量，不能把性能档帧率称为原生1080p性能。正式对比先用DLAA保持原生1920×1080、场景、种子和预算一致，再单独报告超分档位。
 

@@ -218,7 +218,18 @@ def main():
         expected = ((index & 63) << 20) | (((index >> 6) & 31) << 26) | (index & 65535) | ((index & 1) << 16) | (((index >> 1) & 1) << 17) | (((index >> 2) & 3) << 18)
         assert (packed, before, after, lengths) == (expected, index & 63, (index >> 6) & 31, index)
     print("PASS reservoir flag ABI: 65536 packed combinations")
-    report = {"status": "passed", "rng_cases": 4096, "ris_paths": count, "ris_mean": means, "ris_merge_mean": merge_means, "pairwise_cases": 4096, "paired_entries": len(cases), "paired_transforms": 5, "flag_cases": 65536, "bda_strides": strides, "scalar_block_layout_required": True, "execution": "Slang-generated C++ CPU; SPIR-V validation with scalarBlockLayout and binary ABI; no GPU/game execution"}
+    identity_cases = [(epoch, live_count, primitive, accepted)
+                      for epoch in (0, 1, 7, 0xFFFFFFFE, 0xFFFFFFFF)
+                      for live_count in (0, 1, 2, 100, 0xFFFFFFFF)
+                      for primitive in (0, 1, 2, 99, 100, 0xFFFFFFFE, 0xFFFFFFFF)
+                      for accepted in (0, 1, 6, 7, 0xFFFFFFFE, 0xFFFFFFFF)]
+    identity_cases += [tuple(rng.randrange(1 << 32) for _ in range(4)) for _ in range(10000)]
+    result = execute(8, len(identity_cases), b"".join(struct.pack("<4I", *case) for case in identity_cases))
+    for index, (epoch, live_count, primitive, accepted) in enumerate(identity_cases):
+        expected = int(epoch != 0 and epoch <= accepted and primitive < live_count)
+        assert struct.unpack_from("<4I", result, index * 16) == (expected, 0, 0, 0)
+    print("PASS scene identity watermark/liveness/primitive bounds:", len(identity_cases), "cases")
+    report = {"status": "passed", "rng_cases": 4096, "ris_paths": count, "ris_mean": means, "ris_merge_mean": merge_means, "pairwise_cases": 4096, "paired_entries": len(cases), "paired_transforms": 5, "flag_cases": 65536, "identity_cases": len(identity_cases), "bda_strides": strides, "scalar_block_layout_required": True, "execution": "Slang-generated C++ CPU; SPIR-V validation with scalarBlockLayout and binary ABI; no GPU/game execution"}
     (output / "results.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print("PASS Vulkan BDA ABI:", strides)
 

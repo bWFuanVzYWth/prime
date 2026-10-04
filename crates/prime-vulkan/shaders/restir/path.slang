@@ -109,8 +109,20 @@ void restirAddEnvironment(inout PathRISState ris, PathReconnectionInfo rc, float
     }
 }
 
-public PathReservoir restirGenerate(RestirScene scene, uint2 pixel, uint sequence,
-                                    out RestirPrimary primary, out float3 residual) {
+public interface IRestirPrimaryObserver {
+    [mutating] void capturePrimary(SurfaceHit hit, float3 view);
+    [mutating] void captureFirstScatter(float distance, uint eventFlags);
+}
+public struct NoRestirPrimaryObserver : IRestirPrimaryObserver {
+    [mutating] public void capturePrimary(SurfaceHit hit, float3 view) {}[mutating]
+            public void captureFirstScatter(float distance, uint eventFlags) {}
+};
+
+public PathReservoir restirGenerate<T : IRestirPrimaryObserver>(RestirScene scene, uint2 pixel,
+                                                                uint sequence,
+                                                                out RestirPrimary primary,
+                                                                out float3 residual,
+                                                                inout T observer) {
     SampleGenerator sg = SampleGenerator(pixel, sequence * 4);
     uint seed = sg.rng;
     primary.coverageSeed = seed;
@@ -126,7 +138,7 @@ public PathReservoir restirGenerate(RestirScene scene, uint2 pixel, uint sequenc
     float3 throughput = float3(1);
     float sourcePdf = 1;
     float3 origin = scene.frame.position.xyz;
-    float3 direction = restirPrimaryDirection(scene.frame, pixel);
+    float3 direction = restirPrimaryDirection(scene.frame, pixel, scene.sampleJitter);
     float3 previousPosition = origin, previousNormal = -direction;
     float3 previousLightNormal = float3(0);
     float previousPdf = 0, scatterPdf = 1, lastScatterPdf = 1;
@@ -138,8 +150,14 @@ public PathReservoir restirGenerate(RestirScene scene, uint2 pixel, uint sequenc
     for (uint bounce = 0; bounce < budget; ++bounce) {
         HitInfo identity;
         SurfaceHit hit = restirTrace(scene, origin, direction, seed, identity);
-        if (bounce == 0)
+        if (bounce == 0) {
             primary.hit = identity;
+            observer.capturePrimary(hit, -direction);
+        } else if (bounce == 1) {
+            observer.captureFirstScatter(hit.found ? length(hit.surface.position - previousPosition)
+                                                   : 65504.0,
+                                         previousFlags);
+        }
         if (!hit.found) {
             if (bounce == 0) {
                 residual = restirEnvironmentRadiance(scene, RESTIR_LIGHT_SKY, direction) +
@@ -177,8 +195,8 @@ public PathReservoir restirGenerate(RestirScene scene, uint2 pixel, uint sequenc
                                     : 0;
             float mis = lightPdf > 0 ? primePowerHeuristicValue(previousPdf, lightPdf) : 1.0;
             bool selected = ris.addBSDFHitCandidate(uBsdf, rc, bounce - 1, throughput * Le * mis,
-                                                    direction, Le, Le * mis, sourcePdf, lightPdf,
-                                                    RESTIR_LIGHT_EMISSIVE);
+                                                    direction, attenuation * Le, Le * mis,
+                                                    sourcePdf, lightPdf, RESTIR_LIGHT_EMISSIVE);
             if (selected && rc.pathFlags.rcVertexLength() == RESTIR_MAX_RC_LENGTH &&
                 min(segment.footprint, segment.inverseGeometry / RESTIR_DIFFUSE_PSEUDO_PDF) >=
                         threshold) {
@@ -273,6 +291,128 @@ public PathReservoir restirGenerate(RestirScene scene, uint2 pixel, uint sequenc
     reservoir.finalizeReservoirWeight();
     reservoir.M = 1;
     return reservoir;
+}
+
+public PathReservoir restirGenerate(RestirScene scene, uint2 pixel, uint sequence,
+                                    out RestirPrimary primary, out float3 residual) {
+    NoRestirPrimaryObserver observer;
+    return restirGenerate(scene, pixel, sequence, primary, residual, observer);
+}
+
+// Falcor TraceTemporalUpdate: replay only the cached portion after the RC. The RC's
+// first scatter response is evaluated by reconnection, so it is excluded here.
+public bool restirUpdateSuffix(RestirScene scene, SurfaceHit rcHit, float3 rcView,
+                               float4 incomingMedium, inout PathReservoir reservoir) {
+    reservoir.reconnectionIncidentRadiance = float3(0);
+    uint rcLength = uint(reservoir.pathFlags.rcVertexLength());
+    uint pathLength = uint(reservoir.pathFlags.pathLength());
+    bool nee = reservoir.pathFlags.lastVertexNEE();
+    SampleGenerator sg = SampleGenerator(reservoir.rcNextVertexBounceSeed);
+    if (nee && rcLength == pathLength) {
+        if (!restirNeeMayReconnectAtSurface(rcHit))
+            return false;
+        RestirLightSample light = restirSampleLight(scene, rcHit, rcView, incomingMedium,
+                                                    reservoir.initRandomSeed, sg);
+        if (!(light.pdf > 0) || all(light.Le == 0) || all(light.visibility == 0))
+            return false;
+        BsdfEvaluation evaluated =
+                restirEvaluate(scene, rcHit, rcView, light.direction, incomingMedium);
+        if (!(evaluated.pdf > 0) || all(evaluated.response == 0))
+            return false;
+        reservoir.reconnectionIncidentRadiance = light.Le * light.visibility;
+        reservoir.reconnectionWi = light.direction;
+        reservoir.lightPdf = light.pdf;
+        reservoir.pathFlags.insertLightType(light.type);
+        return true;
+    }
+    float3 direction = reservoir.reconnectionWi;
+    bool transmission =
+            dot(rcHit.surface.normal, rcView) * dot(rcHit.surface.normal, direction) < 0;
+    if (transmission != reservoir.pathFlags.decodeIsTransmissionEvent(false))
+        return false;
+    BsdfEvaluation evaluated = restirEvaluate(scene, rcHit, rcView, direction, incomingMedium);
+    if (!(evaluated.pdf > 0) || all(evaluated.response == 0))
+        return false;
+    float4 medium = rcHit.optical && !rcHit.thin && transmission
+                            ? rcHit.transmitted
+                            : restirIncident(rcHit, incomingMedium);
+    float3 origin = spawnRay(rcHit.surface, direction);
+    float3 previousPosition = rcHit.surface.position;
+    float3 previousLightNormal = float3(0);
+#if defined(PRIME_LIGHT_TREE_SPHERE)
+    previousLightNormal = rcHit.optical ? float3(0) : restirMaterial(rcHit, rcView).normal;
+#endif
+    float previousPdf = !rcHit.optical && transmission ? 0 : evaluated.pdf;
+    float3 throughput = float3(1);
+    uint lightType = reservoir.pathFlags.lightType();
+    uint budget = min(asuint(scene.frame.displayExtra.z), 254u);
+    for (uint bounce = rcLength + 1; bounce < budget && bounce <= pathLength + 1; ++bounce) {
+        HitInfo identity;
+        SurfaceHit hit = restirTrace(scene, origin, direction, reservoir.initRandomSeed, identity);
+        float3 view = -direction;
+        if (!hit.found) {
+            if (nee || bounce != pathLength + 1 || lightType == RESTIR_LIGHT_EMISSIVE)
+                return false;
+            float lightPdf = restirEnvironmentPdf(scene, lightType, direction);
+            float mis = previousPdf > 0 && lightPdf > 0
+                                ? primePowerHeuristicValue(previousPdf, lightPdf)
+                                : 1;
+            reservoir.reconnectionIncidentRadiance =
+                    throughput * restirEnvironmentRadiance(scene, lightType, direction) *
+                    (pathLength == rcLength ? 1 : mis);
+            reservoir.lightPdf = lightPdf;
+            return any(reservoir.reconnectionIncidentRadiance > 0);
+        }
+        throughput *= opticalFeatures != 0
+                              ? exp(-medium.yzw * length(hit.surface.position - origin))
+                              : float3(1);
+        sampleNext1D(sg); // BSDF RIS, including terminal hits.
+        if (!nee && bounce == pathLength + 1) {
+            // Prime's split sky/sun RIS domains cannot be exchanged with finite endpoints.
+            if (lightType != RESTIR_LIGHT_EMISSIVE)
+                return false;
+            float lightPdf = previousPdf > 0 ? restirEmitterPdf(scene, hit, previousPosition,
+                                                                previousLightNormal)
+                                             : 0;
+            float mis = lightPdf > 0 ? primePowerHeuristicValue(previousPdf, lightPdf) : 1;
+            reservoir.reconnectionIncidentRadiance = throughput * linear709ToWorking(hit.emission) *
+                                                     (pathLength == rcLength ? 1 : mis);
+            reservoir.lightPdf = lightPdf;
+            return any(reservoir.reconnectionIncidentRadiance > 0);
+        }
+        sampleNext1D(sg); // NEE RIS.
+        if (nee && bounce == pathLength) {
+            RestirLightSample light =
+                    restirSampleLight(scene, hit, view, medium, reservoir.initRandomSeed, sg);
+            if (!(light.pdf > 0) || all(light.Le == 0) || all(light.visibility == 0))
+                return false;
+            BsdfEvaluation direct = restirEvaluate(scene, hit, view, light.direction, medium);
+            float mis = bounce + 1 < budget ? primePowerHeuristicValue(light.pdf, direct.pdf) : 1;
+            reservoir.reconnectionIncidentRadiance =
+                    throughput * direct.response * light.Le * light.visibility * (mis / light.pdf);
+            reservoir.lightPdf = light.pdf;
+            reservoir.pathFlags.insertLightType(light.type);
+            return any(reservoir.reconnectionIncidentRadiance > 0);
+        }
+        restirSkipLightSample(sg);
+        sampleNext1D(sg); // Roulette is replayed without its decision or reweighting.
+        PrimePbrSample sampled = restirScatter(scene, hit, view, medium, sg);
+        BsdfSample scatter = sampled.bsdfSample;
+        if (scatter.eventFlags == 0)
+            return false;
+        throughput *= scatter.response / scatter.pdf;
+        if (any(isnan(throughput) || isinf(throughput)) || all(throughput == 0))
+            return false;
+        medium = sampled.medium;
+        previousPosition = hit.surface.position;
+#if defined(PRIME_LIGHT_TREE_SPHERE)
+        previousLightNormal = hit.optical ? float3(0) : restirMaterial(hit, view).normal;
+#endif
+        previousPdf = primeDirectLightingMisPdf(hit.optical, scatter);
+        direction = scatter.direction;
+        origin = spawnRay(hit.surface, direction);
+    }
+    return false;
 }
 
 public RestirReplayData restirDirectReplayData(RestirScene scene, RestirPrimary primary,

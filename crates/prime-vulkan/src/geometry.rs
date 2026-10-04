@@ -2,15 +2,19 @@
 use super::dynamic::TopLevel;
 use super::resources::{Acceleration, Buffer, Context};
 use super::textures::Textures;
+#[path = "history_identity.rs"]
+mod history_identity;
 use crate::cpu_profile::{FrameCpu, Stage};
 use crate::material_arena::{Allocation, MaterialArena};
 use crate::objects::Objects;
 use crate::plan::{OBJECT_BIT, validate_material_count};
 use ash::vk;
+use history_identity::HistoryIdentity;
+pub(super) use history_identity::HistoryIdentityInput;
 use prime_scene::instances::InstanceInput;
 use prime_scene::{
     geometry::MeshGeometry,
-    incremental::{SceneInput, ScenePublication},
+    incremental::{ResourceIdentity, SceneInput, ScenePublication},
     scene::{InstanceScene, Scene},
     spatial::Cell,
     surface::SurfaceCompiler,
@@ -127,6 +131,8 @@ impl Cluster {
 }
 
 pub(super) struct Geometry {
+    history_identity: Option<HistoryIdentity>,
+    history_resources: ResourceIdentity,
     workers: Arc<prime_scene::workers::CpuWorkers>,
     indices: [Buffer; crate::packing::FORMATS],
     builds: crate::arena::Arena,
@@ -261,6 +267,8 @@ impl Geometry {
                 .collect(),
             objects: Objects::new(context, workers)?,
             directory: crate::static_directory::StaticDirectory::default(),
+            history_identity: None,
+            history_resources: scene.resource_identity(),
             light_sources: BTreeMap::new(),
             capabilities: [0; 3],
             top_dirty: true,
@@ -338,6 +346,60 @@ impl Geometry {
             slot,
         )?;
         Ok((address, self.directory.instances.len() as u32))
+    }
+
+    pub fn anchor(&self) -> [f64; 3] {
+        self.anchor
+    }
+
+    // Numeric slot revisions are local to this scene/resource ownership domain.
+    pub fn history_owner_matches(&self, scene: SceneInput<'_>) -> bool {
+        self.same_owner(scene)
+            && self.epoch == scene.epoch
+            && self.history_resources == scene.resource_identity()
+    }
+
+    // Allocated only when ReSTIR actually consumes history. Subsequent calls upload changed
+    // slots only; ordinary PT neither allocates these buffers nor scans identities.
+    pub fn shader_history_identity(
+        &mut self,
+        context: &Arc<Context>,
+        _slot: usize,
+    ) -> Result<HistoryIdentityInput, String> {
+        if self.history_identity.is_none() {
+            self.objects.enable_history_identity();
+            let mut identity = HistoryIdentity::default();
+            identity.advance()?;
+            for (&key, cluster) in &self.clusters {
+                let (_, first, _) = self
+                    .directory
+                    .slot(key)
+                    .ok_or("Missing history static directory range")?;
+                identity.static_range(
+                    first,
+                    cluster
+                        .allocations
+                        .iter()
+                        .map(|allocation| allocation.records.count * 2),
+                );
+            }
+            for slot in 0..self.objects.instances.len() {
+                identity.dynamic_slot(slot, self.objects.history_primitive_count(slot));
+            }
+            identity.synchronize_emitters(self.light_sampler.history_pages());
+            self.history_identity = Some(identity);
+        }
+        self.history_identity.as_mut().unwrap().input(
+            context,
+            &mut self.uploads,
+            self.directory.bytes.len(),
+            self.objects.instances.len(),
+        )
+    }
+
+    #[cfg(all(test, feature = "shader-tests"))]
+    pub fn history_identity_buffers_for_test(&self) -> [&Buffer; 3] {
+        self.history_identity.as_ref().unwrap().buffers_for_test()
     }
 
     pub fn needs_update(&self, scene: SceneInput<'_>) -> bool {
@@ -572,8 +634,53 @@ impl Geometry {
             compiler.set_cutout_squares(self.opacity_micromap);
         }
         let mut plan = self.static_planner.plan_input_limited(scene, cell_budget)?;
+        if self.history_resources != scene.resource_identity() {
+            self.history_identity = None;
+        }
         plan.placements_changed |= instance_flags_changed;
         let published_changed = plan.content_changed;
+        let history_changed_cells: BTreeSet<_> = if self.history_identity.is_some() {
+            plan.geometry.iter().map(|update| update.key).collect()
+        } else {
+            BTreeSet::new()
+        };
+        if (!plan.geometry.is_empty()
+            || !plan.removed.is_empty()
+            || self.resource_revision != resources.revision)
+            && let Some(identity) = &mut self.history_identity
+        {
+            identity.advance()?;
+        }
+        if !resources.history_support_changed.is_empty()
+            && let Some(identity) = &mut self.history_identity
+        {
+            // Stamp existing slots before budgeted rebuilds. A valid all-frame OMM
+            // proof does not preserve the selected cutout/coating leaf at this frame.
+            let mut emitter_keys = BTreeSet::new();
+            for (&key, cluster) in &self.clusters {
+                if cluster
+                    .texture_dependencies
+                    .is_disjoint(&resources.history_support_changed)
+                {
+                    continue;
+                }
+                let (_, first, _) = self
+                    .directory
+                    .slot(key)
+                    .ok_or("Missing texture support history range")?;
+                identity.static_range(
+                    first,
+                    cluster
+                        .allocations
+                        .iter()
+                        .map(|allocation| allocation.records.count * 2),
+                );
+                emitter_keys.extend(cluster.light_pages.iter().flatten().map(|page| page.key));
+            }
+            if !emitter_keys.is_empty() {
+                identity.invalidate_emitter_keys(&emitter_keys);
+            }
+        }
         plan_trace.count("new", plan.geometry.len() as u64);
         plan_trace.count("del", plan.removed.len() as u64);
         plan_trace.succeed();
@@ -617,6 +724,7 @@ impl Geometry {
             });
         self.top_dirty |= plan.placements_changed;
         if self.epoch != scene.epoch {
+            self.history_identity = None;
             self.compactions.cancel_sources();
             self.directory = crate::static_directory::StaticDirectory::default();
             self.light_sources.clear();
@@ -634,6 +742,11 @@ impl Geometry {
             self.epoch = scene.epoch;
         }
         for key in &plan.removed {
+            if let Some(identity) = &mut self.history_identity
+                && let Some((_, first, count)) = self.directory.slot(*key)
+            {
+                identity.remove_static(first, count);
+            }
             self.directory.remove(*key);
             if let Some(old) = self.clusters.remove(key) {
                 self.static_count -= old.triangle_count;
@@ -655,6 +768,11 @@ impl Geometry {
         let mut allocated_changes = Vec::with_capacity(plan.geometry.len());
         for update in &plan.geometry {
             directory_changed.insert(update.key);
+            if let Some(identity) = &mut self.history_identity
+                && let Some((_, first, count)) = self.directory.slot(update.key)
+            {
+                identity.remove_static(first, count);
+            }
             if let Some(old) = self.clusters.remove(&update.key) {
                 self.static_count -= old.triangle_count;
                 for (total, value) in self.capabilities.iter_mut().zip(old.capabilities()) {
@@ -1033,6 +1151,7 @@ impl Geometry {
             self.revision = scene.publication();
             self.anchor = scene.anchor;
             self.resource_revision = resources.revision;
+            self.history_resources = scene.resource_identity();
             self.resource_occlusion_revision = resources.occlusion_revision;
             self.omm_revision = resources.omm_revision;
             resources.coverage_changed.clear();
@@ -1127,6 +1246,26 @@ impl Geometry {
                     },
                 },
             )?;
+            if history_changed_cells.contains(&key)
+                && let Some(identity) = &mut self.history_identity
+            {
+                let (_, first, _) = self
+                    .directory
+                    .slot(key)
+                    .ok_or("Missing published history range")?;
+                identity.static_range(
+                    first,
+                    cluster
+                        .allocations
+                        .iter()
+                        .map(|allocation| allocation.records.count * 2),
+                );
+            }
+        }
+        if (lights_changed || self.sampler_dirty)
+            && let Some(identity) = &mut self.history_identity
+        {
+            identity.synchronize_emitters(self.light_sampler.history_pages());
         }
         if self.sampler_dirty {
             for (&key, cluster) in &self.clusters {
@@ -1220,6 +1359,7 @@ impl Geometry {
         self.revision = scene.publication();
         self.anchor = scene.anchor;
         self.resource_revision = resources.revision;
+        self.history_resources = scene.resource_identity();
         self.resource_occlusion_revision = resources.occlusion_revision;
         self.omm_revision = resources.omm_revision;
         resources.coverage_changed.clear();
@@ -1236,7 +1376,7 @@ impl Geometry {
         slot: usize,
         cpu: &mut FrameCpu,
     ) -> Result<(bool, bool, bool), String> {
-        let resources = self.resources.borrow();
+        let mut resources = self.resources.borrow_mut();
         let changes = self.objects.prepare(
             context,
             scene,
@@ -1246,6 +1386,27 @@ impl Geometry {
             &mut self.builds,
             cpu,
         )?;
+        if self.objects.history_scene_changed
+            && let Some(identity) = &mut self.history_identity
+        {
+            identity.advance()?;
+            for &index in &self.objects.history_changed_instances {
+                identity.dynamic_slot(index, self.objects.history_primitive_count(index));
+            }
+        }
+        if !resources.history_support_changed.is_empty()
+            && let Some(identity) = &mut self.history_identity
+        {
+            // Static preparation may have consumed its own OMM journal already.
+            // This support journal stays live until both consumers have succeeded.
+            identity.advance()?;
+            for (index, primitives) in self
+                .objects
+                .history_support_slots(&resources.history_support_changed)
+            {
+                identity.dynamic_slot(index, primitives);
+            }
+        }
         let mut bindings = changes.bindings;
         if self.top_dirty || changes.tlas {
             let started = cpu.start();
@@ -1275,6 +1436,7 @@ impl Geometry {
             .static_count
             .checked_add(self.objects.triangle_count)
             .ok_or("Triangle count overflow")?;
+        resources.history_support_changed.clear();
         Ok((changes.scene, changes.occlusion, bindings))
     }
 

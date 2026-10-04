@@ -18,6 +18,7 @@ import "service/bsdf/support/sanitization.slang";
 import "atmosphere/view.slang";
 import "restir/reservoir.slang";
 import "restir/rng.slang";
+import "restir/identity.slang";
 __exported import "restir/types.slang";
 #if defined(PRIME_LIGHT_TREE_SPHERE)
 import "sphere_tree_sampling.slang";
@@ -44,7 +45,17 @@ public struct RestirScene {
     public Frame frame;
     public uint *tlasInstances;
     public uint terrainCount;
+    public float2 sampleJitter;
+    public uint2 *historyStatic;
+    public uint2 *historyDynamic;
+    public uint2 *historyEmitters;
+    public uint4 identityControl;
 };
+
+public bool restirHistoryHitValid(RestirScene scene, HitInfo hit) {
+    return restirHistoryHitValid(hit, scene.historyStatic, scene.historyDynamic,
+                                 scene.historyEmitters, scene.identityControl);
+}
 
 #if !defined(PRIME_RESTIR_MATERIAL_ONLY)
 public struct RestirHitIdentity : IClosestHitIdentity {
@@ -58,8 +69,8 @@ public struct RestirHitIdentity : IClosestHitIdentity {
 };
 #endif
 
-public float3 restirPrimaryDirection(Frame frame, uint2 pixel) {
-    float2 screen = ((float2(pixel) + 0.5) / float2(frame.dimensions.xy)) * 2.0 - 1.0;
+public float3 restirPrimaryDirection(Frame frame, uint2 pixel, float2 jitter = float2(0)) {
+    float2 screen = ((float2(pixel) + 0.5 + jitter) / float2(frame.dimensions.xy)) * 2.0 - 1.0;
     return normalize(frame.forward.xyz +
                      frame.right.xyz * (screen.x * frame.forward.w * frame.position.w) -
                      frame.up.xyz * (screen.y * frame.position.w));
@@ -385,7 +396,8 @@ public float3 restirApplyAtmosphere(RestirScene scene, uint2 pixel, RestirPrimar
                                     float3 radiance) {
     if (!primary.hit.isValid())
         return radiance;
-    SurfaceHit hit = restirLoadHit(scene, primary.hit, -restirPrimaryDirection(scene.frame, pixel),
+    SurfaceHit hit = restirLoadHit(scene, primary.hit,
+                                   -restirPrimaryDirection(scene.frame, pixel, scene.sampleJitter),
                                    primary.coverageSeed);
     if (hit.incident.x != 1.0 && !hit.thin)
         return radiance;

@@ -37,9 +37,18 @@ RestirScene restirScene(bool previous = false) {
     result.environment = atmosphereEnvironment();
     result.energy = {transmissionEnergy};
     result.frame = previous ? parameters.previousFrame : parameters.frame;
+    // Both temporal directions use the current scene's illumination. Only camera,
+    // sampling identity and accepted jitter come from the previous frame.
+    result.frame.right.w = parameters.frame.right.w;
+    result.frame.up.w = parameters.frame.up.w;
     if (!previous)
         result.frame.target.y += pass.sampleOffset;
     result.tlasInstances = parameters.tlasInstances;
     result.terrainCount = parameters.control.x;
+    result.sampleJitter = previous ? parameters.sampleJitter.zw : parameters.sampleJitter.xy;
+    result.historyStatic = parameters.historyStatic;
+    result.historyDynamic = parameters.historyDynamic;
+    result.historyEmitters = parameters.historyEmitters;
+    result.identityControl = parameters.identityControl;
     return result;
 }

@@ -18,6 +18,9 @@ pub(super) struct SceneResources {
     pub omm_revision: u64,
     // An explicit prepare may precede rendering. Keep invalidations until Geometry consumes them.
     pub coverage_changed: BTreeSet<u32>,
+    // Current support differs from the all-frame OMM proof. Both static and dynamic
+    // identities consume this journal; explicit resource prepares must accumulate it.
+    pub history_support_changed: BTreeSet<u32>,
     pub prepare_ns: [u64; 3],
     pub preparations: u64,
     work_serial: u64,
@@ -29,6 +32,7 @@ impl SceneResources {
         let textures = Textures::new(context, scene.texture_input(), &mut uploads)?;
         let mut result = Self {
             coverage_changed: textures.coverage_changed.clone(),
+            history_support_changed: textures.history_support_changed.clone(),
             textures,
             templates: None,
             pool: crate::omm::Pool::new(),
@@ -65,6 +69,8 @@ impl SceneResources {
             .update(context, scene.texture_input(), &mut self.uploads)?;
         self.coverage_changed
             .extend(&self.textures.coverage_changed);
+        self.history_support_changed
+            .extend(&self.textures.history_support_changed);
         self.prepare_templates(context, identity_changed)?;
         if self.textures.occlusion_changed || identity_changed {
             self.occlusion_revision = self

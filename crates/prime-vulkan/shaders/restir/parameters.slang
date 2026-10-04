@@ -6,7 +6,7 @@ import "restir/paired_neighbors.slang";
 import "restir/reservoir.slang";
 import "restir/rng.slang";
 
-// Binding 23, 400 bytes. All pointers borrow private GPU state until host completion.
+// Binding 23, 464 bytes. All pointers borrow private GPU state until host completion.
 public struct RestirParameters {
     public Frame frame;
     public Frame previousFrame;
@@ -26,6 +26,11 @@ public struct RestirParameters {
     public uint *pairedDeltas;
     public uint *tlasInstances;
     public float4 *accumulation;
+    public float4 sampleJitter; // current.xy and accepted previous.zw, in input pixels
+    public uint2 *historyStatic;
+    public uint2 *historyDynamic;
+    public uint2 *historyEmitters;
+    public uint4 identityControl; // static/dynamic/emitter counts, accepted scene revision
 };
 public struct RestirPass {
     public uint phase; // 0 temporal (two directions), 1 spatial (three paired directions)

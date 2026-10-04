@@ -40,7 +40,8 @@ import "math/transport.slang";
 import "service/bsdf/contract/sample.slang";
 
 public PrecomputedShiftData restirShift(RestirScene scene, RestirPrimary primary, float3 primaryWo,
-                                        inout PathReservoir reservoir, RestirReplayData replay) {
+                                        inout PathReservoir reservoir, RestirReplayData replay,
+                                        bool updateSuffix = false) {
     PrecomputedShiftData result = {};
     result.reconnectionJacobian = reservoir.reconnectionJacobian;
     if (reservoir.weight == 0 || all(replay.data.pathThroughput == 0))
@@ -105,7 +106,7 @@ public PrecomputedShiftData restirShift(RestirScene scene, RestirPrimary primary
         return result;
     bool violateRoughness = !(emitter && !nee) && !restirSampleRough(first.pdf, roughnessThreshold);
     bool violateDistance = finite && 1.0 / (first.pdf * geometry) < threshold;
-    float3 integrand = reservoir.reconnectionIncidentRadiance * first.response;
+    float3 integrand = float3(0);
     float3 emitterRadiance = float3(0);
     float emitterMis = 1;
     float secondPdf = 0;
@@ -125,9 +126,16 @@ public PrecomputedShiftData restirShift(RestirScene scene, RestirPrimary primary
                                      : 1;
             emitterRadiance = rcHit.emission;
             emitterMis = mis;
+            if (updateSuffix) {
+                reservoir.reconnectionIncidentRadiance = linear709ToWorking(emitterRadiance);
+                reservoir.lightPdf = lightPdf * geometry;
+            }
         } else {
             if (neeAtRc && !restirNeeMayReconnectAtSurface(rcHit))
                 return result;
+            if (updateSuffix && !restirUpdateSuffix(scene, rcHit, -connection, medium, reservoir))
+                return result;
+            integrand = reservoir.reconnectionIncidentRadiance * first.response;
             BsdfEvaluation second =
                     restirEvaluate(scene, rcHit, -connection, reservoir.reconnectionWi, medium);
             secondPdf = second.pdf;
@@ -145,6 +153,12 @@ public PrecomputedShiftData restirShift(RestirScene scene, RestirPrimary primary
         }
     } else {
         float lightPdf = restirEnvironmentPdf(scene, reservoir.pathFlags.lightType(), connection);
+        if (updateSuffix) {
+            reservoir.reconnectionIncidentRadiance =
+                    restirEnvironmentRadiance(scene, reservoir.pathFlags.lightType(), connection);
+            reservoir.lightPdf = lightPdf;
+        }
+        integrand = reservoir.reconnectionIncidentRadiance * first.response;
         bool continuation = !nee || pathLength + 1 < asuint(scene.frame.displayExtra.z);
         float mis = continuation ? (nee ? primePowerHeuristicValue(lightPdf, first.pdf)
                                         : primePowerHeuristicValue(first.pdf, lightPdf))

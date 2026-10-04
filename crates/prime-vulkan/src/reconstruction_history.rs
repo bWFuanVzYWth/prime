@@ -146,18 +146,6 @@ pub(super) fn rebase(mut camera: Camera, old_anchor: [f64; 3], anchor: [f64; 3])
     camera
 }
 
-pub(super) fn camera_cut(current: Camera, previous: Camera) -> bool {
-    current
-        .position
-        .into_iter()
-        .zip(previous.position)
-        .map(|(a, b)| (a - b).powi(2))
-        .sum::<f32>()
-        > 256.0
-        || dot(current.forward, previous.forward) < 0.5
-        || (current.vertical_fov_radians - previous.vertical_fov_radians).abs() > 0.2
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -236,15 +224,13 @@ mod tests {
         assert!(actual[0] / actual[3] - now[0] / now[3] > 0.0);
     }
     #[test]
-    fn anchor_change_is_not_camera_motion_and_cuts_are_explicit() {
+    fn anchor_change_preserves_absolute_camera_position_and_round_trips() {
         let old = camera();
         let rebased = rebase(old, [1_000_000.0, 0.0, 0.0], [1_000_064.0, 0.0, 0.0]);
         assert_eq!(rebased.position[0], -61.0);
-        assert!(!camera_cut(rebased, rebased));
-        assert!(camera_cut(old, rebased));
-        let mut rotated = old;
-        rotated.forward = [0.0, 0.0, 1.0];
-        assert!(camera_cut(rotated, old));
+        assert_eq!(f64::from(rebased.position[0]) + 1_000_064.0, 1_000_003.0);
+        let restored = rebase(rebased, [1_000_064.0, 0.0, 0.0], [1_000_000.0, 0.0, 0.0]);
+        assert_eq!(restored, old);
     }
     #[test]
     fn jitter_is_bounded_deterministic_and_scales_phase_count() {

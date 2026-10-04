@@ -61,6 +61,12 @@ mod restir;
 #[cfg(all(test, feature = "shader-tests"))]
 mod restir_adapter_tests;
 #[cfg(all(test, feature = "shader-tests"))]
+mod restir_history_tests;
+#[cfg(all(test, feature = "shader-tests"))]
+mod restir_rr_tests;
+#[cfg(all(test, feature = "shader-tests"))]
+mod restir_support_tests;
+#[cfg(all(test, feature = "shader-tests"))]
 mod restir_tests;
 #[cfg(all(test, feature = "shader-tests"))]
 mod rr_display_tests;
@@ -206,7 +212,14 @@ impl Pipeline {
                 restir: None,
             };
             let binding_ids: &[u32] = if integrator == Integrator::RestirPt {
-                &[0, 2, 3, 4, 7, 8, 9, 23, 24]
+                if reconstruction {
+                    &[
+                        0, 2, 3, 4, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
+                        23, 24,
+                    ]
+                } else {
+                    &[0, 2, 3, 4, 7, 8, 9, 23, 24]
+                }
             } else {
                 match mode {
                     RenderMode::Offline => &[0, 2, 3, 4, 5, 7, 8, 9],
@@ -250,7 +263,7 @@ impl Pipeline {
                 .stage_flags(vk::ShaderStageFlags::COMPUTE)
                 .offset(0)
                 .size(if integrator == Integrator::RestirPt {
-                    16
+                    if reconstruction { 64 } else { 16 }
                 } else {
                     128
                 })];
@@ -285,7 +298,7 @@ impl Pipeline {
                 vk::DescriptorPoolSize {
                     ty: vk::DescriptorType::STORAGE_IMAGE,
                     descriptor_count: (if integrator == Integrator::RestirPt {
-                        2
+                        if reconstruction { 14 } else { 2 }
                     } else if reconstruction {
                         13
                     } else {
@@ -294,7 +307,11 @@ impl Pipeline {
                 },
                 vk::DescriptorPoolSize {
                     ty: vk::DescriptorType::UNIFORM_BUFFER,
-                    descriptor_count: FRAME_SLOTS as u32,
+                    descriptor_count: (if integrator == Integrator::RestirPt && reconstruction {
+                        2
+                    } else {
+                        1
+                    }) * FRAME_SLOTS as u32,
                 },
             ];
             result.pool = context
@@ -329,15 +346,6 @@ impl Pipeline {
                 })
                 .collect();
             context.device.update_descriptor_sets(&energy_writes, &[]);
-            if integrator == Integrator::RestirPt {
-                result.restir = Some(restir::Pipelines::new(
-                    context,
-                    result.layout,
-                    light_sampling,
-                    mode,
-                )?);
-                return Ok(result);
-            }
             let mut modules = std::collections::BTreeMap::new();
             let mut create = |bytes: &[u8],
                               features: [u32; 3],
@@ -432,6 +440,31 @@ impl Pipeline {
                     }
                 })
             };
+            if integrator == Integrator::RestirPt {
+                result.restir = Some(restir::Pipelines::new(
+                    context,
+                    result.layout,
+                    light_sampling,
+                    mode,
+                    reconstruction,
+                    frame_generation,
+                )?);
+                if reconstruction {
+                    result.reconstruction_linear = Some(create(
+                        include_bytes!(concat!(env!("OUT_DIR"), "/rr_linear.spv")),
+                        [0, 0, 0],
+                        0,
+                        false,
+                    )?);
+                    result.reconstruction_display = Some(create(
+                        include_bytes!(concat!(env!("OUT_DIR"), "/rr_display.spv")),
+                        [0, 0, 0],
+                        0,
+                        false,
+                    )?);
+                }
+                return Ok(result);
+            }
             // A frame-boundary configuration selects one binary; no per-path method branch.
             let shader: &[u8] = match (mode, reconstruction, light_sampling) {
                 (RenderMode::Offline, _, LightSampling::Grid) => {

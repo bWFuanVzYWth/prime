@@ -38,7 +38,6 @@ struct Images {
 struct Previous {
     camera: Camera,
     anchor: [f64; 3],
-    sequence: u32,
 }
 
 pub(super) struct Reconstruction {
@@ -59,6 +58,8 @@ impl Reconstruction {
     pub fn new(context: &Arc<Context>, failure: &mut Option<String>) -> Option<Self> {
         *failure = None;
         if !context.streamline_capable {
+            *failure =
+                Some("DLSS RR device capability unavailable; using native raw output".into());
             return None;
         }
         let create = || -> Result<Self, String> {
@@ -123,6 +124,10 @@ impl Reconstruction {
     }
     pub fn input_extent(&self) -> [u32; 2] {
         self.images.as_ref().unwrap().input
+    }
+    pub fn jitter(&self, sequence: u32) -> [f32; 2] {
+        let images = self.images.as_ref().unwrap();
+        history::jitter(sequence, images.input[0], images.output[0])
     }
     pub fn status_view(&self) -> vk::ImageView {
         self.images.as_ref().unwrap().unresolved.view
@@ -278,10 +283,10 @@ impl Reconstruction {
         let jitter = history::jitter(sequence, input[0], output[0]);
         let previous = self
             .previous
-            .map(|p| (history::rebase(p.camera, p.anchor, anchor), p.sequence));
-        let valid = previous
-            .is_some_and(|(p, s)| sequence == s.wrapping_add(1) && !history::camera_cut(camera, p));
-        let previous_camera = previous.filter(|_| valid).map_or(camera, |(p, _)| p);
+            .map(|p| history::rebase(p.camera, p.anchor, anchor));
+        // Camera/FOV changes are evaluated by reprojection and guide completion per pixel.
+        let valid = sequence != 0 && previous.is_some();
+        let previous_camera = previous.filter(|_| valid).unwrap_or(camera);
         self.constants[slot].write(&history::camera_constants(
             camera,
             previous_camera,
@@ -297,11 +302,7 @@ impl Reconstruction {
             !valid,
             sequence,
         ));
-        self.pending = Some(Previous {
-            camera,
-            anchor,
-            sequence,
-        });
+        self.pending = Some(Previous { camera, anchor });
         Ok(())
     }
 

@@ -32,12 +32,12 @@ def inspect(path):
         elif opcode == 32 and args[1] == 5349:
             pointers[args[0]] = args[2]
         cursor += count
-    uniform = [0, 128, 256, *range(272, 392, 8)]
+    uniform = [0, 128, 256, *range(272, 392, 8), 400, 416, 424, 432, 448]
     # Ray-query renderer never needs RayTracingKHR pipelines or shaderInt64.
     assert not ({4479, 11} & capabilities), (path, capabilities)
     uniforms = [key for key, name in names.items() if name == "RestirParameters_std140"]
     assert len(uniforms) == 1, (path, uniforms)
-    assert [offsets[uniforms[0]][i] for i in range(18)] == uniform, path
+    assert [offsets[uniforms[0]][i] for i in range(len(uniform))] == uniform, path
     expected = {
         "PathReservoir": (80, [0, 4, 8, 20, 24, 28, 32, 36, 52, 56, 68]),
         "RestirPrimary": (20, [0, 16]),

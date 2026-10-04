@@ -45,7 +45,6 @@ impl Default for StaticDirectory {
     }
 }
 impl StaticDirectory {
-    #[cfg(test)]
     pub fn slot(&self, key: Cell) -> Option<(u32, u32, u32)> {
         self.entries
             .get(&key)

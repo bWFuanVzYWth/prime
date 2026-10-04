@@ -30,8 +30,22 @@ module restir_resolve;
 #include "restir/bindings.slang"
 import "display/prime_drt.slang";
 import "math/color.slang";
+#ifdef PRIME_RESTIR_RR
+import "reconstruct/rr_format.slang";
+import "reconstruct/rr_guides.slang";
+import "reconstruct/reflection_motion.slang";
+import "reconstruct/rr_status.slang";
+[[vk::binding(10, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> noisyColor;
+[[vk::binding(11, 0)]] [[vk::image_format("r32f")]] readonly RWTexture2D<float> linearDepth;
+[[vk::binding(12, 0)]] [[vk::image_format("rg16f")]] readonly RWTexture2D<float2> motionVectors;
+[[vk::binding(16, 0)]] [[vk::image_format("r16f")]] readonly RWTexture2D<float> specularDistance;
+[[vk::binding(17, 0)]] ConstantBuffer<RrCamera> rrCamera;
+[[vk::binding(19, 0)]] [[vk::image_format("r8")]] RWTexture2D<float> guideStatus;
+[[vk::binding(20, 0)]] [[vk::image_format("rg16f")]] RWTexture2D<float2> specularMotion;
+#else
 [[vk::binding(4, 0)]] [[vk::image_format("rgba8")]] RWTexture2D<float4> outputImage;
 [[vk::binding(24, 0)]] [[vk::image_format("rgba32f")]] RWTexture2D<float4> linearOutput;
+#endif
 // Offline specialization is selected at pipeline creation; no history-address test on the GPU.
 [[vk::constant_id(4)]] const uint offline = 0u;
 [numthreads(8, 8, 1)] void main(uint3 id : SV_DispatchThreadID) {
@@ -43,14 +57,15 @@ import "math/color.slang";
     PathReservoir reservoir = parameters.history[offset];
     float3 radiance = parameters.residual[offset].rgb + reservoir.integrand * reservoir.weight;
     RestirPrimary primary = parameters.primary[offset];
-    float3 wo = -restirPrimaryDirection(resources.frame, id.xy);
+    float2 sampleUv = (float2(id.xy) + 0.5 + resources.sampleJitter) / float2(extent);
+    float3 wo = -restirPrimaryDirection(resources.frame, id.xy, resources.sampleJitter);
     SurfaceHit hit = restirLoadHit(resources, primary.hit, wo, primary.coverageSeed, 0.0);
     float depth = hit.found ? dot(hit.surface.position - resources.frame.position.xyz,
                                   resources.frame.forward.xyz)
                             : 0.0;
     if (hit.found && (hit.incident.x == 1.0 || hit.thin)) {
         float3 scattering, transmittance;
-        atmAerial(resources.environment, (float2(id.xy) + 0.5) / float2(extent),
+        atmAerial(resources.environment, sampleUv,
                   length(hit.surface.position - resources.frame.position.xyz), scattering,
                   transmittance);
         radiance = transmittance * radiance + scattering * resources.frame.right.w;
@@ -58,6 +73,12 @@ import "math/color.slang";
     radiance = float3(isfinite(radiance.x) ? max(0.0, radiance.x) : 0.0,
                       isfinite(radiance.y) ? max(0.0, radiance.y) : 0.0,
                       isfinite(radiance.z) ? max(0.0, radiance.z) : 0.0);
+#ifdef PRIME_RESTIR_RR
+    noisyColor[id.xy] = float4(primeRrFiniteHalfColor(workingToLinear709(radiance)),
+                               primeRrForeground(guideStatus[id.xy]) ? 1.0 : 0.0);
+    primeCompleteReflectionMotion(rrCamera, id.xy, extent, sampleUv, guideStatus, specularMotion,
+                                  motionVectors, linearDepth[id.xy], specularDistance[id.xy]);
+#else
     uint pixel = id.y * extent.x + id.x;
     if (offline != 0u) {
         uint count = parameters.frame.dimensions.z + pass.sampleOffset;
@@ -86,4 +107,5 @@ import "math/color.slang";
     }
     uint2 target = uint2(id.x, parameters.frame.target.x != 0u ? extent.y - 1u - id.y : id.y);
     outputImage[target] = float4(float3(uint3(saturate(encoded) * 255.0 + 0.5)) / 255.0, 1);
+#endif
 }

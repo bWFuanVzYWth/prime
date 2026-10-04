@@ -1,4 +1,6 @@
 //! Stable texture identities; newly observed entity textures do not repack terrain pixels.
+#[path = "history_support.rs"]
+pub(crate) mod history_support;
 use super::geometry::transfer_barrier;
 use super::resources::{Buffer, Context};
 use super::uint;
@@ -14,6 +16,7 @@ use std::{
 pub(super) struct Textures {
     pub(crate) source: BTreeMap<u32, Texture>,
     pub(crate) coverage_changed: BTreeSet<u32>,
+    pub(crate) history_support_changed: BTreeSet<u32>,
     pub(crate) occlusion_changed: bool,
     cursor: Option<TextureCursor>,
     pub sprites: usize,
@@ -137,6 +140,43 @@ fn coverage_same(a: &Texture, b: &Texture) -> bool {
         }
 }
 
+#[cfg(test)]
+mod history_support_tests {
+    use super::*;
+    use prime_scene::scene::TextureSampling;
+
+    #[test]
+    fn omm_animation_union_proof_does_not_suppress_current_support_events() {
+        let previous = Texture {
+            width: 2,
+            height: 1,
+            pixels: vec![255, 255, 255, 255, 255, 255, 255, 0].into(),
+            region: Some([0, 0, 1, 1]),
+            sampling: Some(Arc::new(TextureSampling {
+                levels: Vec::new(),
+                next: [1, 0],
+                blend: 0.,
+                coverage_frames: vec![[0, 0], [1, 0]].into(),
+            })),
+            material: None,
+        };
+        for (region, next, blend) in [
+            ([1, 0, 1, 1], [1, 0], 0.),
+            ([0, 0, 1, 1], [0, 0], 0.),
+            ([0, 0, 1, 1], [1, 0], 0.5),
+        ] {
+            let mut current = previous.clone();
+            current.region = Some(region);
+            let sampling = Arc::make_mut(current.sampling.as_mut().unwrap());
+            sampling.next = next;
+            sampling.blend = blend;
+            assert!(coverage_same(&previous, &current));
+            assert!(!history_support::base_sample_same(&previous, &current));
+        }
+        assert!(history_support::base_sample_same(&previous, &previous));
+    }
+}
+
 fn images(texture: &Texture) -> impl Iterator<Item = &Arc<[u8]>> {
     texture.backings()
 }
@@ -161,6 +201,7 @@ impl Textures {
         let mut result = Self {
             source: BTreeMap::new(),
             coverage_changed: BTreeSet::new(),
+            history_support_changed: BTreeSet::new(),
             occlusion_changed: false,
             cursor: None,
             sprites: 0,
@@ -179,6 +220,7 @@ impl Textures {
     fn remove(&mut self, id: u32) {
         if let Some(old) = self.source.remove(&id) {
             self.coverage_changed.insert(id);
+            self.history_support_changed.insert(id);
             self.sprites -= usize::from(old.region.is_some());
             self.slots.release(self.indices.remove(&id).unwrap(), 1);
             if let Some((start, count)) = self.mip_slots.remove(&id) {
@@ -266,6 +308,7 @@ impl Textures {
             }
         }
         self.coverage_changed.clear();
+        self.history_support_changed.clear();
         self.occlusion_changed = false;
         // Do not scan resident identities for a certified incremental input.
         if updates.is_snapshot() {
@@ -312,6 +355,13 @@ impl Textures {
                 .is_none_or(|old| !coverage_same(old, texture))
             {
                 self.coverage_changed.insert(*id);
+            }
+            if self
+                .source
+                .get(id)
+                .is_none_or(|old| !history_support::base_sample_same(old, texture))
+            {
+                self.history_support_changed.insert(*id);
             }
             let index = if let Some(&index) = self.indices.get(id) {
                 index

@@ -56,6 +56,14 @@ impl LightTree {
         self.cpu.page(key).unwrap().first
     }
 
+    pub(crate) fn history_page_count(&self) -> usize {
+        self.cpu.pages.len()
+    }
+
+    pub(crate) fn history_page(&self, index: usize) -> Option<(u64, u32)> {
+        self.cpu.pages[index].map(|page| (page.key, page.count * 2))
+    }
+
     pub(crate) fn update(
         &mut self,
         context: &Arc<Context>,
