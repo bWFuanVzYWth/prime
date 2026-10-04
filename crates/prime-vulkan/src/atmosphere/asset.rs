@@ -1,51 +1,51 @@
 //! Named physical arrays. Container parsing and validation never enter a shader.
 use crate::texture_asset::{TextureAsset, TextureSpec};
 use ash::vk;
+use prime_render_data::atmosphere_medium as medium_bytes;
 use safetensors::{Dtype, SafeTensors};
 
-pub(super) const MEDIUM: &[u8] = include_bytes!("../../assets/atmosphere/medium.safetensors.zst");
 const MEDIUM_BYTES: usize = 203896;
 pub(super) struct Physical {
     pub name: &'static str,
     pub extent: [u32; 3],
     pub format: vk::Format,
-    bytes: &'static [u8],
+    bytes: fn() -> &'static [u8],
 }
 pub(super) const PHYSICAL: &[Physical] = &[
     Physical {
         name: "optical_depth",
         extent: [512, 128, 1],
         format: vk::Format::R16G16B16A16_SFLOAT,
-        bytes: include_bytes!("../../assets/atmosphere/optical_depth.ktx2"),
+        bytes: prime_render_data::atmosphere_optical_depth,
     },
     Physical {
         name: "scattering_source",
         extent: [3200, 240, 1],
         format: vk::Format::R16G16B16A16_SFLOAT,
-        bytes: include_bytes!("../../assets/atmosphere/scattering_source.ktx2"),
+        bytes: prime_render_data::atmosphere_scattering_source,
     },
     Physical {
         name: "incident_mean",
         extent: [160, 40, 1],
         format: vk::Format::R32G32B32A32_SFLOAT,
-        bytes: include_bytes!("../../assets/atmosphere/incident_mean.ktx2"),
+        bytes: prime_render_data::atmosphere_incident_mean,
     },
     Physical {
         name: "ground_radiance",
         extent: [160, 1, 1],
         format: vk::Format::R32G32B32A32_SFLOAT,
-        bytes: include_bytes!("../../assets/atmosphere/ground_radiance.ktx2"),
+        bytes: prime_render_data::atmosphere_ground_radiance,
     },
     Physical {
         name: "rayleigh_source",
         extent: [800, 21, 1],
         format: vk::Format::R32G32B32A32_SFLOAT,
-        bytes: include_bytes!("../../assets/atmosphere/rayleigh_source.ktx2"),
+        bytes: prime_render_data::atmosphere_rayleigh_source,
     },
 ];
 impl Physical {
     pub fn parse(&self) -> Result<TextureAsset<'static>, String> {
-        self.parse_bytes(self.bytes)
+        self.parse_bytes((self.bytes)())
     }
     fn parse_bytes<'a>(&self, bytes: &'a [u8]) -> Result<TextureAsset<'a>, String> {
         let image = TextureAsset::parse(
@@ -98,7 +98,7 @@ fn decode_medium(encoded: &[u8]) -> Result<Vec<u8>, String> {
 pub(super) fn load_medium() -> Result<Vec<u8>, String> {
     // The decoded Safetensors owner ends after validation/packing; no borrowed tensor view
     // escapes. Packed bytes are then copied into the existing device-upload staging owner.
-    medium(&decode_medium(MEDIUM)?)
+    medium(&decode_medium(medium_bytes())?)
 }
 pub(super) const SECTIONS: &[(&str, &[usize])] = &[
     ("heights", &[40, 4]),
@@ -188,7 +188,7 @@ mod tests {
                 source.name
             );
         }
-        let decoded = decode_medium(MEDIUM).unwrap();
+        let decoded = decode_medium(medium_bytes()).unwrap();
         assert_eq!(
             format!("{:x}", Sha256::digest(decoded)),
             "01605794ba83b35cf0375d6c5e8a394e20964372ecaff81e52dda02cfc9aa461"
@@ -207,7 +207,7 @@ mod tests {
             "wavelength_nm",
             "source_dimensions",
         ] {
-            let mut bytes = source.bytes.to_vec();
+            let mut bytes = (source.bytes)().to_vec();
             let offset = u32::from_le_bytes(bytes[56..60].try_into().unwrap()) as usize;
             let size = u32::from_le_bytes(bytes[60..64].try_into().unwrap()) as usize;
             let mut entry = key.as_bytes().to_vec();
@@ -224,7 +224,7 @@ mod tests {
     #[test]
     fn medium_rejects_wrong_frame_size_metadata_dtype_shape_and_phase_sign() {
         assert!(decode_medium(&zstd::bulk::compress(&[0; 16], 22).unwrap()).is_err());
-        let raw = decode_medium(MEDIUM).unwrap();
+        let raw = decode_medium(medium_bytes()).unwrap();
         let (_, info) = SafeTensors::read_metadata(&raw).unwrap();
         let metadata = info.metadata().as_ref().unwrap().clone();
         let tensors = SafeTensors::deserialize(&raw).unwrap();
@@ -292,8 +292,9 @@ mod tests {
 
     #[test]
     fn invalid_container_and_physical_value_are_rejected() {
-        assert!(decode_medium(&MEDIUM[..MEDIUM.len() - 1]).is_err());
-        let mut corrupt = decode_medium(MEDIUM).unwrap();
+        let encoded = medium_bytes();
+        assert!(decode_medium(&encoded[..encoded.len() - 1]).is_err());
+        let mut corrupt = decode_medium(encoded).unwrap();
         assert!(medium(&corrupt[..corrupt.len() - 1]).is_err());
         let header = u64::from_le_bytes(corrupt[..8].try_into().unwrap()) as usize + 8;
         corrupt[header..header + 4].copy_from_slice(&f32::NAN.to_le_bytes());

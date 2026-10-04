@@ -2,6 +2,10 @@
 #language slang 2026
 module restir_history_test;
 #include "restir/bindings.slang"
+import "restir/path.slang";
+import "restir/shift.slang";
+import "restir/types.slang";
+import "restir/reservoir.slang";
 import "math/ray_offset.slang";
 
 [numthreads(64, 1, 1)] void main(uint3 id : SV_DispatchThreadID) {

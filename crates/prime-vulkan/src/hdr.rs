@@ -60,7 +60,7 @@ impl HdrPresent {
                     vk::DescriptorType::STORAGE_IMAGE,
                     vk::DescriptorType::STORAGE_IMAGE,
                 ],
-                &[include_bytes!(concat!(env!("OUT_DIR"), "/hdr_present.spv"))],
+                &[prime_shaders::hdr_present()],
                 32,
             )?,
         })
@@ -150,10 +150,7 @@ impl FrameGenerationPresent {
                     vk::DescriptorType::STORAGE_IMAGE,
                     vk::DescriptorType::STORAGE_IMAGE,
                 ],
-                &[include_bytes!(concat!(
-                    env!("OUT_DIR"),
-                    "/frame_generation_present.spv"
-                ))],
+                &[prime_shaders::frame_generation_present()],
                 16,
             )?,
         })

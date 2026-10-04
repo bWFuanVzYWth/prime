@@ -4,8 +4,6 @@ use prime_scene::scene::{InstanceScene, Scene, Triangle};
 use prime_scene::{Instance, Prototype, Texture, TextureLevel, TextureMaterial, TextureSampling};
 use std::sync::Arc;
 
-const SHADER: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/pbr_texture.spv"));
-
 #[test]
 #[ignore = "windowless mapped texture planning: failed source validation preserves GPU tables and owners"]
 fn gpu_texture_direct_write_validation_failure_preserves_published_state() {
@@ -281,9 +279,16 @@ fn query_reference(
         ],
     ]
     .concat();
-    run(context, SHADER, &input, 32, [0, 1], Some(geometry))
-        .try_into()
-        .unwrap()
+    run(
+        context,
+        prime_shader_tests::pbr_texture(),
+        &input,
+        32,
+        [0, 1],
+        Some(geometry),
+    )
+    .try_into()
+    .unwrap()
 }
 
 fn close(actual: f32, expected: f32, label: &str) {

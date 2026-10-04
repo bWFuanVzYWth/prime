@@ -111,19 +111,13 @@ impl Atmosphere {
             ],
             crate::FRAME_SLOTS,
             &[
-                include_bytes!(concat!(env!("OUT_DIR"), "/atmosphere_prepare.spv")),
-                include_bytes!(concat!(env!("OUT_DIR"), "/atmosphere_sky_update.spv")),
-                include_bytes!(concat!(
-                    env!("OUT_DIR"),
-                    "/atmosphere_transmittance_update.spv"
-                )),
-                include_bytes!(concat!(env!("OUT_DIR"), "/atmosphere_aerial_update.spv")),
-                include_bytes!(concat!(
-                    env!("OUT_DIR"),
-                    "/atmosphere_aerial_transmittance_update.spv"
-                )),
-                include_bytes!(concat!(env!("OUT_DIR"), "/atmosphere_shadow_demand.spv")),
-                include_bytes!(concat!(env!("OUT_DIR"), "/atmosphere_shadow_resolve.spv")),
+                prime_shaders::atmosphere_prepare(),
+                prime_shaders::atmosphere_sky_update(),
+                prime_shaders::atmosphere_transmittance_update(),
+                prime_shaders::atmosphere_aerial_update(),
+                prime_shaders::atmosphere_aerial_transmittance_update(),
+                prime_shaders::atmosphere_shadow_demand(),
+                prime_shaders::atmosphere_shadow_resolve(),
             ],
             96,
         )?;

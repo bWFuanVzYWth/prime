@@ -96,6 +96,8 @@ Java 绑定实际源字段，Rust 负责语义编译、调度和资源，GPU 直
 
 ## 编译验证设施
 
+- [x] 固定资产、生产 SPIR-V、显式测试 SPIR-V 与 Vulkan 宿主分为独立 crate；非内联访问器隔离 payload metadata。Slang 按实际依赖与工具链内容缓存各入口变体，保留 `-O3 -g3`，并行受 Cargo jobserver 限制；开发入口见 CONTRIBUTING。
+- [ ] 根据 Rust type-check/codegen/link 的实际耗时继续评估 CPU 准备模块的 crate 边界；仅在节省迭代时间足以抵偿新增跨 crate 接口时提取，不按源码行数拆分 GPU owner。保留生产 LTO/优化语义，编译收益与运行性能分别验收。
 - [x] 双版本共用实际 SectionCompiler 对拍入口，固定整数材质/绕序/重复面语义及浮点容限；覆盖完整编译、增量编辑、原版串并行一致性和大坐标比较精度。
 - [x] 同工作集、同线程数的原版/Java→FFM→Rust CPU 基准；独立 release 库，多轮新 JVM，保存原始样本、工具链/输入哈希、阶段时长与离群值。入口见 CONTRIBUTING。
 - [x] 红石强度、标准 block/fluid tint、群系混合的双版本实际编译器对拍；显式颜色源/样本批次、颜色依赖失效与缓存退休。原生整数前缀和覆盖全部混合半径，冷群系更新与常规编辑分开测量。

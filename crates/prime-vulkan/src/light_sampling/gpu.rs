@@ -111,6 +111,7 @@ impl Gpu {
             realtime_linear_post: None,
             reconstruction_display: None,
             reconstruction_linear: None,
+            restir: None,
         };
         unsafe {
             let ranges = [vk::PushConstantRange::default()
@@ -123,11 +124,8 @@ impl Gpu {
                     None,
                 )
                 .map_err(|e| error("Create sampling experiment layout", e))?;
-            let code = ash::util::read_spv(&mut Cursor::new(include_bytes!(concat!(
-                env!("OUT_DIR"),
-                "/light_sampling.spv"
-            ))))
-            .map_err(|e| e.to_string())?;
+            let code = ash::util::read_spv(&mut Cursor::new(prime_shaders::light_sampling()))
+                .map_err(|e| e.to_string())?;
             let shader = context
                 .device
                 .create_shader_module(&vk::ShaderModuleCreateInfo::default().code(&code), None)

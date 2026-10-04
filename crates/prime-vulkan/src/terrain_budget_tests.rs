@@ -8,7 +8,6 @@ use prime_scene::{
 };
 use std::sync::Arc;
 
-const OPTICS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/optics.spv"));
 const WIDTH: u32 = 144;
 const HEIGHT: u32 = 48;
 
@@ -112,7 +111,7 @@ fn query(renderer: &Renderer) -> [[f32; 12]; 3] {
         .collect();
     let result = shader_tests::run(
         &renderer.context,
-        OPTICS,
+        prime_shader_tests::optics(),
         &input,
         input.len(),
         [0, 3],

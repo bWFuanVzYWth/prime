@@ -165,18 +165,9 @@ fn gpu_realtime_raw_split_cost_ab_ba() {
     )
     .unwrap();
     for (name, shader) in [
-        (
-            "primary",
-            include_bytes!(concat!(env!("OUT_DIR"), "/realtime_primary.spv")).as_slice(),
-        ),
-        (
-            "transport",
-            include_bytes!(concat!(env!("OUT_DIR"), "/realtime_transport.spv")).as_slice(),
-        ),
-        (
-            "post",
-            include_bytes!(concat!(env!("OUT_DIR"), "/realtime.spv")).as_slice(),
-        ),
+        ("primary", prime_shaders::realtime_primary()),
+        ("transport", prime_shaders::realtime_transport()),
+        ("post", prime_shaders::realtime()),
     ] {
         writeln!(
             metadata,

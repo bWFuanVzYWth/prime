@@ -1,7 +1,6 @@
 //! Checks material translation, Full and retained Lite closures, and sanitizers.
 use super::{Context, shader_tests::run};
 
-const PBR: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/pbr.spv"));
 const INPUT_WORDS: usize = 32;
 const OUTPUT_WORDS: usize = 64;
 
@@ -136,7 +135,7 @@ fn execute(mode: u32, cases: &[[u32; INPUT_WORDS]]) -> Vec<[u32; OUTPUT_WORDS]> 
     let input: Vec<_> = cases.iter().flatten().copied().collect();
     run(
         &context,
-        PBR,
+        prime_shader_tests::pbr(),
         &input,
         cases.len() * OUTPUT_WORDS,
         [mode, cases.len() as u32],
@@ -921,167 +920,149 @@ fn pbr_spirv_bindings_match_full_production_and_lite_reference() {
     let stages: [StageContract; 23] = [
         (
             "Offline",
-            include_bytes!(concat!(env!("OUT_DIR"), "/path_trace.spv")),
+            prime_shaders::path_trace(),
             &[0, 2, 3, 4, 5, 7, 8, 9],
             &[0, 1, 2, 3, 4, 5, 6],
             &[(0, 2), (1, 1), (2, 1), (3, 0), (4, 0)],
         ),
         (
             "K1 raw",
-            include_bytes!(concat!(env!("OUT_DIR"), "/realtime_primary.spv")),
+            prime_shaders::realtime_primary(),
             &[0, 2, 3, 7, 8],
             &[0, 1, 2, 5, 6],
             PRIMARY_IDS,
         ),
         (
             "K1 RR",
-            include_bytes!(concat!(env!("OUT_DIR"), "/realtime_primary_rr.spv")),
+            prime_shaders::realtime_primary_rr(),
             &[0, 2, 3, 7, 8, 9, 11, 12, 13, 14, 15, 16, 17, 19, 20, 21, 22],
             &[0, 1, 2, 5, 6],
             PRIMARY_IDS,
         ),
         (
             "K2 raw",
-            include_bytes!(concat!(env!("OUT_DIR"), "/realtime_transport.spv")),
+            prime_shaders::realtime_transport(),
             &[0, 2, 3, 7, 8, 9],
             &[0, 1, 2, 5, 6],
             TRANSPORT_IDS,
         ),
         (
             "K2 RR",
-            include_bytes!(concat!(env!("OUT_DIR"), "/realtime_transport_rr.spv")),
+            prime_shaders::realtime_transport_rr(),
             &[0, 2, 3, 7, 8, 9, 16],
             &[0, 1, 2, 5, 6],
             TRANSPORT_IDS,
         ),
-        (
-            "post raw",
-            include_bytes!(concat!(env!("OUT_DIR"), "/realtime.spv")),
-            &[4],
-            &[0, 3, 4],
-            &[],
-        ),
+        ("post raw", prime_shaders::realtime(), &[4], &[0, 3, 4], &[]),
         (
             "post RR input",
-            include_bytes!(concat!(env!("OUT_DIR"), "/realtime_rr.spv")),
+            prime_shaders::realtime_rr(),
             &[10, 11, 12, 16, 17, 19, 20],
             &[0, 3, 4],
             &[],
         ),
         (
             "RR display",
-            include_bytes!(concat!(env!("OUT_DIR"), "/rr_display.spv")),
+            prime_shaders::rr_display(),
             &[4, 10, 11, 13, 18, 19],
             &[],
             &[],
         ),
         (
             "post raw linear",
-            include_bytes!(concat!(env!("OUT_DIR"), "/realtime_linear.spv")),
+            prime_shaders::realtime_linear(),
             &[4],
             &[0, 3, 4],
             &[],
         ),
         (
             "RR linear",
-            include_bytes!(concat!(env!("OUT_DIR"), "/rr_linear.spv")),
+            prime_shaders::rr_linear(),
             &[4, 10, 18, 19],
             &[],
             &[],
         ),
         (
             "linear display",
-            include_bytes!(concat!(env!("OUT_DIR"), "/display_from_linear.spv")),
+            prime_shaders::display_from_linear(),
             &[0, 1, 2, 3],
             &[],
             &[],
         ),
-        (
-            "stars",
-            include_bytes!(concat!(env!("OUT_DIR"), "/stars.spv")),
-            &[0, 1, 2, 3],
-            &[],
-            &[],
-        ),
+        ("stars", prime_shaders::stars(), &[0, 1, 2, 3], &[], &[]),
         (
             "exposure histogram",
-            include_bytes!(concat!(env!("OUT_DIR"), "/exposure_histogram.spv")),
+            prime_shaders::exposure_histogram(),
             &[0, 1],
             &[],
             &[],
         ),
         (
             "exposure update",
-            include_bytes!(concat!(env!("OUT_DIR"), "/exposure_update.spv")),
+            prime_shaders::exposure_update(),
             &[1, 2],
             &[],
             &[],
         ),
         (
             "HDR present",
-            include_bytes!(concat!(env!("OUT_DIR"), "/hdr_present.spv")),
+            prime_shaders::hdr_present(),
             &[0, 1, 2, 3, 4, 5],
             &[],
             &[],
         ),
         (
             "FG present",
-            include_bytes!(concat!(env!("OUT_DIR"), "/frame_generation_present.spv")),
+            prime_shaders::frame_generation_present(),
             &[0, 1, 2, 3],
             &[],
             &[],
         ),
         (
             "atmosphere prepare",
-            include_bytes!(concat!(env!("OUT_DIR"), "/atmosphere_prepare.spv")),
+            prime_shaders::atmosphere_prepare(),
             &[],
             &[0],
             &[],
         ),
         (
             "atmosphere sky",
-            include_bytes!(concat!(env!("OUT_DIR"), "/atmosphere_sky_update.spv")),
+            prime_shaders::atmosphere_sky_update(),
             &[0, 1, 2, 3, 4, 5],
             &[0],
             &[],
         ),
         (
             "atmosphere transmittance",
-            include_bytes!(concat!(
-                env!("OUT_DIR"),
-                "/atmosphere_transmittance_update.spv"
-            )),
+            prime_shaders::atmosphere_transmittance_update(),
             &[0],
             &[0],
             &[],
         ),
         (
             "atmosphere aerial",
-            include_bytes!(concat!(env!("OUT_DIR"), "/atmosphere_aerial_update.spv")),
+            prime_shaders::atmosphere_aerial_update(),
             &[0, 1, 2, 4, 5],
             &[0],
             &[],
         ),
         (
             "atmosphere aerial transmittance",
-            include_bytes!(concat!(
-                env!("OUT_DIR"),
-                "/atmosphere_aerial_transmittance_update.spv"
-            )),
+            prime_shaders::atmosphere_aerial_transmittance_update(),
             &[5],
             &[0],
             &[],
         ),
         (
             "atmosphere shadow demand",
-            include_bytes!(concat!(env!("OUT_DIR"), "/atmosphere_shadow_demand.spv")),
+            prime_shaders::atmosphere_shadow_demand(),
             &[],
             &[0],
             &[],
         ),
         (
             "atmosphere shadow resolve",
-            include_bytes!(concat!(env!("OUT_DIR"), "/atmosphere_shadow_resolve.spv")),
+            prime_shaders::atmosphere_shadow_resolve(),
             &[],
             &[0],
             &[(0, 2), (2, 1)],
@@ -1101,15 +1082,12 @@ fn pbr_spirv_bindings_match_full_production_and_lite_reference() {
         );
     }
     assert_eq!(
-        bindings(PBR, 0),
+        bindings(prime_shader_tests::pbr(), 0),
         [0, 1],
         "the retained Lite behavior fixture needs no energy table"
     );
     assert_eq!(
-        bindings(
-            include_bytes!(concat!(env!("OUT_DIR"), "/full_openpbr.spv")),
-            0
-        ),
+        bindings(prime_shader_tests::full_openpbr(), 0),
         [0, 1, 9],
         "the Full constructor oracle binds the actual energy table"
     );
@@ -1550,7 +1528,6 @@ fn gpu_litepbr_continuous_mixtures_match_evaluation_and_two_strategy_mis() {
 #[test]
 #[ignore = "requires Vulkan; actual HALF4 LUT plus retained full-model constructor oracle"]
 fn gpu_full_openpbr_narrow_constructors_preserve_legacy_math() {
-    const CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/full_openpbr.spv"));
     let mut cases = Vec::new();
     for kind in 0..4u32 {
         for roughness in [0.0, 1e-8, 0.009999, 0.01, 0.010001, 0.2, 0.5, 1.0] {
@@ -1582,8 +1559,13 @@ fn gpu_full_openpbr_narrow_constructors_preserve_legacy_math() {
     }
     let count = cases.len() / 24;
     let context = Context::new().unwrap();
-    let values =
-        super::shader_tests::run_full_openpbr(&context, CODE, &cases, count * 32, count as u32);
+    let values = super::shader_tests::run_full_openpbr(
+        &context,
+        prime_shader_tests::full_openpbr(),
+        &cases,
+        count * 32,
+        count as u32,
+    );
     for (case, output) in values.as_chunks::<32>().0.iter().enumerate() {
         for word in 0..16 {
             if (8..12).contains(&word) {

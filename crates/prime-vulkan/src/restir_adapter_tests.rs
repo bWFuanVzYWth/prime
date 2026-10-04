@@ -19,15 +19,9 @@ impl Drop for TestPipeline {
 
 fn self_shift(renderer: &Renderer, count: u32) -> Vec<[u32; 32]> {
     let code = match renderer.settings.light_sampling {
-        LightSampling::Grid => {
-            include_bytes!(concat!(env!("OUT_DIR"), "/restir_adapter.spv")).as_slice()
-        }
-        LightSampling::Tree => {
-            include_bytes!(concat!(env!("OUT_DIR"), "/restir_adapter_tree.spv")).as_slice()
-        }
-        LightSampling::TreeSphere => {
-            include_bytes!(concat!(env!("OUT_DIR"), "/restir_adapter_tree_sphere.spv")).as_slice()
-        }
+        LightSampling::Grid => prime_shader_tests::restir_adapter(),
+        LightSampling::Tree => prime_shader_tests::restir_adapter_tree(),
+        LightSampling::TreeSphere => prime_shader_tests::restir_adapter_tree_sphere(),
     };
     run_probe(renderer, count, code, [count, 0, 0, 0])
 }

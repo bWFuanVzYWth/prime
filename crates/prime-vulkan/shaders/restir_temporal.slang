@@ -28,6 +28,13 @@
 #language slang 2026
 module restir_temporal;
 #include "restir/bindings.slang"
+import "restir/indexing.slang";
+import "restir/path.slang";
+import "restir/shift.slang";
+import "restir/types.slang";
+import "restir/reservoir.slang";
+import "restir/rng.slang";
+import "restir/pairwise.slang";
 
 PrecomputedShiftData temporalShift(RestirScene resources, RestirPrimary primary, float3 wo,
                                    inout PathReservoir source, uint replayAddress,

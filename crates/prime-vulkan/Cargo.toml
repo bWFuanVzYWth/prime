@@ -7,14 +7,17 @@ rust-version.workspace = true
 description = "Vulkan resource ownership and Slang path-tracing execution for Prime"
 
 [features]
-shader-tests = []
-atmosphere-bake = []
-light-sampling-bench = []
+shader-tests = ["dep:prime_shader_tests"]
+atmosphere-bake = ["prime_shaders/atmosphere-bake"]
+light-sampling-bench = ["prime_shaders/light-sampling-bench"]
 
 [dependencies]
 ash = { workspace = true }
 prime_scene = { workspace = true }
 prime_diagnostics = { workspace = true }
+prime_render_data = { workspace = true }
+prime_shaders = { workspace = true }
+prime_shader_tests = { workspace = true, optional = true, features = ["compiled"] }
 safetensors = "0.8.0"
 zstd = { version = "0.14.0", default-features = false }
 

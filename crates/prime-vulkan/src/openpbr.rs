@@ -6,7 +6,6 @@ use ash::vk;
 use std::sync::Arc;
 
 pub(super) const ENERGY_EXTENT: [u32; 3] = [44, 32, 159];
-const ENERGY_CONTAINER: &[u8] = include_bytes!("../assets/openpbr/trans_ggx.ktx2");
 const ENERGY_SPEC: TextureSpec = TextureSpec {
     format: vk::Format::R16G16B16A16_SFLOAT,
     extent: ENERGY_EXTENT,
@@ -15,7 +14,7 @@ const ENERGY_SPEC: TextureSpec = TextureSpec {
 };
 
 fn energy_asset() -> Result<TextureAsset<'static>, String> {
-    let asset = TextureAsset::parse(ENERGY_CONTAINER, ENERGY_SPEC)?;
+    let asset = TextureAsset::parse(prime_render_data::openpbr_energy(), ENERGY_SPEC)?;
     if asset.metadata_text("source")? != "RoboCute author-bsdf-hotfix-2026-07-24"
         || asset.metadata_text("source_sha256")?
             != "605c9160fb9348a1d033321c40cf9930226ce74c03f2624033f5b73aacfa67df"

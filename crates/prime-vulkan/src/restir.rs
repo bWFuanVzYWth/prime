@@ -90,26 +90,27 @@ impl Pipelines {
             Ok(pipelines)
         };
         macro_rules! sampler_binary {
-            ($name:literal) => {
+            ($grid:ident, $tree:ident, $sphere:ident) => {
                 match method {
-                    LightSampling::Grid => {
-                        include_bytes!(concat!(env!("OUT_DIR"), "/", $name, ".spv")).as_slice()
-                    }
-                    LightSampling::Tree => {
-                        include_bytes!(concat!(env!("OUT_DIR"), "/", $name, "_tree.spv")).as_slice()
-                    }
-                    LightSampling::TreeSphere => {
-                        include_bytes!(concat!(env!("OUT_DIR"), "/", $name, "_tree_sphere.spv"))
-                            .as_slice()
-                    }
+                    LightSampling::Grid => prime_shaders::$grid(),
+                    LightSampling::Tree => prime_shaders::$tree(),
+                    LightSampling::TreeSphere => prime_shaders::$sphere(),
                 }
             };
         }
         result.generate = create_group(
             if reconstruction {
-                sampler_binary!("restir_generate_rr")
+                sampler_binary!(
+                    restir_generate_rr,
+                    restir_generate_rr_tree,
+                    restir_generate_rr_tree_sphere
+                )
             } else {
-                sampler_binary!("restir_generate")
+                sampler_binary!(
+                    restir_generate,
+                    restir_generate_tree,
+                    restir_generate_tree_sphere
+                )
             },
             if reconstruction {
                 1 | (u32::from(frame_generation) << 1)
@@ -117,32 +118,40 @@ impl Pipelines {
                 0
             },
         )?;
-        result.workload = create_group(
-            include_bytes!(concat!(env!("OUT_DIR"), "/restir_workload.spv")),
+        result.workload = create_group(prime_shaders::restir_workload(), 0)?;
+        result.retrace = create_group(
+            sampler_binary!(
+                restir_retrace,
+                restir_retrace_tree,
+                restir_retrace_tree_sphere
+            ),
             0,
         )?;
-        result.retrace = create_group(sampler_binary!("restir_retrace"), 0)?;
-        result.shift = create_group(sampler_binary!("restir_shift"), 0)?;
+        result.shift = create_group(
+            sampler_binary!(restir_shift, restir_shift_tree, restir_shift_tree_sphere),
+            0,
+        )?;
         if mode == RenderMode::Realtime {
-            result.temporal = create_group(sampler_binary!("restir_temporal"), 0)?;
+            result.temporal = create_group(
+                sampler_binary!(
+                    restir_temporal,
+                    restir_temporal_tree,
+                    restir_temporal_tree_sphere
+                ),
+                0,
+            )?;
         }
         result.resolve = create_group(
             if reconstruction {
-                include_bytes!(concat!(env!("OUT_DIR"), "/restir_resolve_rr.spv"))
+                prime_shaders::restir_resolve_rr()
             } else {
-                include_bytes!(concat!(env!("OUT_DIR"), "/restir_resolve.spv"))
+                prime_shaders::restir_resolve()
             },
             0,
         )?;
         for (target, bytes) in [
-            (
-                &mut result.indirect,
-                include_bytes!(concat!(env!("OUT_DIR"), "/restir_indirect.spv")).as_slice(),
-            ),
-            (
-                &mut result.spatial,
-                include_bytes!(concat!(env!("OUT_DIR"), "/restir_spatial.spv")).as_slice(),
-            ),
+            (&mut result.indirect, prime_shaders::restir_indirect()),
+            (&mut result.spatial, prime_shaders::restir_spatial()),
         ] {
             let module = shader_module(context, bytes)?;
             *target = create(context, layout, module.handle, None, false, 0)?;
@@ -353,7 +362,7 @@ pub(super) struct State {
 }
 impl State {
     pub fn new(context: &Arc<Context>) -> Result<Self, String> {
-        let source = include_bytes!("../assets/restir/paired-neighbors-3-16.bytes");
+        let source = prime_render_data::paired_neighbors();
         if source.len() != 3 * 256 * 256 * 2 {
             return Err("Unexpected ReSTIR PT paired neighbor asset size".into());
         }

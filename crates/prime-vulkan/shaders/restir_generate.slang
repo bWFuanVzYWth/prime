@@ -28,6 +28,9 @@
 #language slang 2026
 module restir_generate;
 #include "restir/bindings.slang"
+import "restir/indexing.slang";
+import "restir/path.slang";
+import "restir/types.slang";
 [numthreads(8, 8, 1)] void main(uint3 id : SV_DispatchThreadID) {
     if (any(id.xy >= parameters.frame.dimensions.xy))
         return;

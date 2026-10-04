@@ -1,0 +1,16 @@
+[package]
+license.workspace = true
+name = "prime_shader_tests"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Explicit opt-in GPU test shader data, separate from production shaders"
+
+[features]
+compiled = []
+
+[build-dependencies]
+prime_shader_build.workspace = true
+
+[lints]
+workspace = true

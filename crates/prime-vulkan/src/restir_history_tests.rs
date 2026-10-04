@@ -33,16 +33,9 @@ fn gpu_restir_temporal_update_replays_all_cached_suffix_cases() {
             })
             .unwrap();
         let code = match method {
-            LightSampling::Grid => {
-                include_bytes!(concat!(env!("OUT_DIR"), "/restir_history.spv")).as_slice()
-            }
-            LightSampling::Tree => {
-                include_bytes!(concat!(env!("OUT_DIR"), "/restir_history_tree.spv")).as_slice()
-            }
-            LightSampling::TreeSphere => {
-                include_bytes!(concat!(env!("OUT_DIR"), "/restir_history_tree_sphere.spv"))
-                    .as_slice()
-            }
+            LightSampling::Grid => prime_shader_tests::restir_history(),
+            LightSampling::Tree => prime_shader_tests::restir_history_tree(),
+            LightSampling::TreeSphere => prime_shader_tests::restir_history_tree_sphere(),
         };
         let mut cases = [0u32; 5];
         let mut sky_changes = 0u32;

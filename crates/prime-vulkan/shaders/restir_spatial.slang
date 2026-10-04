@@ -28,6 +28,8 @@
 #language slang 2026
 module restir_spatial;
 import "restir/parameters.slang";
+import "restir/indexing.slang";
+import "restir/pairing.slang";
 import "restir/pairwise.slang";
 import "restir/reservoir.slang";
 import "restir/rng.slang";

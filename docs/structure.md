@@ -15,6 +15,10 @@ crates/
   prime-scene/             版本无关的场景、输入验证、增量与空间翻译
   prime-engine/            FFM、源适配上下文、场景和 renderer 生命周期
   prime-vulkan/            Vulkan 资源、AS、命令、同步、退休与 Slang
+  prime-render-data/       无渲染依赖的固定资产字节访问
+  prime-shaders/           生产 SPIR-V 构建与字节访问
+  prime-shader-tests/      显式 feature 启用的测试 SPIR-V
+  prime-shader-build/      构建期 Slang 依赖发现、内容缓存与并行编译
   prime-tools/             诊断与性能夹具
   rectangle-decomposition/ 体素引擎矩形分解
 ```
@@ -22,6 +26,8 @@ crates/
 ## 依赖与所有权
 
 `prime_engine → prime_minecraft → prime_scene` 构成地形源输入链，`prime_engine → prime_vulkan → prime_scene` 承担渲染。`prime_abi` 不依赖业务 crate，C 头同时生成 Rust DTO 与 Java FFM；MC 适配 crate 不依赖 JVM、Fabric 或 Vulkan，只解释由宿主转录的版本化字段；它向场景核心交付闭合的 `CompiledSection`。GPU 不认识 section 或 MC 枚举。
+
+`prime_vulkan` 从 `prime_render_data`、`prime_shaders` 及可选的 `prime_shader_tests` 取得固定字节；这些 leaf 不反向依赖 Vulkan、场景或 GPU owner。大型 payload 只在非内联函数体中包含，避免进入下游 Rust metadata；访问发生在资源加载或管线创建时。源 shader 与 LFS 资产路径仍位于 `prime-vulkan`，解析、上传、验证和完成证明仍由原资源 owner 负责。`prime_shader_build` 仅为 shader leaf 的 build dependency，不进入运行时数据流；构建入口与缓存设置见 CONTRIBUTING。
 
 一个 `TerrainContext` 管理一个 renderer 的世界/资源世代、活动窗口、压缩源缓存、资源表和共享 session CPU 池的引用。没有全局异步队列、Java compiler 池或逐体素反向调用。section 源每帧一批请求和一批响应，颜色与群系是按需的显式批次；响应借用结束前全部 worker join。静态地形4³合批、动态分桶和 GPU 生命周期继续由原来的场景/渲染上下文负责。
 

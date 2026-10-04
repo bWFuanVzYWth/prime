@@ -130,7 +130,7 @@ impl Drop for RawResolve {
 }
 impl RawResolve {
     fn new(context: &Arc<Context>, layout: vk::PipelineLayout, variant: usize) -> Self {
-        let code = include_bytes!(concat!(env!("OUT_DIR"), "/restir_resolve.spv"));
+        let code = prime_shaders::restir_resolve();
         let words = ash::util::read_spv(&mut Cursor::new(code)).unwrap();
         let features = [
             [0, 0, 0],

@@ -45,7 +45,9 @@
 | `reconstruct/visible_guides.slang` | FG真实第一可见界面的device depth；不使用RR的PSR提升终点代替首界面 |
 | `rr_display.slang`、`rr_linear.slang` | 输出分辨率RR显示/FP32线性selector；失败或未解析guide足迹使用当前raw，非有限alpha保守为前景 |
 
-库不声明描述符、push constant 或全局可变状态，不通过 DCE 消除不需要的资源。入口按阶段显式传入场景、OpenPBR energy 或显示资源；私有辅助函数保持模块可见，只公开跨模块所需类型、字段和函数。大气物理库显式接收 `AtmModel`；K1/K2消费窄 `AtmLighting`，post消费 `AtmAerial`，Offline保留 `AtmEnvironment`；绑定与极线 groupshared 工作区只存在于入口或入口专用 include。构建跟踪整个 shader 目录，修改被导入模块也必须重新编译。
+库不声明描述符、push constant 或全局可变状态，不通过 DCE 消除不需要的资源。入口按阶段显式传入场景、OpenPBR energy 或显示资源；私有辅助函数保持模块可见，只公开跨模块所需类型、字段和函数。大气物理库显式接收 `AtmModel`；K1/K2消费窄 `AtmLighting`，post消费 `AtmAerial`，Offline保留 `AtmEnvironment`；绑定与极线 groupshared 工作区只存在于入口或入口专用 include。构建按 Slang 实际 import/include 闭包缓存每个入口变体，并跟踪搜索命名空间变化，不因无关 Rust 或 shader 内容编辑重编所有入口。
+
+ReSTIR 的 `restir/parameters.slang` 只声明 uniform/pass 布局；线性地址与边界计算位于 `restir/indexing.slang`，邻居变换位于 `restir/pairing.slang`。入口专用 `bindings.slang` 不统一导入路径、shift、pairwise MIS 或 paired-neighbor 算法，各入口显式导入实际消费者。生成入口不依赖 shift/pairwise，retrace 不依赖 shift；这些编译边界不改变 GPU 布局、路径数学、随机域或 pass 调度。
 
 实时与离线入口共同使用旧完整 OpenPBR 的实际源支持子域；math/state/evaluate/sample 保持同一数学核，生产窄构造不建立完整 generic Material 默认图。能量表 binding 由实际消费者入口声明：Offline和K2传入完整BSDF，RR的K1只在guide能量尾声消费；delta循环无energy参数，库不声明描述符。精确 Fresnel、multiple scattering、支持与过滤边界见[材质契约](materials.md)。厚壁 authored SSS 仍使用明确隔离的历史 Lite 近似；foliage API 不表示已按 MC 类型或旧 preset 自动分类。
 

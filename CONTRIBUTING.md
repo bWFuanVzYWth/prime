@@ -36,11 +36,17 @@ git lfs status
 
 `std::simd` 仍是 nightly 的 `portable_simd` 接口，仓库固定 `nightly-2026-09-11`；通过 rustup 运行 cargo 会选择该工具链，不使用 `RUSTC_BOOTSTRAP`。CPU 内核按512-bit逻辑向量编写，由编译目标降为较窄向量或标量，ABI仍使用普通数组。`.cargo/config.toml` 为 x86-64 默认启用 `target-feature=+avx2`，发行包要求 AVX2；不要求 AVX-512、不启用 `target-cpu=native`，也不包含运行时指令集分派。需要验证较窄目标时可用 `RUSTFLAGS='-C target-cpu=x86-64 -C target-feature=-avx2,-avx'` 覆盖，并使用独立 target 目录保存产物。参考 [Rust portable SIMD](https://doc.rust-lang.org/nightly/std/simd/index.html)。
 
-`prime_vulkan` 按以下顺序寻找 Slang：`SLANGC` 指向的可执行文件、`VULKAN_SDK` 下的 `Bin/slangc.exe`（Linux 为 `bin/slangc`）、`PATH` 中的 `slangc`。这些路径属于本机配置，不写入项目文件。当前运行支持范围见 README，不因存在 Linux 构建分支就视为已完成 Linux 验证。
+shader 构建按以下顺序寻找 Slang：`SLANGC` 指向的可执行文件、`VULKAN_SDK` 下的 `Bin/slangc.exe`（Linux 为 `bin/slangc`）、`PATH` 中的 `slangc`。这些路径属于本机配置，不写入项目文件。当前运行支持范围见 README，不因存在 Linux 构建分支就视为已完成 Linux 验证。
 
 Windows 构建的 Streamline C++ 静态桥接需要 MSVC C++ 工具链；Streamline 与 Vulkan 头文件及运行时按来源/哈希锁定在 `third_party/`，构建不隐式下载最新版。升级须从官方 GitHub 重新解析 release、更新锁定文件，并一起验证 Vulkan interposer 初始化、真实 Present 与 RR/FG 完成证明。Gradle `buildNative` 将锁定的九个 runtime DLL 放到 `target/release`；指定自定义 `nativeLibrary` 时须将整套对应 DLL 放在引擎旁。发行 `nativeJar` 包含同一套 DLL、全部 `licenses/` 文件及许可声明。
 
 所有 shader 默认使用 `-O3 -g3` 编译，保留优化并生成最高级别调试信息，供 GPU 分析工具使用。
+
+生产 SPIR-V 由 `prime_shaders` 构建，`shader-tests` 额外启用 `prime_shader_tests`；固定资产由 `prime_render_data` 提供。它们通过非内联字节访问函数隔离大型 payload，Vulkan 宿主的普通 Rust 编辑不触发 Slang 或重新编译固定资产。`prime_vulkan/build.rs` 只构建 native bridge。
+
+`prime_shader_build` 按入口、宏、编译参数、工具链内容和 Slang 实际报告的 import/include 依赖保存内容缓存，默认位于 `target/prime-shader-cache/v1`，可跨 check/test/release 的 OUT_DIR 复用。修改 shader 后只重新编译有效依赖受影响的变体；新增、删除或遮蔽模块会重新发现依赖。缓存损坏或缺失会重新构建，不依赖人工复制旧 SPV。`PRIME_SHADER_CACHE` 可指定缓存父目录，`PRIME_SHADER_JOBS` 可设置正整数并行上限（默认4），额外 worker 仍受 Cargo jobserver 限制。工具链升级会失效缓存；缓存是本地产物，不提交 Git。
+
+缓存自身的 CPU 单元测试为 `cargo test -p prime_shader_build --locked`；实际 Slang 缓存/失效/并发行为测试需显式执行 `cargo test -p prime_shader_build --locked -- --ignored --test-threads=1`，只编译小型夹具，不启动 GPU 或窗口。
 
 ## 构建与发行包
 
@@ -289,7 +295,7 @@ cargo test -p prime_vulkan --features shader-tests --lib --locked -- --ignored -
 
 这些测试覆盖 cutout、累积、尺寸变化、增量场景和宿主资源退休；小尺寸/奇数尺寸用于边界检查，不是性能数据。改变宿主集成或捕获时，还需在对应 MC 适配器实际运行，检查主图像与 HUD、资源重载、世界退出等相关生命周期。更新公共接口时验证受影响的两个适配器；编译通过不证明 Mixin 注入或实际 GPU 功能正常。
 
-`shader-tests` 另编译无窗口测试入口，直接验证生产 Slang 的 Z-Sobol、颜色、primeDRT 与安全起点；正常发行构建不包含测试入口。所有 imported shader 的改动都会触发重编译。同步验证日志出现 `Prime Vulkan ERROR`、`VUID` 或 hazard 时，即使 Rust test harness 返回通过也不能视为 GPU 检查通过。Slang 模块/数学支持边界及可替换的显示策略见 [模块说明](docs/shaders.md)。
+`shader-tests` 另编译无窗口测试入口，直接验证生产 Slang 的 Z-Sobol、颜色、primeDRT 与安全起点；正常发行构建不包含测试入口。imported shader 的改动会重编有效依赖受影响的入口变体。同步验证日志出现 `Prime Vulkan ERROR`、`VUID` 或 hazard 时，即使 Rust test harness 返回通过也不能视为 GPU 检查通过。Slang 模块/数学支持边界及可替换的显示策略见 [模块说明](docs/shaders.md)。
 
 就绪计数与压缩编码回归随普通 `prime_minecraft` 测试执行：覆盖 Single/Local/Global 的水、玻璃与岩浆输出、63/64段阈值、cached halo 迁移和大工作集内的单次编辑。上传/阴影改动可在上述 validation 会话中执行以下窄入口，实际资源收缩、在途退休及遮挡行为不能只靠编译判断：
 

@@ -28,6 +28,12 @@
 #language slang 2026
 module restir_workload;
 #include "restir/bindings.slang"
+import "restir/indexing.slang";
+import "restir/pairing.slang";
+import "restir/paired_neighbors.slang";
+import "restir/types.slang";
+import "restir/reservoir.slang";
+import "frame.slang";
 
 int2 previousPixel(RestirScene resources, RestirPrimary primary, SurfaceHit hit) {
     if (!hit.found || parameters.control.y == 0u)

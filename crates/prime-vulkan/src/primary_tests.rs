@@ -10,7 +10,6 @@ use prime_scene::{
 };
 use std::sync::Arc;
 
-const SHADER: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/primary.spv"));
 const CASES: usize = 256;
 const ACTIVE: u32 = 1 << 8;
 const REFRACTED: u32 = 1 << 9;
@@ -151,7 +150,7 @@ fn run(context: &Arc<Context>, scene: &Scene, budgets: impl Fn(usize) -> u32) ->
     // The shader owns 8 report + 11 common (including companion) + 2 optical + 1 prefix float4 per case.
     let output = run_primary(
         context,
-        SHADER,
+        prime_shader_tests::primary(),
         &input,
         CASES * 22 * 4,
         [0, CASES as u32],

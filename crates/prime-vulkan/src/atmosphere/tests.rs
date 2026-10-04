@@ -34,10 +34,7 @@ fn execute(atmosphere: &Atmosphere, mode: u32, count: u32, input: &[u8]) -> Vec<
             CONSUMER_TYPES,
         ],
         1,
-        &[include_bytes!(concat!(
-            env!("OUT_DIR"),
-            "/atmosphere_test.spv"
-        ))],
+        &[prime_shader_tests::atmosphere_test()],
         16,
     )
     .unwrap();

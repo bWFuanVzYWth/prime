@@ -24,8 +24,8 @@ impl Exposure {
                 vk::DescriptorType::STORAGE_BUFFER,
             ],
             &[
-                include_bytes!(concat!(env!("OUT_DIR"), "/exposure_histogram.spv")),
-                include_bytes!(concat!(env!("OUT_DIR"), "/exposure_update.spv")),
+                prime_shaders::exposure_histogram(),
+                prime_shaders::exposure_update(),
             ],
             32,
         )?;

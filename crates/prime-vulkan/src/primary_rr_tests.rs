@@ -584,11 +584,8 @@ impl Fixture {
                     &[],
                 );
             }
-            let words = ash::util::read_spv(&mut Cursor::new(include_bytes!(concat!(
-                env!("OUT_DIR"),
-                "/primary_rr.spv"
-            ))))
-            .unwrap();
+            let words =
+                ash::util::read_spv(&mut Cursor::new(prime_shader_tests::primary_rr())).unwrap();
             let shader = context
                 .device
                 .create_shader_module(&vk::ShaderModuleCreateInfo::default().code(&words), None)

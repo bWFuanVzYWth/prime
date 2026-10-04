@@ -5,6 +5,10 @@ members = [
     "crates/prime-minecraft",
     "crates/prime-scene",
     "crates/prime-vulkan",
+    "crates/prime-render-data",
+    "crates/prime-shader-build",
+    "crates/prime-shaders",
+    "crates/prime-shader-tests",
     "crates/prime-engine",
     "crates/prime-tools",
     "crates/rectangle-decomposition",
@@ -23,6 +27,10 @@ prime_diagnostics = { path = "crates/prime-diagnostics" }
 prime_minecraft = { path = "crates/prime-minecraft" }
 prime_scene = { path = "crates/prime-scene" }
 prime_vulkan = { path = "crates/prime-vulkan" }
+prime_render_data = { path = "crates/prime-render-data" }
+prime_shaders = { path = "crates/prime-shaders" }
+prime_shader_tests = { path = "crates/prime-shader-tests" }
+prime_shader_build = { path = "crates/prime-shader-build" }
 ash = "0.38"
 rayon = "1.12"
 mimalloc = { version = "0.1.52", default-features = false }

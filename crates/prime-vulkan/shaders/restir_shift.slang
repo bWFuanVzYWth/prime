@@ -28,6 +28,13 @@
 #language slang 2026
 module restir_shift;
 #include "restir/bindings.slang"
+import "restir/indexing.slang";
+import "restir/pairing.slang";
+import "restir/paired_neighbors.slang";
+import "restir/path.slang";
+import "restir/shift.slang";
+import "restir/types.slang";
+import "restir/reservoir.slang";
 [numthreads(8, 8, 1)] void main(uint3 id : SV_DispatchThreadID) {
     uint2 extent = parameters.frame.dimensions.xy;
     if (any(id.xy >= extent))

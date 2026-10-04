@@ -355,7 +355,7 @@ fn gpu_cross_bilateral_uvs_match_original_source_triangles_from_four_sides() {
     ) -> Vec<([f32; 3], [f32; 4])> {
         crate::shader_tests::run(
             context,
-            include_bytes!(concat!(env!("OUT_DIR"), "/optics.spv")),
+            prime_shader_tests::optics(),
             input,
             input.len(),
             [0, (input.len() / 12) as u32],
@@ -625,7 +625,7 @@ fn gpu_optical_boundaries_match_beer_lambert_and_fresnel_from_both_sides_and_ins
         let input: Vec<_> = inputs.into_iter().map(f32::to_bits).collect();
         let output = crate::shader_tests::run(
             &renderer.context,
-            include_bytes!(concat!(env!("OUT_DIR"), "/optics.spv")),
+            prime_shader_tests::optics(),
             &input,
             48,
             [0, 4],
@@ -679,7 +679,7 @@ fn gpu_optical_visibility_preserves_coverage_and_absorption_with_blocker_reorder
             .unwrap();
         crate::shader_tests::run(
             context,
-            include_bytes!(concat!(env!("OUT_DIR"), "/optics.spv")),
+            prime_shader_tests::optics(),
             input,
             input.len(),
             [0, (input.len() / 12) as u32],
@@ -1178,7 +1178,7 @@ fn gpu_surface_light_grid_global_fallback_matches_reverse_pdf_and_scene_replacem
         renderer.render(&scene, &camera(3), 64, 64, 0).unwrap();
         let out = crate::shader_tests::run(
             &renderer.context,
-            include_bytes!(concat!(env!("OUT_DIR"), "/lights.spv")),
+            prime_shader_tests::lights(),
             &inputs,
             samples as usize * 16,
             [0, samples],
@@ -1467,7 +1467,7 @@ fn sprite_frames_mips_and_endpoints_share_pixels_without_rebuilding_geometry() {
         let g = renderer.geometry.as_ref().unwrap();
         let output = crate::shader_tests::run(
             &renderer.context,
-            include_bytes!(concat!(env!("OUT_DIR"), "/texture.spv")),
+            prime_shader_tests::texture(),
             &input,
             16,
             [g.textures().index(2).unwrap(), 4],
@@ -1617,7 +1617,7 @@ fn compound_emitters_sample_the_visible_layer_without_leaking_hidden_emission() 
         for back in [0, 1] {
             let out = crate::shader_tests::run(
                 &renderer.context,
-                include_bytes!(concat!(env!("OUT_DIR"), "/lights.spv")),
+                prime_shader_tests::lights(),
                 &input,
                 samples * 16,
                 [back, samples as u32],

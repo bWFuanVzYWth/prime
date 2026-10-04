@@ -28,6 +28,9 @@
 #language slang 2026
 module restir_resolve;
 #include "restir/bindings.slang"
+import "restir/indexing.slang";
+import "restir/types.slang";
+import "restir/reservoir.slang";
 import "display/prime_drt.slang";
 import "math/color.slang";
 #ifdef PRIME_RESTIR_RR

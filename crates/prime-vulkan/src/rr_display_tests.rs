@@ -133,7 +133,7 @@ fn pipeline(context: &Arc<Context>) -> Pipeline {
                     .set_layouts(&layouts),
             )
             .unwrap()[0];
-        let code = include_bytes!(concat!(env!("OUT_DIR"), "/rr_display.spv"));
+        let code = prime_shaders::rr_display();
         let words: Vec<_> = code
             .as_chunks::<4>()
             .0

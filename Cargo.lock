@@ -612,6 +612,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "prime_render_data"
+version = "0.1.0"
+
+[[package]]
 name = "prime_scene"
 version = "0.1.0"
 dependencies = [
@@ -620,6 +624,30 @@ dependencies = [
  "rayon",
  "rectangle_decomposition",
  "serde_json",
+]
+
+[[package]]
+name = "prime_shader_build"
+version = "0.1.0"
+dependencies = [
+ "jobserver",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "prime_shader_tests"
+version = "0.1.0"
+dependencies = [
+ "prime_shader_build",
+]
+
+[[package]]
+name = "prime_shaders"
+version = "0.1.0"
+dependencies = [
+ "prime_shader_build",
 ]
 
 [[package]]
@@ -641,7 +669,10 @@ dependencies = [
  "mimalloc",
  "prime_abi",
  "prime_diagnostics",
+ "prime_render_data",
  "prime_scene",
+ "prime_shader_tests",
+ "prime_shaders",
  "safetensors",
  "serde_json",
  "sha2",

@@ -1,0 +1,17 @@
+[package]
+license.workspace = true
+name = "prime_shaders"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Compile-time production shader data with narrow Rust metadata"
+
+[features]
+atmosphere-bake = []
+light-sampling-bench = []
+
+[build-dependencies]
+prime_shader_build.workspace = true
+
+[lints]
+workspace = true

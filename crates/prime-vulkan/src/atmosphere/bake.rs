@@ -62,18 +62,12 @@ pub fn bake_default_atmosphere(path: &std::path::Path) -> Result<(), String> {
         &[&[C, C, I, I, I, B, W, W, B, B, B, W, W]],
         3,
         &[
-            include_bytes!(concat!(
-                env!("OUT_DIR"),
-                "/atmosphere_bake_transmittance.spv"
-            )),
-            include_bytes!(concat!(env!("OUT_DIR"), "/atmosphere_bake_directions.spv")),
-            include_bytes!(concat!(env!("OUT_DIR"), "/atmosphere_bake_incident.spv")),
-            include_bytes!(concat!(env!("OUT_DIR"), "/atmosphere_bake_moments.spv")),
-            include_bytes!(concat!(
-                env!("OUT_DIR"),
-                "/atmosphere_bake_multi_scattering.spv"
-            )),
-            include_bytes!(concat!(env!("OUT_DIR"), "/atmosphere_bake_ground.spv")),
+            prime_shaders::atmosphere_bake_transmittance(),
+            prime_shaders::atmosphere_bake_directions(),
+            prime_shaders::atmosphere_bake_incident(),
+            prime_shaders::atmosphere_bake_moments(),
+            prime_shaders::atmosphere_bake_multi_scattering(),
+            prime_shaders::atmosphere_bake_ground(),
         ],
         16,
     )?;

@@ -1,20 +1,7 @@
 // Entry-point bindings share the existing self-contained scene and atmospheric resources.
 import "restir/parameters.slang";
-#if !defined(PRIME_RESTIR_MATERIAL_ONLY)
-import "restir/shift.slang";
-import "restir/path.slang";
-import "ray_query.slang";
-#else
 import "trace/closest.slang";
-#endif
-import "restir/types.slang";
 import "restir/scene.slang";
-import "restir/reservoir.slang";
-import "restir/rng.slang";
-import "restir/paired_neighbors.slang";
-import "restir/pairwise.slang";
-import "frame.slang";
-import "pbr.slang";
 #include "atmosphere/consumer_bindings.slang"
 #if !defined(PRIME_RESTIR_MATERIAL_ONLY)
 [[vk::binding(0, 0)]] RaytracingAccelerationStructure scene;

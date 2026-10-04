@@ -588,7 +588,7 @@ fn gpu_stars_fp32_coverage_foreground_and_ground() {
     let selector = PostCompute::new(
         &context,
         &[vk::DescriptorType::STORAGE_IMAGE; 20],
-        &[include_bytes!(concat!(env!("OUT_DIR"), "/rr_linear.spv"))],
+        &[prime_shaders::rr_linear()],
         64,
     )
     .unwrap();

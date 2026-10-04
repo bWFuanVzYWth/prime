@@ -12,7 +12,6 @@ use std::collections::BTreeSet;
 
 const SAMPLES: usize = 4096;
 const CENTERS: [f32; 3] = [8., 24., 44.];
-const LIGHTS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/lights.spv"));
 
 struct ExpectedLight {
     source: usize,
@@ -186,7 +185,7 @@ fn check_selection(renderer: &Renderer, scene: &Scene, lights: &[ExpectedLight],
     }
     let output = crate::shader_tests::run(
         &renderer.context,
-        LIGHTS,
+        prime_shader_tests::lights(),
         &inputs,
         receivers.len() * samples * 20,
         [2, (receivers.len() * samples) as u32],
@@ -420,7 +419,7 @@ fn gpu_light_grid_extreme_power_retains_rare_emitters_without_aborting() {
             }
             let output = crate::shader_tests::run(
                 &renderer.context,
-                LIGHTS,
+                prime_shader_tests::lights(),
                 &inputs,
                 witnesses.len() * 20,
                 [3, witnesses.len() as u32],

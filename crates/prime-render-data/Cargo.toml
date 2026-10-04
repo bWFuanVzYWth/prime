@@ -1,0 +1,10 @@
+[package]
+name = "prime_render_data"
+description = "Embedded immutable renderer data behind a narrow byte-accessor boundary"
+license.workspace = true
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true

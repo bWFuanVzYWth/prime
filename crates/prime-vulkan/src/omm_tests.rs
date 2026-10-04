@@ -10,8 +10,6 @@ use prime_scene::{
 };
 use std::sync::Arc;
 
-const SHADER: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/optics.spv"));
-
 fn capable_context() -> Arc<Context> {
     let context = Context::new().unwrap();
     let support = context
@@ -127,7 +125,7 @@ fn repeated_scene(repeat: RepeatUv, span: [f32; 2], phase: [f32; 2]) -> Scene {
 fn query_input(context: &Arc<Context>, geometry: &Geometry, input: &[u32]) -> Vec<u32> {
     shader_tests::run(
         context,
-        SHADER,
+        prime_shader_tests::optics(),
         input,
         input.len(),
         [0, (input.len() / 12) as u32],
@@ -1042,7 +1040,7 @@ fn gpu_omm_exact_shared_edge_diagnostic() {
     let run = |geometry: &Geometry| {
         shader_tests::run(
             &context,
-            SHADER,
+            prime_shader_tests::optics(),
             &input,
             input.len(),
             [0, (input.len() / 12) as u32],

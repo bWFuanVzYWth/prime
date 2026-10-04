@@ -1,6 +1,9 @@
 #language slang 2026
 module restir_generate_rr;
 #include "restir/bindings.slang"
+import "restir/indexing.slang";
+import "restir/path.slang";
+import "restir/types.slang";
 import "restir/rr_guides.slang";
 import "realtime/primary_parameters.slang";
 import "reconstruct/primary_guides.slang";

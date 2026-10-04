@@ -1,7 +1,6 @@
 //! Actual production Slang checks against the retained Full entry and full energy states.
 use super::{Context, shader_tests::run};
 
-const CODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/pbr_delta.spv"));
 const CASES: u32 = 74_088;
 // Signed zero has identical ray geometry. Bit 8 still rejects any numeric difference.
 const DIRECTION_BITS: u32 = 128;
@@ -11,7 +10,14 @@ const DIRECTION_BITS: u32 = 128;
 fn gpu_pbr_delta_and_guide_contracts() {
     let context = Context::new().unwrap();
     let input: Vec<_> = (0..CASES).collect();
-    let output = run(&context, CODE, &input, CASES as usize * 4, [0, CASES], None);
+    let output = run(
+        &context,
+        prime_shader_tests::pbr_delta(),
+        &input,
+        CASES as usize * 4,
+        [0, CASES],
+        None,
+    );
     let mut delta = 0;
     let mut guide = 0;
     let mut tir = 0;
@@ -37,7 +43,7 @@ fn gpu_pbr_delta_and_guide_contracts() {
         for mode in 2..=7 {
             let values = run(
                 &context,
-                CODE,
+                prime_shader_tests::pbr_delta(),
                 &diagnostic,
                 diagnostic.len() * 4,
                 [mode, diagnostic.len() as u32],
@@ -59,7 +65,14 @@ fn gpu_pbr_delta_and_guide_contracts() {
     }
     assert!(delta > 10_000 && guide > 10_000 && tir > 500);
     let edges: Vec<_> = (0..13).collect();
-    let output = run(&context, CODE, &edges, 13 * 4, [1, 13], None);
+    let output = run(
+        &context,
+        prime_shader_tests::pbr_delta(),
+        &edges,
+        13 * 4,
+        [1, 13],
+        None,
+    );
     for (case, result) in output.as_chunks::<4>().0.iter().enumerate() {
         assert_eq!(result[0], 0, "delta/guide edge contract {case}");
     }

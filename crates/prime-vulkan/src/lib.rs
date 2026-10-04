@@ -450,55 +450,37 @@ impl Pipeline {
                     frame_generation,
                 )?);
                 if reconstruction {
-                    result.reconstruction_linear = Some(create(
-                        include_bytes!(concat!(env!("OUT_DIR"), "/rr_linear.spv")),
-                        [0, 0, 0],
-                        0,
-                        false,
-                    )?);
-                    result.reconstruction_display = Some(create(
-                        include_bytes!(concat!(env!("OUT_DIR"), "/rr_display.spv")),
-                        [0, 0, 0],
-                        0,
-                        false,
-                    )?);
+                    result.reconstruction_linear =
+                        Some(create(prime_shaders::rr_linear(), [0, 0, 0], 0, false)?);
+                    result.reconstruction_display =
+                        Some(create(prime_shaders::rr_display(), [0, 0, 0], 0, false)?);
                 }
                 return Ok(result);
             }
             // A frame-boundary configuration selects one binary; no per-path method branch.
             let shader: &[u8] = match (mode, reconstruction, light_sampling) {
-                (RenderMode::Offline, _, LightSampling::Grid) => {
-                    include_bytes!(concat!(env!("OUT_DIR"), "/path_trace.spv"))
-                }
-                (RenderMode::Offline, _, LightSampling::Tree) => {
-                    include_bytes!(concat!(env!("OUT_DIR"), "/path_trace_tree.spv"))
-                }
+                (RenderMode::Offline, _, LightSampling::Grid) => prime_shaders::path_trace(),
+                (RenderMode::Offline, _, LightSampling::Tree) => prime_shaders::path_trace_tree(),
                 (RenderMode::Offline, _, LightSampling::TreeSphere) => {
-                    include_bytes!(concat!(env!("OUT_DIR"), "/path_trace_tree_sphere.spv"))
+                    prime_shaders::path_trace_tree_sphere()
                 }
                 (RenderMode::Realtime, true, LightSampling::Grid) => {
-                    include_bytes!(concat!(env!("OUT_DIR"), "/realtime_transport_rr.spv"))
+                    prime_shaders::realtime_transport_rr()
                 }
                 (RenderMode::Realtime, false, LightSampling::Grid) => {
-                    include_bytes!(concat!(env!("OUT_DIR"), "/realtime_transport.spv"))
+                    prime_shaders::realtime_transport()
                 }
                 (RenderMode::Realtime, true, LightSampling::Tree) => {
-                    include_bytes!(concat!(env!("OUT_DIR"), "/realtime_transport_rr_tree.spv"))
+                    prime_shaders::realtime_transport_rr_tree()
                 }
                 (RenderMode::Realtime, false, LightSampling::Tree) => {
-                    include_bytes!(concat!(env!("OUT_DIR"), "/realtime_transport_tree.spv"))
+                    prime_shaders::realtime_transport_tree()
                 }
                 (RenderMode::Realtime, true, LightSampling::TreeSphere) => {
-                    include_bytes!(concat!(
-                        env!("OUT_DIR"),
-                        "/realtime_transport_rr_tree_sphere.spv"
-                    ))
+                    prime_shaders::realtime_transport_rr_tree_sphere()
                 }
                 (RenderMode::Realtime, false, LightSampling::TreeSphere) => {
-                    include_bytes!(concat!(
-                        env!("OUT_DIR"),
-                        "/realtime_transport_tree_sphere.spv"
-                    ))
+                    prime_shaders::realtime_transport_tree_sphere()
                 }
             };
             for (i, features) in [
@@ -519,18 +501,18 @@ impl Pipeline {
             }
             if let Some(primary) = &mut result.primary_pipelines {
                 let shader: &[u8] = if reconstruction {
-                    include_bytes!(concat!(env!("OUT_DIR"), "/realtime_primary_rr.spv"))
+                    prime_shaders::realtime_primary_rr()
                 } else {
-                    include_bytes!(concat!(env!("OUT_DIR"), "/realtime_primary.spv"))
+                    prime_shaders::realtime_primary()
                 };
                 for (target, features) in primary.iter_mut().zip(realtime::PRIMARY_FEATURES) {
                     *target = create(shader, features, 0, true)?;
                 }
                 result.realtime_post = Some(create(
                     if reconstruction {
-                        include_bytes!(concat!(env!("OUT_DIR"), "/realtime_rr.spv"))
+                        prime_shaders::realtime_rr()
                     } else {
-                        include_bytes!(concat!(env!("OUT_DIR"), "/realtime.spv"))
+                        prime_shaders::realtime()
                     },
                     [0, 0, 0],
                     0,
@@ -538,7 +520,7 @@ impl Pipeline {
                 )?);
                 if !reconstruction {
                     result.realtime_linear_post = Some(create(
-                        include_bytes!(concat!(env!("OUT_DIR"), "/realtime_linear.spv")),
+                        prime_shaders::realtime_linear(),
                         [0, 0, 0],
                         0,
                         false,
@@ -546,18 +528,10 @@ impl Pipeline {
                 }
             }
             if reconstruction {
-                result.reconstruction_linear = Some(create(
-                    include_bytes!(concat!(env!("OUT_DIR"), "/rr_linear.spv")),
-                    [0, 0, 0],
-                    0,
-                    false,
-                )?);
-                result.reconstruction_display = Some(create(
-                    include_bytes!(concat!(env!("OUT_DIR"), "/rr_display.spv")),
-                    [0, 0, 0],
-                    0,
-                    false,
-                )?);
+                result.reconstruction_linear =
+                    Some(create(prime_shaders::rr_linear(), [0, 0, 0], 0, false)?);
+                result.reconstruction_display =
+                    Some(create(prime_shaders::rr_display(), [0, 0, 0], 0, false)?);
             }
             Ok(result)
         }

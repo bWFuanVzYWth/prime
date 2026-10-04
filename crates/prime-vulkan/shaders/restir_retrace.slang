@@ -28,6 +28,12 @@
 #language slang 2026
 module restir_retrace;
 #include "restir/bindings.slang"
+import "restir/indexing.slang";
+import "restir/pairing.slang";
+import "restir/paired_neighbors.slang";
+import "restir/path.slang";
+import "restir/types.slang";
+import "restir/reservoir.slang";
 [numthreads(64, 1, 1)] void main(uint3 id : SV_DispatchThreadID) {
     if (id.x >= parameters.queueControl[0])
         return;

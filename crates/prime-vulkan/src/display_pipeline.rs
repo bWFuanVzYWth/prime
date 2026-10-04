@@ -22,10 +22,7 @@ impl LinearDisplay {
                     vk::DescriptorType::STORAGE_IMAGE,
                     vk::DescriptorType::STORAGE_IMAGE,
                 ],
-                &[include_bytes!(concat!(
-                    env!("OUT_DIR"),
-                    "/display_from_linear.spv"
-                ))],
+                &[prime_shaders::display_from_linear()],
                 96,
             )?,
         })

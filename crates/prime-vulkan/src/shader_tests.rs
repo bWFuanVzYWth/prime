@@ -5,11 +5,6 @@ use prime_scene::{Instance, Prototype, Triangle};
 mod reference;
 use reference::{cross, dot, inverse, normalized, sub, transform};
 
-const FOUNDATIONS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/foundations.spv"));
-const DISPLAY: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/display.spv"));
-const INTERSECTION: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/intersection.spv"));
-const SPHERE_TREE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/sphere_tree.spv"));
-
 #[test]
 #[ignore = "windowless execution of production sphere proposal, finite selectors and PDF replay"]
 fn gpu_sphere_tree_integer_support_forward_reverse_and_geometry_boundaries() {
@@ -112,7 +107,7 @@ fn gpu_sphere_tree_integer_support_forward_reverse_and_geometry_boundaries() {
     }
     let output = run(
         &context,
-        SPHERE_TREE,
+        prime_shader_tests::sphere_tree(),
         &input,
         input.len() / 12 * 8,
         [0, (input.len() / 12) as u32],
@@ -511,7 +506,7 @@ fn gpu_z_sobol_matches_u64_oracle_and_dyadic_nets() {
     }
     let actual = run(
         &context,
-        FOUNDATIONS,
+        prime_shader_tests::foundations(),
         &input,
         input.len(),
         [0, (input.len() / 8) as u32],
@@ -550,7 +545,7 @@ fn gpu_z_sobol_matches_u64_oracle_and_dyadic_nets() {
             }
             let bits = run(
                 &context,
-                FOUNDATIONS,
+                prime_shader_tests::foundations(),
                 &cases,
                 cases.len(),
                 [0, (cases.len() / 8) as u32],
@@ -596,7 +591,7 @@ fn gpu_color_transfer_and_working_space_match_f64_reference() {
         .collect();
     let result = run(
         &context,
-        FOUNDATIONS,
+        prime_shader_tests::foundations(),
         &input,
         colors.len() * 16,
         [1, colors.len() as u32],
@@ -629,7 +624,14 @@ fn gpu_color_transfer_and_working_space_match_f64_reference() {
         );
     }
     let negative = [-1.0f32, -0.0001, 0.0, 0.0].map(f32::to_bits);
-    let result = run(&context, FOUNDATIONS, &negative, 16, [1, 1], None);
+    let result = run(
+        &context,
+        prime_shader_tests::foundations(),
+        &negative,
+        16,
+        [1, 1],
+        None,
+    );
     assert_eq!(
         &result[12..15],
         &[0; 3],
@@ -704,7 +706,7 @@ fn gpu_prime_drt_matches_legacy_across_controls_and_headroom() {
     let count = input.len() / 16;
     let result = run(
         &context,
-        DISPLAY,
+        prime_shader_tests::display(),
         &input,
         count * 8,
         [0, count as u32],
@@ -788,7 +790,7 @@ fn gpu_ray_error_bounds_cover_reconstruction_and_both_spawn_sides() {
     }
     let result = run(
         &context,
-        FOUNDATIONS,
+        prime_shader_tests::foundations(),
         &input,
         expected.len() * 16,
         [2, expected.len() as u32],
@@ -804,7 +806,7 @@ fn gpu_ray_error_bounds_cover_reconstruction_and_both_spawn_sides() {
         .collect::<Vec<_>>();
     let translation_result = run(
         &context,
-        FOUNDATIONS,
+        prime_shader_tests::foundations(),
         &translation_input,
         expected.len() / 2 * 16,
         [3, (expected.len() / 2) as u32],
@@ -940,7 +942,14 @@ fn gpu_spawn_avoids_self_hits_without_skipping_nearby_occluders() {
                     rays.extend([v[0] as f32, v[1] as f32, v[2] as f32, 0.0].map(f32::to_bits));
                 }
             }
-            let result = run(&context, INTERSECTION, &rays, 32, [0, 4], Some(&geometry));
+            let result = run(
+                &context,
+                prime_shader_tests::intersection(),
+                &rays,
+                32,
+                [0, 4],
+                Some(&geometry),
+            );
             for case in result.as_chunks::<8>().0 {
                 assert_eq!(
                     &case[..2],
@@ -977,7 +986,14 @@ fn gpu_spawn_avoids_self_hits_without_skipping_nearby_occluders() {
                         [v[0] as f32, v[1] as f32, v[2] as f32, 0.0].map(f32::to_bits)
                     })
                     .collect();
-                let result = run(&context, INTERSECTION, &rays, 8, [0, 1], Some(&geometry));
+                let result = run(
+                    &context,
+                    prime_shader_tests::intersection(),
+                    &rays,
+                    8,
+                    [0, 1],
+                    Some(&geometry),
+                );
                 assert_eq!(
                     &result[..2],
                     &[1, 1],

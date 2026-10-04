@@ -9,7 +9,6 @@ use std::sync::Arc;
 pub(crate) const WIDTH: u32 = 16384;
 pub(crate) const HEIGHT: u32 = 8192;
 pub(crate) const MIPS: u32 = 15;
-const ASSET: &[u8] = include_bytes!("../assets/starmap/starmap_2020_16k.ktx2");
 const SPEC: TextureSpec = TextureSpec {
     format: vk::Format::BC6H_UFLOAT_BLOCK,
     extent: [WIDTH, HEIGHT, 0],
@@ -17,7 +16,7 @@ const SPEC: TextureSpec = TextureSpec {
     primaries: 4, // D65 linear BT.2020; the original payload is already in this working space.
 };
 fn asset() -> Result<TextureAsset<'static>, String> {
-    let asset = TextureAsset::parse(ASSET, SPEC)?;
+    let asset = TextureAsset::parse(prime_render_data::starmap(), SPEC)?;
     for (key, expected) in [
         (
             "source_sha256",
@@ -254,7 +253,7 @@ impl Stars {
                     vk::DescriptorType::SAMPLED_IMAGE,
                     vk::DescriptorType::STORAGE_IMAGE,
                 ],
-                &[include_bytes!(concat!(env!("OUT_DIR"), "/stars.spv"))],
+                &[prime_shaders::stars()],
                 112,
             )?,
         })
@@ -375,6 +374,7 @@ mod tests {
             total += size;
         }
         assert_eq!(total, 178_957_008);
-        assert!(TextureAsset::parse(&ASSET[..ASSET.len() - 1], SPEC).is_err());
+        let bytes = prime_render_data::starmap();
+        assert!(TextureAsset::parse(&bytes[..bytes.len() - 1], SPEC).is_err());
     }
 }
