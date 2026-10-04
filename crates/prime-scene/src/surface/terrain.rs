@@ -158,7 +158,7 @@ impl SurfaceCompiler {
             rectangles::append(&mut faces, &quads[index], None);
         }
         faces.extend(self.merge_resolved(other)?);
-        let lights = LightTree::build(&mut faces)?;
+        let lights = Arc::new(LightTree::build(&mut faces)?);
         Ok(Some(SurfaceMesh {
             revision,
             quads: faces,

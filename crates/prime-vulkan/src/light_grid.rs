@@ -710,13 +710,17 @@ mod tests {
         let pages: Vec<_> = (0..16)
             .map(|key| LightPage {
                 key: key + 1,
-                emitters: Buffer::new(
-                    &context,
-                    16,
-                    vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
-                    false,
-                )
-                .unwrap(),
+                emitters: Arc::new(
+                    Buffer::new(
+                        &context,
+                        16,
+                        vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+                        false,
+                    )
+                    .unwrap(),
+                ),
+                source: Arc::new(prime_scene::surface::LightTree::default()),
+                method: prime_scene::settings::LightSampling::Grid,
                 lights: vec![crate::light_grid_cpu::Light {
                     center: [8., 8., 8.],
                     power: 1.,

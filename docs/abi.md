@@ -36,7 +36,7 @@ Java 适配器与 Rust 核心作为同一构建产物配套使用。公共 ABI �
 | --- | --- | --- |
 | `PrimeReset` | 16 B | `prime_reset`；world epoch严格增加，清理世界几何/动态状态，保留当前常驻资源代和同一CPU池 |
 | `PrimeFrame` | 96 B | record/render；epoch、f64世界位置、forward/right/up、FOV、输出尺寸、sample index、实际太阳时角 |
-| `PrimeSettings` | 100 B | configure；具名渲染、调度、星图、自动曝光、HDR、帧生成与固定光源采样方式 |
+| `PrimeSettings` | 100 B | configure；具名渲染、调度、星图、自动曝光、HDR、帧生成与帧边界光源采样方式 |
 | `PrimeVulkanHost` | 56 B | attach；instance/physical device/device/queue/timeline/family/实际启用capabilities |
 | `PrimeRecordTarget` | 40 B | record；活动command、目标image/view、实际提交serial |
 | `PrimePrepareResources` | 24 B | prepare_resources；活动command与真实提交serial，仅准备设备/全局资源 |
@@ -171,7 +171,7 @@ flags 的 bit0 表示已在这台逻辑设备启用 `VK_EXT_opacity_micromap` �
 
 ## 设置结构与文件 schema
 
-`prime_configure(handle,&settings)` 借用100 B `PrimeSettings`，header使用公共ABI v11。末字段 `light_sampling` 位于96字节偏移，0为Grid、1为Tree，其他值拒绝；renderer创建时固定，之后变更拒绝且不推进设置或资源。磁盘 `primept.properties` 为schema v7；旧版本或字段不完整按既有严格规则整份回退默认，不以旧控制字节序列作为生产输入。
+`prime_configure(handle,&settings)` 借用100 B `PrimeSettings`，header使用公共ABI v11。末字段 `light_sampling` 位于96字节偏移，0为Grid、1为Tree功率树、2为TreeSphere球界方向树，其他值拒绝；创建时采用当前值，之后允许在外层帧边界变更。宿主先提交并证明旧命令完成，native重建所选管线，并在下一次录制中完成灯表和目录更新后才dispatch。JAR与DLL仍须配套重建，旧DLL不接受新枚举值。磁盘 `primept.properties` 为schema v7，合法值为`GRID`、`TREE`、`TREE_SPHERE`；旧版本或字段不完整按既有严格规则整份回退默认，不以旧控制字节序列作为生产输入。
 
 | 字段 | 范围/语义 |
 | --- | --- |
@@ -189,8 +189,9 @@ flags 的 bit0 表示已在这台逻辑设备启用 `VK_EXT_opacity_micromap` �
 | auto_exposure_compensation | `[0,1]`，默认0.6；0关闭，其余为旧算法的补偿强度，并非EV |
 | hdr / hdr_reference_white | 0/1请求；0自动参考白，否则1–10000 nit；实际启用需surface及标定支持 |
 | frame_generation | 0/1请求，默认0；实时RR、早期interposer及实际SDK支持全部成立才准备 |
+| light_sampling | 0 Grid默认、1 Tree功率树、2 TreeSphere球界方向树；帧边界切换并重置采样历史 |
 
-结构尺寸/版本、枚举、有限性及范围完整验证后应用。模式或实时RR布局改变前宿主先提交encoder，在外层帧边界切换；native依旧资源最后consumer退休。显示控制和格预算无需模式切换等待。冻结拒绝实时源变更入口，资源及显示边界见[渲染模式](renderers.md)。
+结构尺寸/版本、枚举、有限性及范围完整验证后应用。模式、采样方式或实时RR布局改变前宿主先提交encoder并证明旧提交完成，在外层帧边界切换；native依旧资源最后consumer退休。显示控制和格预算无需模式切换等待。冻结拒绝实时源变更入口，但允许替换采样proposal；仅更新快照设置的`light_sampling`，保留姿态和其他冻结输运参数。资源及显示边界见[渲染模式](renderers.md)。
 
 地形批次上限控制 CPU 源编译和后段静态构建两个阶段，各自每帧最多 N 格；不参与 transport 比较，调整上限不重置 RR 历史或离线累积。冻结期间可修改并继续限制已发布源的后段积压，CPU 源编译暂停至恢复实时。实际几何内容变化与等价 OMM 重建的累积处理见 [渲染模式契约](renderers.md)。
 

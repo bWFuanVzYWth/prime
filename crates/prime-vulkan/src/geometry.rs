@@ -154,6 +154,7 @@ pub(super) struct Geometry {
     pub static_bases: Buffer,
     light_sampler: crate::light_sampler::LightSampler,
     light_sampling: prime_scene::settings::LightSampling,
+    sampler_dirty: bool,
     next_light_key: u64,
     has_surfaces: bool,
     has_compounds: bool,
@@ -168,6 +169,20 @@ pub(super) struct Geometry {
     omm_dirty: bool,
     pub(crate) omm_prepare_ns: [u64; 3],
     pub(crate) omm_work_counts: [u64; 2],
+}
+
+#[cfg(test)]
+pub(super) struct LightSamplingSnapshot {
+    pub method: prime_scene::settings::LightSampling,
+    pub dirty: bool,
+    pub has_lights: bool,
+    pub pages: Vec<(
+        u64,
+        Arc<Buffer>,
+        Arc<prime_scene::surface::LightTree>,
+        prime_scene::settings::LightSampling,
+    )>,
+    pub blas: Vec<vk::AccelerationStructureKHR>,
 }
 
 impl Geometry {
@@ -262,6 +277,7 @@ impl Geometry {
             )?,
             light_sampler: crate::light_sampler::LightSampler::new(context, light_sampling),
             light_sampling,
+            sampler_dirty: false,
             next_light_key: 1,
             has_surfaces: false,
             has_compounds: false,
@@ -309,6 +325,7 @@ impl Geometry {
     }
     pub fn needs_update(&self, scene: SceneInput<'_>) -> bool {
         self.compactions.needs_update(self.completed)
+            || self.sampler_dirty
             || self.omm_dirty
             || self.source_changed(scene)
             || self.static_planner.has_pending()
@@ -345,6 +362,60 @@ impl Geometry {
             self.uploads.reserved_bytes(),
             self.indices.iter().map(|b| b.size).sum(),
         ]
+    }
+
+    #[cfg(test)]
+    pub(super) fn light_sampling_snapshot(&self) -> LightSamplingSnapshot {
+        LightSamplingSnapshot {
+            method: self.light_sampling,
+            dirty: self.sampler_dirty,
+            has_lights: self.light_sampler.has_lights,
+            pages: self
+                .light_sources
+                .iter()
+                .map(|(&key, (_, page))| {
+                    (key, page.emitters.clone(), page.source.clone(), page.method)
+                })
+                .collect(),
+            blas: self
+                .clusters
+                .values()
+                .map(|cluster| cluster.acceleration.handle)
+                .collect(),
+        }
+    }
+
+    /// Defer uploads to the next active record; published BLAS and emitter identities survive.
+    pub fn set_light_sampling(&mut self, method: prime_scene::settings::LightSampling) {
+        if self.light_sampling != method {
+            self.light_sampling = method;
+            self.sampler_dirty = true;
+        }
+    }
+
+    fn rebuild_light_sampler(&mut self, context: &Arc<Context>) -> Result<(), String> {
+        let mut trace = prime_diagnostics::scope("lights.switch");
+        trace.fail();
+        trace.count("ls", self.light_sampling as u64);
+        trace.count("pg", self.light_sources.len() as u64);
+        let mut sources = BTreeMap::new();
+        for (&key, (origin, page)) in &self.light_sources {
+            let page = if page.method == self.light_sampling {
+                page.clone()
+            } else {
+                Rc::new(page.rebuild_sampler(context, self.light_sampling)?)
+            };
+            sources.insert(key, (*origin, page));
+        }
+        for cluster in self.clusters.values_mut() {
+            for page in cluster.light_pages.iter_mut().flatten() {
+                *page = sources[&page.key].1.clone();
+            }
+        }
+        self.light_sources = sources;
+        self.light_sampler = crate::light_sampler::LightSampler::new(context, self.light_sampling);
+        trace.succeed();
+        Ok(())
     }
 
     pub fn set_omm(&mut self, enabled: bool) {
@@ -422,7 +493,7 @@ impl Geometry {
                     .map(|(&key, _)| key),
             );
         }
-        let mut lights_changed = self.anchor != scene.anchor;
+        let mut lights_changed = self.anchor != scene.anchor || self.sampler_dirty;
         let mut instance_flags_changed = self.omm_dirty;
         let owner = self.resources.clone();
         let mut resources = owner.borrow_mut();
@@ -861,7 +932,7 @@ impl Geometry {
                             mesh,
                             &resources.textures.indices,
                             self.next_light_key,
-                            self.light_sampling == prime_scene::settings::LightSampling::Tree,
+                            self.light_sampling,
                         )?
                         .map(Rc::new)
                     } else {
@@ -928,7 +999,7 @@ impl Geometry {
         };
         plan.placements_changed |= compacted;
         self.top_dirty |= compacted;
-        if !plan.placements_changed {
+        if !plan.placements_changed && !self.sampler_dirty {
             self.omm_dirty = false;
             self.revision = scene.publication();
             self.anchor = scene.anchor;
@@ -938,6 +1009,9 @@ impl Geometry {
             resources.coverage_changed.clear();
             self.static_planner.recycle(plan);
             return Ok(false);
+        }
+        if self.sampler_dirty {
+            self.rebuild_light_sampler(context)?;
         }
         if lights_changed {
             let mut lights_trace = prime_diagnostics::scope("geom.lights");
@@ -1025,6 +1099,24 @@ impl Geometry {
                 },
             )?;
         }
+        if self.sampler_dirty {
+            for (&key, cluster) in &self.clusters {
+                let fields: Vec<_> = cluster
+                    .light_pages
+                    .iter()
+                    .map(|page| {
+                        page.as_ref().map_or((0, 0, 1), |page| {
+                            (
+                                self.light_sampler.first_emitter(page.key),
+                                page.emitters.address(),
+                                page.format,
+                            )
+                        })
+                    })
+                    .collect();
+                self.directory.light_fields(key, &fields)?;
+            }
+        }
         self.directory.light_header(
             self.light_sampler.world_count(),
             self.light_sampler.header_address(),
@@ -1103,6 +1195,7 @@ impl Geometry {
         self.omm_revision = resources.omm_revision;
         resources.coverage_changed.clear();
         directory_trace.succeed();
+        self.sampler_dirty = false;
         Ok(published_changed)
     }
 

@@ -1,6 +1,6 @@
-//! Device publication for the historical page tree + world tree proposal.
+//! Device publication for the power or directional sphere page/world proposal.
 //! Immutable local trees belong to their source LightPage; only changed ranges and world metadata
-//! are uploaded here. The renderer chooses this module or the grid once at initialization.
+//! are uploaded here. Sampler changes replace metadata at an explicit completion boundary.
 use crate::{
     arena::{Arena, Lease},
     light_tree_cpu::{Input, Node, Tree as CpuTree},
@@ -62,6 +62,7 @@ impl LightTree {
         anchor: [f64; 3],
         sources: &BTreeMap<u64, ([f64; 3], &LightPage)>,
         uploads: &mut Arena,
+        method: prime_scene::settings::LightSampling,
     ) -> Result<(), String> {
         let mut trace = prime_diagnostics::scope("lt.update");
         trace.fail();
@@ -78,6 +79,7 @@ impl LightTree {
                 root: tree.root,
                 lights: &source.lights,
                 pdfs: &tree.pdfs,
+                paths: tree.sphere_root.map(|_| tree.paths.as_slice()),
             });
         }
         let changes = self.cpu.update(&inputs, anchor)?;
@@ -91,6 +93,37 @@ impl LightTree {
             trace.succeed();
             return Ok(());
         }
+        let sphere = if method == prime_scene::settings::LightSampling::TreeSphere {
+            let roots = self
+                .cpu
+                .pages
+                .iter()
+                .enumerate()
+                .filter_map(|(slot, page)| {
+                    page.as_ref().map(|page| {
+                        let tree = sources[&page.key].1.tree.as_ref().unwrap();
+                        let mut root = tree
+                            .sphere_root
+                            .ok_or("Sphere sampler received a power tree page")?;
+                        // Match GPU's represented page origin + local position, then widen the
+                        // endpoints by one ULP so the sphere encloses the actual translated corners.
+                        let relative: [f32; 3] =
+                            std::array::from_fn(|a| (page.origin[a] - anchor[a]) as f32);
+                        root.bounds = [
+                            std::array::from_fn(|a| (relative[a] + root.bounds[0][a]).next_down()),
+                            std::array::from_fn(|a| (relative[a] + root.bounds[1][a]).next_up()),
+                        ];
+                        Ok((slot as u32, root))
+                    })
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            Some(crate::light_sphere_cpu::Tree::world(
+                &roots,
+                self.cpu.pages.len(),
+            )?)
+        } else {
+            None
+        };
         let mut copies = Vec::new();
         let mut staging = prime_diagnostics::scope("lt.stage");
         staging.fail();
@@ -130,7 +163,10 @@ impl LightTree {
             drop(refs);
             let mut world = prime_diagnostics::scope("lt.world_stage");
             world.fail();
-            let bytes = node_bytes(&self.cpu.world);
+            let bytes = sphere.as_ref().map_or_else(
+                || node_bytes(&self.cpu.world),
+                |tree| crate::light_sphere_cpu::node_bytes(&tree.nodes),
+            );
             world.count("nodes", self.cpu.world.len() as u64);
             world.count("bytes", bytes.len() as u64);
             stage_table(context, uploads, &bytes, &mut self.world, &mut copies)?;
@@ -138,7 +174,12 @@ impl LightTree {
             drop(world);
             let mut pages = prime_diagnostics::scope("lt.pages");
             pages.fail();
-            let bytes = page_bytes(&self.cpu, anchor, sources)?;
+            let bytes = page_bytes(
+                &self.cpu,
+                anchor,
+                sources,
+                sphere.as_ref().map(|tree| tree.paths.as_slice()),
+            )?;
             pages.count("bytes", bytes.len() as u64);
             stage_table(context, uploads, &bytes, &mut self.pages, &mut copies)?;
             let bytes = header_bytes(
@@ -205,9 +246,10 @@ fn page_bytes(
     cpu: &CpuTree,
     anchor: [f64; 3],
     sources: &BTreeMap<u64, ([f64; 3], &LightPage)>,
+    paths: Option<&[u32]>,
 ) -> Result<Vec<u8>, String> {
     let mut bytes = Vec::with_capacity(cpu.pages.len() * 48);
-    for page in &cpu.pages {
+    for (slot, page) in cpu.pages.iter().enumerate() {
         if let Some(page) = page {
             let source = sources[&page.key].1;
             let tree = source.tree.as_ref().ok_or("Missing local light tree")?;
@@ -220,7 +262,8 @@ fn page_bytes(
                 }
                 bytes.extend_from_slice(&relative.to_le_bytes());
             }
-            for word in [source.format, page.first, page.count, page.pdf.to_bits(), 0] {
+            let selection = paths.map_or(page.pdf.to_bits(), |paths| paths[slot]);
+            for word in [source.format, page.first, page.count, selection, 0] {
                 bytes.extend_from_slice(&word.to_le_bytes());
             }
         } else {

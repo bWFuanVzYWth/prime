@@ -244,14 +244,7 @@ impl Engine {
             diagnostic.fail();
             return Err("Renderer session is poisoned".into());
         }
-        #[cfg(feature = "vulkan")]
-        if self.renderer.is_some() && settings.light_sampling != self.settings.light_sampling {
-            diagnostic.fail();
-            return Err(
-                "Light sampling is fixed when attaching the renderer; restart to change it".into(),
-            );
-        }
-        let frozen = if settings.mode == RenderMode::Offline {
+        let mut frozen = if settings.mode == RenderMode::Offline {
             Some(match self.frozen_frame {
                 Some(snapshot) => snapshot,
                 None => self
@@ -262,6 +255,10 @@ impl Engine {
         } else {
             None
         };
+        if let Some((_, transport)) = &mut frozen {
+            // A sampling proposal is a renderer setting, not frozen source/lighting state.
+            transport.light_sampling = settings.light_sampling;
+        }
         #[cfg(feature = "vulkan")]
         if let Some(renderer) = &mut self.renderer {
             let mut active = settings;
@@ -731,6 +728,33 @@ mod tests {
         assert_eq!(engine.settings.exposure, 2.0);
         assert_eq!(engine.astronomy.direction(0.), frozen_sun);
         assert_eq!(engine.frozen_frame.unwrap().1, RenderSettings::default());
+        for method in [
+            prime_scene::settings::LightSampling::TreeSphere,
+            prime_scene::settings::LightSampling::Tree,
+            prime_scene::settings::LightSampling::Grid,
+        ] {
+            engine
+                .configure(RenderSettings {
+                    light_sampling: method,
+                    ..engine.settings
+                })
+                .unwrap();
+            let (pose, transport) = engine.frozen_frame.unwrap();
+            assert_eq!(pose.epoch, frame.epoch);
+            assert_eq!(pose.world_position, frame.world_position);
+            assert_eq!(pose.solar_hour_angle, frame.solar_hour_angle);
+            assert_eq!(pose.camera, frame.camera);
+            assert_eq!(
+                (pose.width, pose.height, pose.sample_index),
+                (frame.width, frame.height, frame.sample_index)
+            );
+            assert_eq!(transport.light_sampling, method);
+            assert_eq!(transport.bounces, RenderSettings::default().bounces);
+            assert_eq!(transport.sky, RenderSettings::default().sky);
+            assert_eq!(engine.effective_frame(&moved).camera, frame.camera);
+            assert_eq!(engine.astronomy.direction(0.), frozen_sun);
+            assert!(engine.check_live_source().is_err());
+        }
         engine
             .configure(RenderSettings {
                 astronomy: prime_scene::environment::Astronomy {

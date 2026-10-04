@@ -19,6 +19,7 @@ mod light_grid_tests;
 mod light_sampler;
 #[cfg(feature = "light-sampling-bench")]
 pub mod light_sampling;
+mod light_sphere_cpu;
 mod light_tree;
 mod light_tree_cpu;
 mod objects;
@@ -392,13 +393,16 @@ impl Pipeline {
                     }
                 })
             };
-            // Initialization selects one binary; sampler choice never enters a dispatch.
+            // A frame-boundary configuration selects one binary; no per-path method branch.
             let shader: &[u8] = match (mode, reconstruction, light_sampling) {
                 (RenderMode::Offline, _, LightSampling::Grid) => {
                     include_bytes!(concat!(env!("OUT_DIR"), "/path_trace.spv"))
                 }
                 (RenderMode::Offline, _, LightSampling::Tree) => {
                     include_bytes!(concat!(env!("OUT_DIR"), "/path_trace_tree.spv"))
+                }
+                (RenderMode::Offline, _, LightSampling::TreeSphere) => {
+                    include_bytes!(concat!(env!("OUT_DIR"), "/path_trace_tree_sphere.spv"))
                 }
                 (RenderMode::Realtime, true, LightSampling::Grid) => {
                     include_bytes!(concat!(env!("OUT_DIR"), "/realtime_transport_rr.spv"))
@@ -411,6 +415,18 @@ impl Pipeline {
                 }
                 (RenderMode::Realtime, false, LightSampling::Tree) => {
                     include_bytes!(concat!(env!("OUT_DIR"), "/realtime_transport_tree.spv"))
+                }
+                (RenderMode::Realtime, true, LightSampling::TreeSphere) => {
+                    include_bytes!(concat!(
+                        env!("OUT_DIR"),
+                        "/realtime_transport_rr_tree_sphere.spv"
+                    ))
+                }
+                (RenderMode::Realtime, false, LightSampling::TreeSphere) => {
+                    include_bytes!(concat!(
+                        env!("OUT_DIR"),
+                        "/realtime_transport_tree_sphere.spv"
+                    ))
                 }
             };
             for (i, features) in [

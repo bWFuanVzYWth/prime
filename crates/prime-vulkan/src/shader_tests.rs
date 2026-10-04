@@ -8,6 +8,154 @@ use reference::{cross, dot, inverse, normalized, sub, transform};
 const FOUNDATIONS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/foundations.spv"));
 const DISPLAY: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/display.spv"));
 const INTERSECTION: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/intersection.spv"));
+const SPHERE_TREE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/sphere_tree.spv"));
+
+#[test]
+#[ignore = "windowless execution of production sphere proposal, finite selectors and PDF replay"]
+fn gpu_sphere_tree_integer_support_forward_reverse_and_geometry_boundaries() {
+    use prime_scene::{
+        geometry::CompiledQuad,
+        settings::LightSampling,
+        surface::{Emission, SurfaceFace, SurfaceMesh},
+    };
+    let context = Context::new().unwrap();
+    let textures = std::collections::BTreeMap::from([(0, 0)]);
+    let mut pages = Vec::new();
+    for (key, count) in [(1u64, 3), (2, 2), (3, 1)] {
+        let faces = (0..count)
+            .map(|id| {
+                let x = id as f32 * 5.0;
+                let mut positions = [
+                    [x - 1., -1., 0.],
+                    [x + 1., -1., 0.],
+                    [x + 1., 1., 0.],
+                    [x - 1., 1., 0.],
+                ];
+                if key == 2 && id == 0 {
+                    positions[3][2] = 0.7;
+                }
+                if key == 2 && id == 1 {
+                    positions[3] = positions[2];
+                }
+                let quad = CompiledQuad {
+                    positions,
+                    uvs: [[0.; 2]; 4],
+                    color: [1.; 4],
+                    texture_id: 0,
+                    flags: 0,
+                };
+                let mut face = SurfaceFace::from_quad(quad);
+                face.emission = Emission {
+                    radiance: [if id == 0 {
+                        1e-20
+                    } else if id == 2 {
+                        1e20
+                    } else {
+                        1.0
+                    }; 3],
+                    two_sided: key != 1,
+                    textured: false,
+                };
+                face
+            })
+            .collect();
+        let mesh = SurfaceMesh::from_resolved(key, faces).unwrap();
+        let page = crate::surface::upload_lights(
+            &context,
+            &mesh,
+            &textures,
+            key,
+            LightSampling::TreeSphere,
+        )
+        .unwrap()
+        .unwrap();
+        pages.push(page);
+    }
+    let sources: std::collections::BTreeMap<_, _> = pages
+        .iter()
+        .map(|p| (p.key, ([p.key as f64 * 17.0, 0.0, p.key as f64 * 0.125], p)))
+        .collect();
+    let mut uploads = crate::arena::Arena::new(&context, true);
+    let mut tree = crate::light_tree::LightTree::new(&context);
+    tree.update(
+        &context,
+        [0.; 3],
+        &sources,
+        &mut uploads,
+        LightSampling::TreeSphere,
+    )
+    .unwrap();
+    let address = tree.header_address();
+    let receivers = [
+        ([17., 0., 0.125], [0., 0., 1.]), // face center, d2 == 0 and zero projected receiver bound
+        ([17.3, 0.2, 0.125], [0., 0., -1.]), // coplanar interior
+        ([18., 1., 0.125], [0., 0., 1.]), // coplanar edge/corner
+        ([23., 2., 8.], [0., 0., -1.]),
+        ([23., 2., -8.], [0., 0., 1.]),
+        ([23., 2., 8.], [0.; 3]), // optical full-hemisphere proposal
+    ];
+    let lights: Vec<_> = pages
+        .iter()
+        .flat_map(|p| {
+            (0..p.lights.len()).map(|i| (p.key, i as u32, tree.first_emitter(p.key) + i as u32))
+        })
+        .collect();
+    let mut input = Vec::new();
+    for &(point, normal) in &receivers {
+        for endpoint in 0..2 {
+            for &(_, _, light) in &lights {
+                input.extend([address as u32, (address >> 32) as u32, light, endpoint]);
+                input.extend([point[0], point[1], point[2], 0.].map(f32::to_bits));
+                input.extend([normal[0], normal[1], normal[2], 0.].map(f32::to_bits));
+            }
+        }
+    }
+    let output = run(
+        &context,
+        SPHERE_TREE,
+        &input,
+        input.len() / 12 * 8,
+        [0, (input.len() / 12) as u32],
+        None,
+    );
+    for (case, rows) in output.chunks_exact(lights.len() * 2 * 8).enumerate() {
+        for (endpoint, rows) in rows.chunks_exact(lights.len() * 8).enumerate() {
+            let mut total = 0.0f64;
+            let mut worlds = std::collections::BTreeMap::new();
+            let mut locals = std::collections::BTreeMap::<u64, u32>::new();
+            for (&(key, emitter, light), row) in lights.iter().zip(rows.chunks_exact(8)) {
+                assert_eq!(
+                    row[0], light,
+                    "case {case}, endpoint {endpoint}: missing leaf witness"
+                );
+                assert_eq!(row[3], emitter);
+                assert_eq!(row[1], row[2], "case {case}: forward/reverse PDF bits");
+                let pdf = f32::from_bits(row[1]);
+                assert!(pdf.is_finite() && pdf > 0.0);
+                let [world_first, world_count, local_first, local_count]: [u32; 4] =
+                    row[4..].try_into().unwrap();
+                assert!(world_count > 0 && local_count > 0);
+                assert!(
+                    world_first + world_count <= 1 << 24 && local_first + local_count <= 1 << 24
+                );
+                let expected = (world_count as f32 / (1 << 24) as f32)
+                    * (local_count as f32 / (1 << 24) as f32);
+                assert_eq!(
+                    pdf.to_bits(),
+                    expected.to_bits(),
+                    "PDF is the actual integer PMF"
+                );
+                total += f64::from(pdf);
+                let previous = worlds.insert(key, world_count);
+                assert!(previous.is_none_or(|previous| previous == world_count));
+                *locals.entry(key).or_default() += local_count;
+            }
+            assert_eq!(worlds.values().copied().sum::<u32>(), 1 << 24);
+            assert!(locals.values().all(|&n| n == 1 << 24));
+            assert!((total - 1.0).abs() < 2e-7, "actual PMF sum {total}");
+        }
+    }
+}
 
 // Test-only submission/readback. Production shader libraries declare no bindings.
 pub(super) fn run(

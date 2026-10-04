@@ -91,6 +91,8 @@ pub(crate) struct Input<'a> {
     pub root: LightNode,
     pub lights: &'a [Light],
     pub pdfs: &'a [f32],
+    /// Sphere sampler stores a replay trail instead of a fixed local PMF.
+    pub paths: Option<&'a [u32]>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -107,6 +109,8 @@ pub(crate) struct Page {
 pub(crate) struct Reference {
     pub page: u32,
     pub emitter: u32,
+    /// Variant-specific 32-bit word: Tree PMF or TreeSphere replay path.
+    /// Sphere paths must only round-trip through from_bits/to_bits, never float arithmetic.
     pub pdf: f32,
     pub inv_area: f32,
 }
@@ -199,13 +203,23 @@ impl Tree {
                 continue;
             }
             if input.lights.is_empty()
-                || input.lights.len() != input.pdfs.len()
+                || input
+                    .paths
+                    .map_or(input.lights.len() != input.pdfs.len(), |paths| {
+                        paths.len() != input.lights.len()
+                    })
                 || input.origin.iter().any(|x| !x.is_finite())
-                || input.lights.iter().zip(input.pdfs).any(|(light, pdf)| {
-                    !light.inv_area.is_finite()
-                        || light.inv_area <= 0.0
-                        || !pdf.is_finite()
-                        || *pdf <= 0.0
+                || input.lights.iter().enumerate().any(|(index, light)| {
+                    let valid_selection = input.paths.map_or_else(
+                        || {
+                            input
+                                .pdfs
+                                .get(index)
+                                .is_some_and(|pdf| pdf.is_finite() && *pdf > 0.0)
+                        },
+                        |paths| paths[index] >> 27 <= 27,
+                    );
+                    !light.inv_area.is_finite() || light.inv_area <= 0.0 || !valid_selection
                 })
             {
                 return Err("Invalid light tree page input".into());
@@ -270,7 +284,10 @@ impl Tree {
         self.refs.resize(slots.end as usize, Reference::default());
         let mut ranges = Vec::with_capacity(added.len());
         for (slot, first, input) in added {
-            for (index, (light, &pdf)) in input.lights.iter().zip(input.pdfs).enumerate() {
+            for (index, light) in input.lights.iter().enumerate() {
+                let pdf = input
+                    .paths
+                    .map_or_else(|| input.pdfs[index], |paths| f32::from_bits(paths[index]));
                 self.refs[first as usize + index] = Reference {
                     page: slot,
                     emitter: index as u32,
@@ -385,6 +402,7 @@ mod tests {
             root: source[0],
             lights: &lights,
             pdfs: &pdfs,
+            paths: None,
         };
         let b = Input {
             key: 2,
@@ -442,6 +460,7 @@ mod tests {
             root: source[0],
             lights: &lights,
             pdfs: &[1.0],
+            paths: None,
         };
         let mut tree = Tree::default();
         tree.update(&[input], [0.0; 3]).unwrap();
@@ -598,6 +617,7 @@ mod tests {
                                             root: fixture.root,
                                             lights: &fixture.lights,
                                             pdfs: &fixture.pdfs,
+                                            paths: None,
                                         }
                                     })
                                     .collect();

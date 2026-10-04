@@ -29,13 +29,14 @@ pub enum ReconstructionQuality {
     UltraPerformance = 4,
 }
 
-/// Renderer creation choice; each method has its own CPU data and shader variant.
+/// Frame-boundary renderer choice; each method has its own CPU data and shader variant.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[repr(u32)]
 pub enum LightSampling {
     #[default]
     Grid = 0,
     Tree = 1,
+    TreeSphere = 2,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -163,6 +164,7 @@ impl RenderSettings {
             light_sampling: match word(92) {
                 0 => LightSampling::Grid,
                 1 => LightSampling::Tree,
+                2 => LightSampling::TreeSphere,
                 _ => return Err("Unknown light sampling method".into()),
             },
         };
@@ -231,6 +233,7 @@ impl RenderSettings {
             light_sampling: match s.light_sampling {
                 0 => LightSampling::Grid,
                 1 => LightSampling::Tree,
+                2 => LightSampling::TreeSphere,
                 _ => return Err("Unknown light sampling method".into()),
             },
         };
@@ -341,7 +344,7 @@ mod tests {
             (80, 2),
             (84, 10001),
             (88, 2),
-            (92, 2),
+            (92, 3),
             (92, u32::MAX),
         ] {
             let mut invalid = bytes.clone();
@@ -373,7 +376,11 @@ mod tests {
     fn light_sampling_defaults_and_exact_wire_and_abi_values() {
         let defaults = RenderSettings::default();
         assert_eq!(defaults.light_sampling, LightSampling::Grid);
-        for (word, method) in [(0_u32, LightSampling::Grid), (1, LightSampling::Tree)] {
+        for (word, method) in [
+            (0_u32, LightSampling::Grid),
+            (1, LightSampling::Tree),
+            (2, LightSampling::TreeSphere),
+        ] {
             let mut bytes = golden();
             bytes[92..96].copy_from_slice(&word.to_le_bytes());
             let parsed = RenderSettings::parse(&bytes).unwrap();
@@ -423,14 +430,24 @@ mod tests {
             frame_generation: defaults.frame_generation as u32,
             light_sampling: 1,
         };
-        assert_eq!(
-            RenderSettings::from_abi(&abi).unwrap(),
-            RenderSettings {
-                light_sampling: LightSampling::Tree,
-                ..defaults
-            }
-        );
-        for invalid in [2, u32::MAX] {
+        for method in [
+            LightSampling::Grid,
+            LightSampling::Tree,
+            LightSampling::TreeSphere,
+        ] {
+            assert_eq!(
+                RenderSettings::from_abi(&prime_abi::PrimeSettings {
+                    light_sampling: method as u32,
+                    ..abi
+                })
+                .unwrap(),
+                RenderSettings {
+                    light_sampling: method,
+                    ..defaults
+                }
+            );
+        }
+        for invalid in [3, u32::MAX] {
             assert!(
                 RenderSettings::from_abi(&prime_abi::PrimeSettings {
                     light_sampling: invalid,

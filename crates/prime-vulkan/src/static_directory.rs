@@ -112,6 +112,31 @@ impl StaticDirectory {
         self.dirty_instances.push(entry.instance as usize);
         Ok(())
     }
+    /// Replace sampler fields on existing material rows without changing their TLAS instances.
+    /// Each value is (first emitter, emitter buffer address, emitter format).
+    pub fn light_fields(&mut self, key: Cell, values: &[(u32, u64, u32)]) -> Result<(), String> {
+        let entry = self
+            .entries
+            .get(&key)
+            .ok_or("Unpublished static light cell")?;
+        if values.len() != entry.count as usize {
+            return Err("Static light row count mismatch".into());
+        }
+        for (i, &(first, address, format)) in values.iter().enumerate() {
+            let at = entry.first as usize + i;
+            let row = &mut self.bytes[at];
+            let first = first.to_le_bytes();
+            let address = address.to_le_bytes();
+            let format = format.to_le_bytes();
+            if row[16..20] != first || row[24..32] != address || row[44..48] != format {
+                row[16..20].copy_from_slice(&first);
+                row[24..32].copy_from_slice(&address);
+                row[44..48].copy_from_slice(&format);
+                self.dirty_records.push(at);
+            }
+        }
+        Ok(())
+    }
     pub fn light_header(&mut self, count: u32, address: u64) {
         let row = &mut self.bytes[0];
         if row[12..16] != count.to_le_bytes() || row[32..40] != address.to_le_bytes() {
@@ -182,6 +207,74 @@ mod tests {
                 .low_24(),
             2
         );
+    }
+    #[test]
+    fn sampler_changes_only_patch_light_rows_and_preserve_instances_and_slots() {
+        let mut directory = StaticDirectory::default();
+        let mut instance = empty_instance();
+        instance.transform.matrix = [1., 0., 0., 3., 0., 1., 0., 4., 0., 0., 1., 5.];
+        instance.instance_shader_binding_table_record_offset_and_flags = vk::Packed24_8::new(7, 3);
+        instance.acceleration_structure_reference = vk::AccelerationStructureReferenceKHR {
+            device_handle: 0x1234,
+        };
+        directory
+            .publish(cell(0.), &[[0x5a; BYTES], [0x6b; BYTES]], instance)
+            .unwrap();
+        directory
+            .publish(cell(64.), &[[8; BYTES]], empty_instance())
+            .unwrap();
+        directory.finish_upload();
+        let slot = directory.slot(cell(0.));
+        let ends = (directory.records.end, directory.slots.end);
+        let before = directory.bytes.clone();
+        let identity = |value: &vk::AccelerationStructureInstanceKHR| {
+            (
+                value.transform.matrix.map(f32::to_bits),
+                value.instance_custom_index_and_mask.low_24(),
+                value.instance_custom_index_and_mask.high_8(),
+                value
+                    .instance_shader_binding_table_record_offset_and_flags
+                    .low_24(),
+                value
+                    .instance_shader_binding_table_record_offset_and_flags
+                    .high_8(),
+                unsafe { value.acceleration_structure_reference.device_handle },
+            )
+        };
+        let instances: Vec<_> = directory.instances.iter().map(identity).collect();
+        let values = [(17, 0xabcdef, 2), (0, 0, 1)];
+        directory.light_fields(cell(0.), &values).unwrap();
+        let mut expected = before;
+        for (i, &(first, address, format)) in values.iter().enumerate() {
+            expected[1 + i][16..20].copy_from_slice(&first.to_le_bytes());
+            expected[1 + i][24..32].copy_from_slice(&address.to_le_bytes());
+            expected[1 + i][44..48].copy_from_slice(&format.to_le_bytes());
+        }
+        assert_eq!(directory.bytes, expected);
+        assert_eq!(directory.dirty_records, [1, 2]);
+        assert!(directory.dirty_instances.is_empty());
+        assert_eq!(directory.slot(cell(0.)), slot);
+        assert_eq!((directory.records.end, directory.slots.end), ends);
+        assert_eq!(
+            directory.instances.iter().map(identity).collect::<Vec<_>>(),
+            instances
+        );
+
+        directory.finish_upload();
+        directory.light_fields(cell(0.), &values).unwrap();
+        assert!(directory.dirty_records.is_empty());
+        assert!(directory.dirty_instances.is_empty());
+        assert!(directory.light_fields(cell(0.), &values[..1]).is_err());
+        assert!(directory.light_fields(cell(128.), &values).is_err());
+        assert_eq!(directory.bytes, expected);
+        assert_eq!(directory.slot(cell(0.)), slot);
+        assert_eq!((directory.records.end, directory.slots.end), ends);
+        assert_eq!(
+            directory.instances.iter().map(identity).collect::<Vec<_>>(),
+            instances
+        );
+        assert!(directory.dirty_records.is_empty());
+        assert!(directory.dirty_instances.is_empty());
     }
     #[test]
     fn resize_and_late_allocation_failure_preserve_existing_directory() {

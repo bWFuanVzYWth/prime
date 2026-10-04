@@ -42,7 +42,7 @@ K2 的交接点是 landing 的 coverage、纹理/材质解析、该段 Beer、co
 | K1 → K2 | canonical landing、入射方向/cone、全局 beta/eta/bounce、当前介质与必要光学端点 | 该 landing 的查询、原始 hit、纹理、Beer、cone 推进与发光；prefix/主相机/guide 进入独立冷输出 |
 | K2 或 Offline 的局部阴影 | vertex、SurfacePoint、view、物理端点/介质、路径/采样上下文及该灯的查询后输入 | 当前 hit 的原始几何/材质、UV/TBN/LOD、发光命中 PDF |
 | 局部评价到太阳阴影 | 同一 vertex、几何、物理端点及路径状态；太阳方向/radiance | 局部灯样本、visibility、response、PDF/MIS 和短时闭包；贡献已累加 |
-| 续接到下一次查询 | 新 ray/medium/beta/eta、previous position/PDF、cone、tail radiance 与随机身份 | 当前 vertex、采样与 roulette 的临时值 |
+| 续接到下一次查询 | 新 ray/medium/beta/eta、previous position/PDF、cone、tail radiance 与随机身份；TreeSphere另保留前驱proposal法线 | 当前 vertex、采样与 roulette 的临时值 |
 | 实时 post | FP32 prefix + tail、原相机空气段、同一采样 UV、所选显示输入；RR另消费主depth、内部反射距离、当前/前相机与guide状态，零距离非天空像素复用K1主motion，以补全反射motion | TLAS、材质、BSDF、medium、eta 与 MIS 均无消费者 |
 
 K2 与 Offline 在阴影查询之后才建立短时 ONB 和 Full 支持子域状态，立即消费完整 response/PDF/MIS；下一跳同样就地准备。缓存两个 ONB 切向会增加六个浮点分量，缓存 closure 或 pending contribution 还会增加其他状态。可以调整重算、缓存与重载，但须比较实际保存、占用率及带宽成本，不能因准备重复就把全部状态跨查询保留。
@@ -95,6 +95,16 @@ CPU 证明必须说明生产者、覆盖域、未知情况和失效路径。当�
 静态灯采样和静态最近交点共用 translation-only 安全重构，使用各自实际页的 origin 与原物理三角形，保留 RTX 误差界；不为静态 emitter 构造通用正反仿射矩阵。局部灯选择的全局 index 在查询目录后结束，只将有消费者的样本值返回；接收侧 cosine 在局部评价内消费，不作为无用 output 传回 PT。天空/发光命中与其它消费者共用同一个功率启发式数学入口。源码收窄与数学复用本身不声明驱动寄存器或帧时收益。
 
 同 hit 的发光当前复用已解析材质和已过滤 specular A；证明包含同一选中记录、动画帧、UV/LOD 与资源代次，并保留 front/two-sided gate、EOTF 和 legacy fallback。局部灯 emitter 没有现成的相同样本时仍走自身解析；原物理边界的 IOR 也不能用选中着色记录代替。消除重复计算必须证明输入和消费语义一致。
+
+## 光源采样特化与切换成本
+
+Grid、功率Tree与TreeSphere均为独立编译产物，CPU在创建或帧边界切换时选择；稳态没有GPU方法分派。TreeSphere的32B节点评分和实际整数区间PDF重放见[shader契约](shaders.md#采样域)。它仅在K2/Offline续接之后增加三个浮点分量的`previousLightNormal`，跨后续最近交点查询保存，到发光命中MIS重放前驱proposal时消费；K1和其他采样变体没有该字段。这是新增外部活跃值，不能由节点大小或小样板选光耗时推断完整PT的寄存器、查询保存成本或帧率。
+
+为了在游戏内切换而保留已发布几何，`SurfaceMesh.lights`与`LightPage.source`共享`Arc<LightTree>`，灯页另以`Arc<Buffer>`共享不可变GPU发光记录。CPU原灯源在灯页存活期间保留；它包含发光面positions等80B逻辑记录及32B原功率树节点，不持有全部quads，也不复制同一灯源。对于N个灯、`2N−1`个节点，逻辑数据约`144N−32`B，另有Vec容量、Arc和管理开销；同一Arc由上游仍持有时不重复计费。原先可随临时SurfaceMesh销毁的灯数据现在延长驻留，不能称为零额外内存。所选方法的CPU摘要、路径和GPU表另计，切换时新旧资源还会短时共存。
+
+切换先由Java提交并等待旧宿主工作完成，native沿现有模式重建路径退休管线、RR和输出。下一active host record按已发布灯页的稳定key重建所选局部节点与世界表，复用emitter buffer，替换所有cluster和light_sources中的页引用，再更新目录灯字段及global header；灯表上传和目录拷贝的可见性仍由原队列屏障证明。sampler dirty使冻结Offline也执行这一次准备，完成前不dispatch。灯字段更新不修改目录实例，不因采样方式本身重建BLAS/TLAS、重新取得宿主源或重新编译全场景；正常待更新几何仍受原预算管理。Buffer及旧表按实际提交完成值回收，失败继续隔离session。
+
+上述取舍以延长CPU灯数据驻留换取简单、确定的切换路径，未增加持续缓存失效、后台重编译或跨帧采样学习。一次切换仍有等待、CPU建表、上传、pipeline和SDK重建暂停，须与稳态分开。TreeSphere目前是实测候选：完整PT新增PDF重放与前驱法线状态，整数支持修正也改变极小概率proposal；原小样板的质量、成本结果不能直接作为生产性能验收。正式比较固定原生1920×1080、场景、种子与预算，覆盖加载/更新、稳态及离群帧，按整帧收益和实现复杂度决定保留或撤回。
 
 ## PT 之外的状态与当前特化
 

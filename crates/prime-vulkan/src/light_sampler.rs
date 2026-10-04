@@ -1,4 +1,4 @@
-//! Initialization fixes one sampler owner. Dispatch only occurs during light publications.
+//! One sampler owner at a time. Dispatch only occurs during light publications.
 use crate::{
     arena::Arena, light_grid::LightGrid, light_tree::LightTree, resources::Context,
     surface::LightPage,
@@ -13,6 +13,7 @@ enum Tables {
 
 pub(crate) struct LightSampler {
     tables: Tables,
+    method: LightSampling,
     /// Read directly by steady-state scene specialization; no sampler dispatch.
     pub has_lights: bool,
 }
@@ -22,8 +23,11 @@ impl LightSampler {
         Self {
             tables: match method {
                 LightSampling::Grid => Tables::Grid(LightGrid::new(context)),
-                LightSampling::Tree => Tables::Tree(LightTree::new(context)),
+                LightSampling::Tree | LightSampling::TreeSphere => {
+                    Tables::Tree(LightTree::new(context))
+                }
             },
+            method,
             has_lights: false,
         }
     }
@@ -47,7 +51,7 @@ impl LightSampler {
             }
             Tables::Tree(tree) => {
                 tree.begin_frame(completed, serial);
-                tree.update(context, anchor, sources, uploads)?;
+                tree.update(context, anchor, sources, uploads, self.method)?;
                 self.has_lights = tree.has_lights();
             }
         }

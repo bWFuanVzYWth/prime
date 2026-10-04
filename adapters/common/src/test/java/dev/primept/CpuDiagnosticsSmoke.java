@@ -12,7 +12,7 @@ public final class CpuDiagnosticsSmoke {
             if (!bridge.cpuDiagnostics().contains("available=false"))
                 throw new AssertionError("Source submission cannot fabricate renderer timings");
             bridge.configure(dev.primept.settings.RenderSettings.defaults().withLightSampling(
-                                     dev.primept.settings.RenderSettings.LightSampling.TREE),
+                                     dev.primept.settings.RenderSettings.LightSampling.TREE_SPHERE),
                              false, dev.primept.settings.RenderSettings.View.OUTPUT);
             bridge.diagnosticsConfigure(3);
             bridge.diagnosticsFrame(91);
@@ -23,7 +23,7 @@ public final class CpuDiagnosticsSmoke {
                 !captured.contains("\"f\":91") || !captured.contains("reset"))
                 throw new AssertionError("Real native reset interval missing from capture: " +
                                          captured);
-            verifyLightSampling(captured, 1);
+            verifyLightSampling(captured, 2);
             bridge.diagnosticsConfigure(0);
             long stopped = bridge.diagnosticsClock();
             bridge.diagnosticsRead();
@@ -92,7 +92,7 @@ public final class CpuDiagnosticsSmoke {
                 throw new AssertionError("First native owner must inherit the current Java frame");
         }
         System.out.println(
-                "PRIME_CPU_DIAGNOSTICS_FFM_OK: ABI, Tree setting/metadata, real reset and transport spans/frame, final tail, UTF-8, retained clock and owner thread; no GPU");
+                "PRIME_CPU_DIAGNOSTICS_FFM_OK: ABI, bounds-sphere tree setting/metadata, real reset and transport spans/frame, final tail, UTF-8, retained clock and owner thread; no GPU");
     }
 
     private record Event(long id, long parent, long frame, int name, long start, long duration,

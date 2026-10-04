@@ -626,11 +626,7 @@ impl Renderer {
     /// Shared geometry survives; exclusive old pipelines/images retire before the new pipeline is created.
     pub fn configure(&mut self, settings: RenderSettings) -> Result<(), String> {
         settings.validate()?;
-        if settings.light_sampling != self.settings.light_sampling {
-            return Err(
-                "Light sampling is fixed at renderer creation; restart to change it".into(),
-            );
-        }
+        let sampler_changed = settings.light_sampling != self.settings.light_sampling;
         let reset_temporal = settings.mode != self.settings.mode
             || !settings.transport_matches(self.settings)
             || settings.ray_reconstruction != self.settings.ray_reconstruction
@@ -652,7 +648,8 @@ impl Renderer {
             }
             self.fg_prepared = false;
         }
-        if settings.mode != self.settings.mode
+        if sampler_changed
+            || settings.mode != self.settings.mode
             || settings.mode == RenderMode::Realtime
                 && settings.ray_reconstruction != self.settings.ray_reconstruction
             || settings.frame_generation != self.settings.frame_generation
@@ -662,6 +659,7 @@ impl Renderer {
             drop(self.reconstruction.take());
             drop(self.output.take());
             drop(self.pipeline.take());
+            self.fg_prepared = false;
             self.context.completed_serial()?; // Drain the retired images/buffers using completed host work.
             self.reconstruction_error = None;
             self.reconstruction = (settings.mode == RenderMode::Realtime
@@ -698,6 +696,9 @@ impl Renderer {
             }
         }
         if let Some(geometry) = &mut self.geometry {
+            if sampler_changed {
+                geometry.set_light_sampling(settings.light_sampling);
+            }
             geometry.set_omm(settings.opacity_micromap && self.context.opacity_micromap.is_some());
             if reset_temporal {
                 geometry.objects.reset_motion();

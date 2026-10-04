@@ -290,27 +290,33 @@ final class SettingsTest {
         var defaults = RenderSettings.defaults();
         assertEquals(RenderSettings.LightSampling.GRID, defaults.lightSampling());
         assertSame(defaults, defaults.withLightSampling(RenderSettings.LightSampling.GRID));
-        var tree = defaults.withLightSampling(RenderSettings.LightSampling.TREE);
-        assertNotEquals(defaults, tree);
-        assertEquals(tree, SettingsFile.decode(SettingsFile.encode(tree)).settings());
-        assertEquals(tree.hashCode(),
-                     SettingsFile.decode(SettingsFile.encode(tree)).settings().hashCode());
-        assertEquals(RenderSettings.LightSampling.GRID, defaults.lightSampling());
-        assertEquals(RenderSettings.LightSampling.TREE,
-                     tree.withPathTracing(false)
-                             .withOpacityMicromap(false)
-                             .withRayReconstruction(false)
-                             .withDlssQuality(RenderSettings.DlssQuality.QUALITY)
-                             .with(RenderSettings.Control.BOUNCES, 8)
-                             .lightSampling());
-        assertThrows(NullPointerException.class, () -> tree.withLightSampling(null));
+        assertEquals(0, RenderSettings.LightSampling.GRID.ordinal());
+        assertEquals(1, RenderSettings.LightSampling.TREE.ordinal());
+        assertEquals(2, RenderSettings.LightSampling.TREE_SPHERE.ordinal());
+        assertThrows(NullPointerException.class, () -> defaults.withLightSampling(null));
         var before = settingsBuffer();
         var after = settingsBuffer();
-        for (boolean offline : new boolean[] {false, true}) {
-            defaults.write(before, offline, RenderSettings.View.OUTPUT);
-            tree.write(after, offline, RenderSettings.View.OUTPUT);
-            assertEquals(1, PrimeSettings.light_sampling(view(after)));
-            assertOnlyFieldChanged(before, after, 96);
+        for (var method : new RenderSettings.LightSampling[] {
+                     RenderSettings.LightSampling.TREE, RenderSettings.LightSampling.TREE_SPHERE}) {
+            var changed = defaults.withLightSampling(method);
+            assertNotEquals(defaults, changed);
+            assertSame(changed, changed.withLightSampling(method));
+            assertEquals(changed, SettingsFile.decode(SettingsFile.encode(changed)).settings());
+            assertEquals(changed.hashCode(),
+                         SettingsFile.decode(SettingsFile.encode(changed)).settings().hashCode());
+            assertEquals(RenderSettings.LightSampling.GRID, defaults.lightSampling());
+            assertEquals(method, changed.withPathTracing(false)
+                                         .withOpacityMicromap(false)
+                                         .withRayReconstruction(false)
+                                         .withDlssQuality(RenderSettings.DlssQuality.QUALITY)
+                                         .with(RenderSettings.Control.BOUNCES, 8)
+                                         .lightSampling());
+            for (boolean offline : new boolean[] {false, true}) {
+                defaults.write(before, offline, RenderSettings.View.OUTPUT);
+                changed.write(after, offline, RenderSettings.View.OUTPUT);
+                assertEquals(method.ordinal(), PrimeSettings.light_sampling(view(after)));
+                assertOnlyFieldChanged(before, after, 96);
+            }
         }
     }
     @Test

@@ -216,6 +216,345 @@ fn gpu_resource_prepare_world_reset_and_quality_reuse() {
     renderer.shutdown().unwrap();
 }
 
+#[test]
+#[ignore = "windowless real host submissions; light sampler switching, retained geometry and frozen history"]
+fn gpu_light_sampling_switch_reuses_geometry_and_restarts_offline_history() {
+    use prime_scene::{
+        geometry::{CompiledQuad, MeshGeometry},
+        settings::LightSampling,
+        surface::{Emission, Provenance, SurfaceCompiler, SurfaceQuad, SurfaceRule},
+        workers::CpuWorkers,
+    };
+    let owner = Context::new().unwrap();
+    let timeline = unsafe {
+        let mut ty =
+            vk::SemaphoreTypeCreateInfo::default().semaphore_type(vk::SemaphoreType::TIMELINE);
+        owner
+            .device
+            .create_semaphore(&vk::SemaphoreCreateInfo::default().push_next(&mut ty), None)
+    }
+    .unwrap();
+    struct Timeline(Arc<Context>, vk::Semaphore);
+    impl Drop for Timeline {
+        fn drop(&mut self) {
+            if self.0.can_destroy() {
+                unsafe { self.0.device.destroy_semaphore(self.1, None) };
+            }
+        }
+    }
+    let _timeline = Timeline(owner.clone(), timeline);
+    let settings = RenderSettings {
+        mode: RenderMode::Realtime,
+        light_sampling: LightSampling::Grid,
+        ray_reconstruction: false,
+        view: DiagnosticView::LinearDepth,
+        depth_range: 4.0,
+        stars: 0.0,
+        auto_exposure_compensation: 0.0,
+        sun: 1.0 / 256.0,
+        sky: 1.0 / 256.0,
+        bounces: 1,
+        ..Default::default()
+    };
+    let mut renderer = unsafe {
+        Renderer::borrowed_with_settings_and_workers(
+            owner.instance_handle(),
+            owner.physical.as_raw(),
+            owner.device.handle().as_raw(),
+            owner.queue.as_raw(),
+            owner.queue_family,
+            timeline.as_raw(),
+            u32::from(owner.opacity_micromap.is_some()),
+            settings,
+            Arc::new(CpuWorkers::new(1).unwrap()),
+        )
+    }
+    .unwrap();
+    renderer.context.set_diagnostics(true);
+    let mut scene = plane();
+    for (index, origin) in [64.0, 128.0].into_iter().enumerate() {
+        // Explicit rich emitters are necessary: closed Triangle inputs declare no emission.
+        // Separate source cells exercise both the world and local light tables.
+        let x = 4.0 - origin as f32;
+        let y = index as f32 * 2.0;
+        let mesh = SurfaceCompiler::new()
+            .compile(
+                1,
+                &[SurfaceQuad {
+                    geometry: CompiledQuad {
+                        positions: [
+                            [x, y, 4.0],
+                            [x, y + 1.0, 4.0],
+                            [x + 1.0, y + 1.0, 4.0],
+                            [x + 1.0, y, 4.0],
+                        ],
+                        uvs: [[0.5; 2]; 4],
+                        color: [1.0; 4],
+                        texture_id: 7,
+                        flags: 0,
+                    },
+                    provenance: Provenance {
+                        domain: 1,
+                        source: index as u64,
+                    },
+                    emission: Emission {
+                        radiance: [1000.0; 3],
+                        two_sided: false,
+                        textured: false,
+                    },
+                    rule: SurfaceRule::Preserve,
+                }],
+            )
+            .unwrap();
+        assert_eq!(mesh.lights.emitters.len(), 1);
+        let origin = [origin, 0.0, 0.0];
+        scene
+            .ready_terrain
+            .insert(prime_scene::spatial::Cell::containing(origin).unwrap());
+        scene.meshes.insert(
+            (index as u64 + 10, 0),
+            SceneMesh {
+                revision: 1,
+                flags: 0,
+                origin,
+                triangles: MeshGeometry::Surfaces(Arc::new(mesh)),
+            },
+        );
+    }
+    let image = Image::new(&owner, 19, 13).unwrap();
+    let readback = Buffer::new_readback(&owner, 19 * 13 * 4).unwrap();
+    let camera = camera();
+    let mut serial = 0_u64;
+    let mut frame = |renderer: &mut Renderer| {
+        serial += 1;
+        let mut result = Ok(());
+        owner
+            .submit_named("light_sampler_switch_frame", |command| {
+                result = (|| -> Result<(), String> {
+                    unsafe {
+                        renderer.prepare_host_resources(
+                            (&scene).into(),
+                            command.as_raw(),
+                            serial,
+                        )?;
+                        renderer.record_host(
+                            &scene,
+                            &camera,
+                            19,
+                            13,
+                            serial as u32,
+                            command.as_raw(),
+                            image.image.as_raw(),
+                            image.view.as_raw(),
+                            serial,
+                        )?;
+                        owner.device.cmd_pipeline_barrier(
+                            command,
+                            vk::PipelineStageFlags::COMPUTE_SHADER,
+                            vk::PipelineStageFlags::TRANSFER,
+                            vk::DependencyFlags::empty(),
+                            &[vk::MemoryBarrier::default()
+                                .src_access_mask(vk::AccessFlags::SHADER_WRITE)
+                                .dst_access_mask(vk::AccessFlags::TRANSFER_READ)],
+                            &[],
+                            &[],
+                        );
+                        owner.device.cmd_copy_image_to_buffer(
+                            command,
+                            image.image,
+                            vk::ImageLayout::GENERAL,
+                            readback.buffer,
+                            &[vk::BufferImageCopy::default()
+                                .image_subresource(
+                                    vk::ImageSubresourceLayers::default()
+                                        .aspect_mask(vk::ImageAspectFlags::COLOR)
+                                        .layer_count(1),
+                                )
+                                .image_extent(vk::Extent3D {
+                                    width: 19,
+                                    height: 13,
+                                    depth: 1,
+                                })],
+                        );
+                        owner.device.cmd_pipeline_barrier(
+                            command,
+                            vk::PipelineStageFlags::TRANSFER,
+                            vk::PipelineStageFlags::HOST,
+                            vk::DependencyFlags::empty(),
+                            &[vk::MemoryBarrier::default()
+                                .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+                                .dst_access_mask(vk::AccessFlags::HOST_READ)],
+                            &[],
+                            &[],
+                        );
+                    }
+                    Ok(())
+                })();
+            })
+            .unwrap();
+        result.unwrap();
+        // submit_named waited for this exact GPU fence; only now publish host completion.
+        unsafe {
+            owner.device.signal_semaphore(
+                &vk::SemaphoreSignalInfo::default()
+                    .semaphore(timeline)
+                    .value(serial),
+            )
+        }
+        .unwrap();
+        renderer.submission_accepted(serial).unwrap();
+        readback.read(19 * 13 * 4).unwrap()
+    };
+    for warmup in 0..8 {
+        frame(&mut renderer);
+        if warmup >= 2
+            && !renderer
+                .geometry
+                .as_ref()
+                .unwrap()
+                .needs_update((&scene).into())
+        {
+            break;
+        }
+    }
+    assert!(
+        !renderer
+            .geometry
+            .as_ref()
+            .unwrap()
+            .needs_update((&scene).into()),
+        "Compaction did not settle"
+    );
+    let expected = frame(&mut renderer);
+    assert!(
+        expected
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|rgba| *rgba == [128, 128, 128, 255])
+    );
+    let geometry = renderer.geometry.as_ref().unwrap();
+    let top = geometry.top.handle();
+    let retained = geometry.light_sampling_snapshot();
+    assert_eq!(retained.pages.len(), 2);
+    assert!(retained.pages.iter().all(|page| page.2.emitters.len() == 1));
+    let assert_retained = |renderer: &Renderer, method| {
+        let geometry = renderer.geometry.as_ref().unwrap();
+        assert_eq!(geometry.top.handle(), top, "Sampler switch rebuilt TLAS");
+        let actual = geometry.light_sampling_snapshot();
+        assert_eq!(actual.blas, retained.blas, "Sampler switch rebuilt BLAS");
+        assert_eq!(actual.method, method);
+        assert!(!actual.dirty);
+        assert!(actual.has_lights);
+        assert_eq!(actual.pages.len(), retained.pages.len());
+        for (actual, previous) in actual.pages.iter().zip(&retained.pages) {
+            assert_eq!(actual.0, previous.0);
+            assert!(
+                Arc::ptr_eq(&actual.1, &previous.1),
+                "Sampler switch reuploaded emitter records"
+            );
+            assert!(
+                Arc::ptr_eq(&actual.2, &previous.2),
+                "Sampler switch recompiled source lights"
+            );
+            assert_eq!(actual.3, method);
+        }
+    };
+    for method in [
+        LightSampling::Grid,
+        LightSampling::TreeSphere,
+        LightSampling::Tree,
+        LightSampling::Grid,
+    ] {
+        let selected = RenderSettings {
+            light_sampling: method,
+            ..settings
+        };
+        renderer.configure(selected).unwrap();
+        assert_eq!(frame(&mut renderer), expected);
+        assert_retained(&renderer, method);
+        let uploaded = renderer.context.cpu_upload_bytes();
+        let pipeline = renderer.pipeline.as_ref().unwrap().pipelines;
+        renderer.configure(selected).unwrap();
+        assert_eq!(frame(&mut renderer), expected);
+        assert_eq!(
+            renderer.context.cpu_upload_bytes(),
+            uploaded,
+            "Stable sampler reuploaded data"
+        );
+        assert_eq!(renderer.pipeline.as_ref().unwrap().pipelines, pipeline);
+        renderer
+            .configure(RenderSettings {
+                view: DiagnosticView::NoisyColor,
+                ..selected
+            })
+            .unwrap();
+        assert!(
+            frame(&mut renderer)
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .any(|rgba| rgba[..3] != [0; 3]),
+            "Emissive fixture rendered black"
+        );
+        assert_retained(&renderer, method);
+        renderer.configure(selected).unwrap();
+    }
+    let offline = RenderSettings {
+        mode: RenderMode::Offline,
+        // Offline always accumulates radiance; its diagnostic controls do not produce depth.
+        view: DiagnosticView::NoisyColor,
+        ..settings
+    };
+    renderer.configure(offline).unwrap();
+    renderer.set_scene_frozen(true);
+    frame(&mut renderer);
+    frame(&mut renderer);
+    assert_eq!(renderer.samples, 2);
+    for method in [
+        LightSampling::TreeSphere,
+        LightSampling::Tree,
+        LightSampling::Grid,
+    ] {
+        let selected = RenderSettings {
+            light_sampling: method,
+            ..offline
+        };
+        renderer.configure(selected).unwrap();
+        assert_eq!(
+            renderer.samples, 0,
+            "Sampler switch retained old accumulation"
+        );
+        assert_eq!(renderer.camera, Some(camera));
+        assert!(renderer.scene_frozen);
+        assert!(
+            frame(&mut renderer)
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .any(|rgba| rgba[..3] != [0; 3]),
+            "Frozen emissive fixture rendered black"
+        );
+        assert_eq!(renderer.samples, 1);
+        assert_retained(&renderer, method);
+        let uploaded = renderer.context.cpu_upload_bytes();
+        assert!(
+            frame(&mut renderer)
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .any(|rgba| rgba[..3] != [0; 3])
+        );
+        assert_eq!(renderer.samples, 2);
+        assert_eq!(
+            renderer.context.cpu_upload_bytes(),
+            uploaded,
+            "Frozen stable sampler reuploaded data"
+        );
+    }
+    renderer.shutdown().unwrap();
+}
+
 pub(crate) fn camera() -> Camera {
     Camera {
         position: [0.0, 0.0, 2.0],

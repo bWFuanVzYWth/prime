@@ -26,7 +26,13 @@ public void primeTransportDirect(TraceScene resources, AtmLighting environment,
     bool hasNormal = primePbrVertexHasNormal(material);
     if (lightFeatures != 0 && hasLocalLights(resources)) {
         uint lightDomain = 512 + 4 * bounce;
+#if defined(PRIME_LIGHT_TREE_SPHERE)
+        float3 proposalNormal = optical ? float3(0) : material.normal;
+        LightSample light =
+                sampleLocalLight(resources, sampler, bounce, surface.position, proposalNormal);
+#else
         LightSample light = sampleLocalLight(resources, sampler, bounce, surface.position);
+#endif
         float3 lightDirection =
                 light.valid ? normalize(light.surface.position - surface.position) : surface.normal;
         float4 lightMedium =

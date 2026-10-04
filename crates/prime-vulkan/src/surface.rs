@@ -12,7 +12,9 @@ pub(crate) const PAGE_BYTES: usize = 64;
 
 pub(crate) struct LightPage {
     pub key: u64,
-    pub emitters: Buffer,
+    pub emitters: Arc<Buffer>,
+    pub source: Arc<prime_scene::surface::LightTree>,
+    pub method: prime_scene::settings::LightSampling,
     pub lights: Vec<Light>,
     pub tree: Option<TreePage>,
     pub format: u32,
@@ -22,6 +24,8 @@ pub(crate) struct TreePage {
     pub nodes: Buffer,
     pub root: prime_scene::surface::LightNode,
     pub pdfs: Vec<f32>,
+    pub sphere_root: Option<crate::light_sphere_cpu::Root>,
+    pub paths: Vec<u32>,
 }
 
 #[cfg(feature = "light-sampling-bench")]
@@ -50,7 +54,7 @@ pub(crate) fn upload_lights(
     mesh: &SurfaceMesh,
     textures: &BTreeMap<u32, u32>,
     key: u64,
-    tree: bool,
+    method: prime_scene::settings::LightSampling,
 ) -> Result<Option<LightPage>, String> {
     if mesh.lights.emitters.is_empty() {
         return Ok(None);
@@ -82,14 +86,53 @@ pub(crate) fn upload_lights(
     encode_trace.succeed();
     drop(encode_trace);
     let usage = vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS;
-    let emitters = Buffer::upload_device(context, &bytes, usage)?;
+    let emitters = Arc::new(Buffer::upload_device(context, &bytes, usage)?);
+    let source = Arc::clone(&mesh.lights);
+    let (lights, tree) = sampler(context, &source, method)?;
+    page_trace.succeed();
+    Ok(Some(LightPage {
+        key,
+        emitters,
+        source,
+        method,
+        lights,
+        tree,
+        format: format as u32,
+    }))
+}
+
+impl LightPage {
+    pub(crate) fn rebuild_sampler(
+        &self,
+        context: &Arc<Context>,
+        method: prime_scene::settings::LightSampling,
+    ) -> Result<Self, String> {
+        let (lights, tree) = sampler(context, &self.source, method)?;
+        Ok(Self {
+            key: self.key,
+            emitters: Arc::clone(&self.emitters),
+            source: Arc::clone(&self.source),
+            method,
+            lights,
+            tree,
+            format: self.format,
+        })
+    }
+}
+
+fn sampler(
+    context: &Arc<Context>,
+    source: &prime_scene::surface::LightTree,
+    method: prime_scene::settings::LightSampling,
+) -> Result<(Vec<Light>, Option<TreePage>), String> {
+    use prime_scene::settings::LightSampling;
     let lights = {
         let _summary_trace = prime_diagnostics::scope("light.summary");
-        mesh.lights
+        source
             .emitters
             .iter()
             .map(|emitter| {
-                if tree {
+                if method != LightSampling::Grid {
                     Light {
                         power: emitter.power,
                         inv_area: 1.0 / emitter.area,
@@ -101,32 +144,51 @@ pub(crate) fn upload_lights(
             })
             .collect()
     };
-    let tree = if tree {
+    let tree = if method == LightSampling::TreeSphere {
+        let mut trace = prime_diagnostics::scope("ls.local");
+        trace.fail();
+        let tree = crate::light_sphere_cpu::Tree::local(&source.emitters)?;
+        let bytes = crate::light_sphere_cpu::node_bytes(&tree.nodes);
+        trace.count("nodes", tree.nodes.len() as u64);
+        trace.count("bytes", bytes.len() as u64);
+        let page = TreePage {
+            nodes: Buffer::upload_device(
+                context,
+                &bytes,
+                vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+            )?,
+            root: source.nodes[0],
+            pdfs: Vec::new(),
+            sphere_root: Some(tree.root()),
+            paths: tree.paths,
+        };
+        trace.succeed();
+        Some(page)
+    } else if method == LightSampling::Tree {
         let mut trace = prime_diagnostics::scope("lt.local");
         trace.fail();
-        let nodes = crate::light_tree_cpu::quantize(&mesh.lights.nodes)?;
-        let pdfs = crate::light_tree_cpu::leaf_pdfs(&nodes, mesh.lights.emitters.len())?;
+        let nodes = crate::light_tree_cpu::quantize(&source.nodes)?;
+        let pdfs = crate::light_tree_cpu::leaf_pdfs(&nodes, source.emitters.len())?;
         let bytes = crate::light_tree::node_bytes(&nodes);
         trace.count("nodes", nodes.len() as u64);
         trace.count("bytes", bytes.len() as u64);
         let tree = TreePage {
-            nodes: Buffer::upload_device(context, &bytes, usage)?,
-            root: mesh.lights.nodes[0],
+            nodes: Buffer::upload_device(
+                context,
+                &bytes,
+                vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+            )?,
+            root: source.nodes[0],
             pdfs,
+            sphere_root: None,
+            paths: Vec::new(),
         };
         trace.succeed();
         Some(tree)
     } else {
         None
     };
-    page_trace.succeed();
-    Ok(Some(LightPage {
-        key,
-        emitters,
-        lights,
-        tree,
-        format: format as u32,
-    }))
+    Ok((lights, tree))
 }
 
 fn summary(emitter: &prime_scene::surface::Emitter) -> Light {

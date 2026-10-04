@@ -112,9 +112,9 @@ cargo test -p prime_engine --no-default-features --lib --locked
 
 客户端命令 `/primept renderer vanilla` 与 `/primept renderer path_trace` 只请求切换，实际资源移交在下一外层帧边界执行。验证时覆盖 Prime→原版→Prime、世界退出/重进、标题界面资源重载及退休失败；等待资源加载完成再采样，不把切换暂停计入稳态。首个 Prime 后端使用宿主事件驱动的源路由，加载完成的判据包括待路由地形事件清空，不能仅等待首帧输出。新增后端通过惰性工厂注册，并遵守公共 `RendererSlot` 的完成/失败契约。
 
-光源采样方式在光照组选择，保存后重启客户端，或完整关闭再创建 PT renderer。默认 `GRID`，可选 `TREE`；现有 renderer 拒绝变更采样方式，RR/Offline 切换仍沿用该方式。独立 shader 产物只在 Pipeline 初始化时选择，不增加路径循环中的模式分支，也不同时构建两套采样资源。
+光源采样方式在光照组选择，默认 `GRID`，另可选 `TREE` 功率树和 `TREE_SPHERE` 包围盒中心球界方向树。游戏内修改在下一外层帧边界生效，无需重启；关闭设置页保存选择。切换先完成旧宿主提交，重建所选独立shader管线和灯表，保留已发布几何/BLAS与共享GPU发光记录。RR历史与离线累积会重置，冻结相机与源保持；切换可能有一次暂停，不计入稳态性能。稳态没有采样方式的GPU运行时分支；为切换保留的CPU灯源有实际驻留成本，见[PT设计](docs/pt-state-design.md#光源采样特化与切换成本)。
 
-对比时固定同一世界副本、相机/移动路线、种子、预算、原生1920×1080、RR/OMM与硬件；每种方式各录制加载/更新及停止更新后的稳态窗口，保留离群帧。JSON `cap.start`/`cfg` 的 `ls=0/1` 分别表示实际 Grid/Tree，不能用 UI 中尚待重启的请求值代替。比较 `lg.*`/`lt.*`、总 static/提取与 GPU K2/整帧时间；单看建表或采样微基准不足以决定默认方式。
+对比时固定同一世界副本、相机/移动路线、种子、预算、原生1920×1080、RR/OMM与硬件；每种方式各录制加载/更新及停止更新后的稳态窗口，保留离群帧。JSON `cap.start`/`cfg` 的 `ls=0/1/2` 分别表示Grid/功率Tree/TreeSphere；以实际录制的配置和切换事件划分窗口。比较 `lg.*`/`lt.*`/`ls.*`、`lights.switch`、总static/提取与GPU K2/整帧时间。球界树仍是游戏实测候选，小样板的连续PMF、选光微基准或单场景收益不能外推生产质量与帧率，也不足以决定默认方式。
 
 ### 用户手动检查重点
 
@@ -132,6 +132,7 @@ cargo test -p prime_engine --no-default-features --lib --locked
 10. 检查星图方向、明暗、前景边缘与水面反射，覆盖星图强度零值、RR 开关、天空亮度和冻结；天空亮度与星图强度分别控制。检查暗室/明亮室外间曝光适应、手动曝光只乘一次、进入离线后的固定曝光，以及同时切换模式和曝光补偿强度时的重测。
 11. 在启用 Windows HDR 的实际显示器测试 HDR 开关、SDR 白自动/指定值、峰值、跨显示器移动与 scRGB swapchain；检查 HUD/手部、标题菜单和无世界时的亮度/方位。FG 默认关闭，只有实时 RR 最终输出及 SDK 能力满足时生效；分别检查 SDR/HDR 下 HUD 稳定、真实 Present、窗口变化、后端/模式切换与关闭资源。离屏测试不证明实际生成帧、显示器标定或整帧速度，见[显示合同](docs/display.md)。
 12. 两版分别检查诊断和“录制性能 JSON”：默认关闭、终端不输出慢帧长日志；开启后覆盖稳态、移动/编辑、实时/离线。关闭采集应后台导出一份可解析 JSON，再次开启产生新会话；退出世界、后端切换和关闭客户端也应收尾。检查线程/frame/parent、GPU delayed serial 与 pending/null，保留尖峰；确认关闭采集但保留诊断时仍能导出完整尾部。游戏性能比较另外固定场景和预算，区分采集开销。
+13. 在已加载的同一场景依次切换网格、功率树、球界方向树，再切回网格，检查无需重启即可生效、世界不因采样方式消失、灯和发光命中无缺失。分别覆盖raw、RR及冻结Offline；Offline姿态、光照和种子保持，切换后从新累积开始。记录切换暂停及切换后的稳态窗口，检查JSON `cfg.ls`与设置一致；世界重进和重载后仍使用保存的方式。检查validation日志，切换失败不能继续创建或使用资源。
 
 正确性检查时显式追加 `-PprimeptValidation=true`，此时不作性能结论。性能采样保持 validation、legacy profile、细叶计时和 capture audit 关闭，在游戏内启用性能采集，固定场景、相机、画质、射线预算与原生1920×1080分辨率，停止后保存 JSON。积压清空后的原型稳态应只交换请求/响应头，`requested/compiled/tint_requests` 为0；覆盖边缘可能仍不完整，pending=0 不能证明全部64段单元齐备。分别记录稳态及更新阶段；CPU 优化目前非阻塞，不以即时 FPS 达标作为本轮检查的前提。
 
@@ -141,7 +142,9 @@ cargo test -p prime_engine --no-default-features --lib --locked
 
 `./scripts/test-light-tree-cpu.ps1` 直接编译生产 Slang 树选择/PDF 为 C++，在 CPU 穷举世界层与局部层各 `2^24` 个输入，检查实际离散 PMF、稀有光源支持和正反面积 PDF。Rust 树更新、稳定身份、失败回滚和字节布局可用 `cargo test -p prime_vulkan --lib light_tree --locked` 验证；这些入口不创建 Vulkan 设备或窗口。
 
-合成 CPU 对比需显式运行 `cargo test -p prime_vulkan --release --lib cpu_sampler_comparison --locked -- --ignored --nocapture`。默认 CSV 保存在 `artifacts/light-sampler-restoration/cpu-comparison.csv`，保留全部轮次和共同源准备成本；不包含 Vulkan 上传、GPU 时间或画面质量。实际两种方式按前文同场景录制步骤分别验收。
+TreeSphere的CPU拓扑、叶数、路径和保守球界使用 `cargo test -p prime_vulkan --lib light_sphere --locked`；目录灯字段更新不改变实例/槽位使用 `cargo test -p prime_vulkan --lib static_directory --locked`。生产Slang整数支持、前向/反向PDF及面中心/边缘边界可用 `cargo test -p prime_vulkan --features shader-tests --lib --locked gpu_sphere_tree_integer_support_forward_reverse_and_geometry_boundaries -- --ignored --nocapture --test-threads=1` 执行无窗口GPU夹具，正确性检查另启用Vulkan与同步validation。这些检查不能代替两版游戏的菜单切换、完整PT质量和性能验收。
+
+Grid/功率Tree的合成CPU对比需显式运行 `cargo test -p prime_vulkan --release --lib cpu_sampler_comparison --locked -- --ignored --nocapture`。默认CSV保存在 `artifacts/light-sampler-restoration/cpu-comparison.csv`，保留全部轮次和共同源准备成本；不包含TreeSphere、Vulkan上传、GPU时间或画面质量。生产三种方式按前文同场景录制步骤分别验收。
 
 ### Streamline / DLSS RR
 

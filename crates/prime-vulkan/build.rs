@@ -45,6 +45,12 @@ fn main() {
             &format!("{name}_tree.spv"),
             &["PRIME_LIGHT_TREE=1"],
         );
+        compile_defines(
+            &compiler,
+            &format!("shaders/{name}.slang"),
+            &format!("{name}_tree_sphere.spv"),
+            &["PRIME_LIGHT_TREE=1", "PRIME_LIGHT_TREE_SPHERE=1"],
+        );
     }
     for name in [
         "realtime_primary",
@@ -130,6 +136,7 @@ fn main() {
             "display",
             "lights",
             "light_tree",
+            "sphere_tree",
             "optics",
             "texture",
             "roulette",

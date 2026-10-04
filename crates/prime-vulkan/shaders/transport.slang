@@ -30,6 +30,9 @@ public float3 traceSample(TraceScene resources, AtmEnvironment environment,
     float etaScale = 1.0;
     float3 previous = origin;
     float primaryDistance = 0;
+#if defined(PRIME_LIGHT_TREE_SPHERE)
+    float3 previousLightNormal = float3(0);
+#endif
     float previousPdf = 0;
     float4 medium = float4(1, 0, 0, 0);
     float coneWidth = 0.0;
@@ -87,7 +90,12 @@ public float3 traceSample(TraceScene resources, AtmEnvironment environment,
             {
                 float lightPdf = previousPdf == 0 || lightFeatures == 0
                                          ? 0
-                                         : emissiveHitPdf(resources, hit, previous);
+                                         : emissiveHitPdf(resources, hit, previous
+#if defined(PRIME_LIGHT_TREE_SPHERE)
+                                                          ,
+                                                          previousLightNormal
+#endif
+                                           );
                 float emissionWeight =
                         lightPdf == 0 ? 1.0 : primePowerHeuristicValue(previousPdf, lightPdf);
                 radiance += primeTripleProduct(throughput, linear709ToWorking(hit.emission),
@@ -121,6 +129,9 @@ public float3 traceSample(TraceScene resources, AtmEnvironment environment,
         direction = scatter.direction;
         medium = sampled.medium;
         previous = surface.position;
+#if defined(PRIME_LIGHT_TREE_SPHERE)
+        previousLightNormal = primePbrVertexIsDielectric(material) ? float3(0) : material.normal;
+#endif
         previousPdf = primeDirectLightingMisPdf(optical, scatter);
         origin = spawnRay(surface, direction);
         if (primeRussianRouletteApplies(bounce, PRIME_RUSSIAN_ROULETTE_START)) {

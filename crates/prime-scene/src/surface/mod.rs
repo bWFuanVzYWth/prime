@@ -202,7 +202,7 @@ pub struct CompileStats {
 pub struct SurfaceMesh {
     pub revision: u64,
     pub quads: Vec<SurfaceFace>,
-    pub lights: LightTree,
+    pub lights: Arc<LightTree>,
     pub stats: CompileStats,
 }
 impl SurfaceMesh {
@@ -215,7 +215,7 @@ impl SurfaceMesh {
     }
 
     pub fn from_resolved(revision: u64, mut quads: Vec<SurfaceFace>) -> Result<Self, String> {
-        let lights = LightTree::build(&mut quads)?;
+        let lights = Arc::new(LightTree::build(&mut quads)?);
         Ok(Self {
             revision,
             quads,
@@ -259,7 +259,7 @@ impl SurfaceCompiler {
         for index in retained {
             rectangles::append(&mut faces, &quads[index], None);
         }
-        let lights = LightTree::build(&mut faces)?;
+        let lights = Arc::new(LightTree::build(&mut faces)?);
         Ok(SurfaceMesh {
             revision,
             quads: faces,

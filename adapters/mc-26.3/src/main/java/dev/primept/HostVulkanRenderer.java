@@ -26,7 +26,6 @@ public final class HostVulkanRenderer implements AutoCloseable {
     private static Throwable retirementFailure;
     private final NativeBridge bridge;
     private final VulkanCommandEncoder encoder;
-    private final RenderSettings.LightSampling activeLightSampling;
     private boolean closed;
     private boolean retired;
     private long pendingTemporalSerial;
@@ -36,7 +35,6 @@ public final class HostVulkanRenderer implements AutoCloseable {
     private long readinessGeneration;
     private boolean completedWorldFrame;
     private RenderSettings appliedSettings;
-    private RenderSettings requestedSettings;
     private RenderSettings.View appliedView;
     private boolean offline;
 
@@ -45,7 +43,6 @@ public final class HostVulkanRenderer implements AutoCloseable {
         encoder = device.createCommandEncoder();
         var access = (VulkanCommandEncoderAccessor)(Object)encoder;
         bridge = new NativeBridge(NativeBridge.resolveLibrary());
-        activeLightSampling = PrimeClient.settings().lightSampling();
         try {
             var initialSettings = PrimeClient.settings();
             var initialView = PrimeClient.diagnosticView();
@@ -58,7 +55,6 @@ public final class HostVulkanRenderer implements AutoCloseable {
                     VulkanBootstrap.opacityMicromapEnabled(device),
                     VulkanBootstrap.streamlineEnabled(device));
             appliedSettings = initialSettings;
-            requestedSettings = initialSettings;
             appliedView = initialView;
             prepareResources();
             if (submissionOwner != null)
@@ -306,22 +302,17 @@ public final class HostVulkanRenderer implements AutoCloseable {
     }
     /** Frame-boundary control updates; stable frames make no settings FFM call. */
     public void configure(RenderSettings settings, boolean nextOffline, RenderSettings.View view) {
-        if (offline == nextOffline && settings.equals(requestedSettings) && view == appliedView)
+        if (offline == nextOffline && settings.equals(appliedSettings) && view == appliedView)
             return;
-        var requested = settings;
-        settings = settings.withLightSampling(activeLightSampling);
-        if (offline == nextOffline && settings.equals(appliedSettings) && view == appliedView) {
-            requestedSettings = requested;
-            return;
-        }
         if (offline != nextOffline ||
+            (appliedSettings != null &&
+             settings.lightSampling() != appliedSettings.lightSampling()) ||
             (!nextOffline && appliedSettings != null &&
              (settings.rayReconstruction() != appliedSettings.rayReconstruction() ||
               settings.dlssQuality() != appliedSettings.dlssQuality())))
             submitAndAwait(encoder);
         bridge.configure(settings, nextOffline, view);
         appliedSettings = settings;
-        requestedSettings = requested;
         appliedView = view;
         offline = nextOffline;
     }

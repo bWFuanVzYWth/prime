@@ -82,7 +82,7 @@ typedef struct PrimeSettings {
     uint32_t hdr;
     uint32_t hdr_reference_white;
     uint32_t frame_generation;
-    /* Fixed when the renderer is created: 0 = grid, 1 = tree. */
+    /* Frame-boundary choice: 0 = grid, 1 = power tree, 2 = bounds-sphere tree. */
     uint32_t light_sampling;
 } PrimeSettings;
 

@@ -348,6 +348,11 @@ fn named_frame_and_settings_validate_semantics_without_a_wire_roundtrip() {
         prime_scene::settings::LightSampling::Tree
     );
     settings.light_sampling = 2;
+    assert_eq!(
+        RenderSettings::from_abi(&settings).unwrap().light_sampling,
+        prime_scene::settings::LightSampling::TreeSphere
+    );
+    settings.light_sampling = 3;
     assert!(RenderSettings::from_abi(&settings).is_err());
     settings.light_sampling = 0;
     settings.saturation = 0.08;

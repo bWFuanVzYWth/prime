@@ -43,7 +43,7 @@ public final class RenderSettings {
     }
     public enum View { OUTPUT, NOISY_COLOR, LINEAR_DEPTH, NORMAL }
     public enum DlssQuality { DLAA, QUALITY, BALANCED, PERFORMANCE, ULTRA_PERFORMANCE }
-    public enum LightSampling { GRID, TREE }
+    public enum LightSampling { GRID, TREE, TREE_SPHERE }
     private final boolean pathTracing;
     private final boolean opacityMicromap;
     private final boolean rayReconstruction;
