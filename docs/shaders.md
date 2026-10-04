@@ -19,7 +19,7 @@
 | `pbr/guide_albedo.slang` | 独立方向能量与清洗；不导入通用 PBR 分派或完整 closure |
 | `pbr.slang` | 生产 Full opaque/dielectric 源适配、thick-SSS Lite 扩展与历史 Lite 材质参考 API；重导出窄顶点/guide 接口 |
 | `grid_sampling.slang` | 默认局部 alias、全局退路及正反向混合 PDF，无资源绑定 |
-| `tree_sampling.slang` | 可选双层功率树、24-bit 整数区间遍历及同源正反向 PDF，无资源绑定 |
+| `tree_sampling.slang`、`light_distance.slang` | 可选双层功率距离树、24-bit 支持保留及同接收点路径重放 PDF；窄距离数学模块，无资源绑定 |
 | `sphere_tree_sampling.slang`、`light_direction.slang` | 可选球界方向树、接收/发光方向摘要、24-bit 支持保留与同源路径重放 PDF，无资源绑定 |
 | `light_sampling.slang` | 显式采样实验保留的 32B 功率树节点与选择，无资源绑定 |
 | `display/prime_drt.slang` | 当前可替换的显示策略；显式显示变换与艺术调整，只依赖颜色数学库 |
@@ -79,7 +79,9 @@ Z-Sobol 配置为 `R≤16`、`S≤20`、`2R+S≤52`，像素坐标 `<2^R`、样�
 
 BSDF事件选择使用 `sample1D(1280+bounce)`。仅实时相机第一可见表面为纯delta optical时，额外使用独立domain1536，在有效reflection-only/transmission-only候选之间固定0.5抽选；候选保留物理response和条件PDF=1，双有效时未来beta乘2，单有效乘1。首面发光/guide albedo不补偿，连续MIS PDF仍为0。粗糙首面、后续透明及Offline保持普通采样；照明roulette与guide几何方向均不复用该随机域。
 
-Tree保留历史空间median拓扑和功率proposal，以两份独立24-bit样本分别选择光页与页内灯。CPU在各树中分配整数区间，每叶至少一个输入，GPU用绝对CDF边界比较，无浮点残差链；页与灯引用保存量化后的实际PMF，前向/反向共同使用其乘积和相同总面积倒数。低功率支持修正只改变proposal，不改真实发光，不宣称不同多维采样域完全独立。
+Tree保留历史空间median拓扑，以两份独立24-bit样本分别选择光页与页内灯。分支proposal使用功率与接收点距离平方，不考虑接收/发光方向。节点为24B：中心与功率、child和后代叶数。世界层中心为AABB中点；页内内部节点为按quad两半面积质心与灯功率加权、在节点AABB中10-bit量化的位置。页内终端使用接收点到实际四角AABB的距离，距离为零时依次退到量化质心与quad两条边的平方长度之和，沿用TreeSphere距离语义。空间median保留的是拓扑；TreeSphere仍另用方向SAOH构建树。
+
+Tree前向选择与反向PDF都从每层`2^24`个整数输入开始，按同一接收点的功率距离评分划分count，每个子树至少分配其后代叶数的输入。每棵树最多`2^24`叶、路径深度最多27；页与灯引用存储32-bit重放路径，实际PMF为所选叶count除以`2^24`。发光命中MIS和ReSTIR的端点PDF在原前驱接收点重放两层划分，再乘总面积倒数；不能保存或使用固定页/灯概率。Tree不增加跨射线查询的法线状态。整数支持修正只改变proposal，不改真实发光、面积、coverage与可见性，也不证明不同多维采样域完全独立。Grid局部提议使用功率与距离近似；TreeSphere还包含接收/发射方向评分，三者均在选灯后按实际BSDF、发光和可见性计算贡献。
 
 TreeSphere使用相同quad发光面和两个24-bit选择域，CPU按功率、空间与方向摘要构建双层树。节点为32B：中心与功率、压缩方向、child、后代叶数和保守半径。世界层中心为已表示AABB的中点，半径按该f32中心到AABB角点的最大距离向上取整；世界叶直接保存页界，不再借页内根的功率质心作为球中心。页内内部节点保留量化功率质心距离与方向评分，终端quad按实际两半面积权重计算方向和接收余弦界，零面积半面不归一化。方向表示轴/圆锥或六个5-bit轴向功率瓣；世界球界估计接收与发光角度，在球内取宽界。评分含`1/256`角度下限，均为选光proposal近似，不改变发光、coverage、面积或真实遮挡。
 
@@ -105,9 +107,9 @@ alias 的 PDF 对应单表实际 f32 运算及 24-bit 输入格点，上传后�
 
 ## 尺寸与历史
 
-Java 使用实际 render target 尺寸，零尺寸/未初始化相机暂停发布并重置样本序列；恢复及尺寸变化从新样本集开始。Rust 同步更新离线累积存储或实时内部尺寸scratch/guide图像、相机宽高比、输出绑定与 Z-Sobol R。离线冻结姿态保持不变。旧输出按最后使用的 timeline 完成值回收，不等待当前帧、不回读像素。相同尺寸重建 image view 仍刷新宿主描述符。
+Java 使用实际 render target 尺寸，零尺寸/未初始化相机暂停发布，保留样本序列和最近接受的历史；实际尺寸变化从新样本序列开始，RR/ReSTIR 按各自实际图像尺寸决定失效。Rust 同步更新离线累积存储或实时内部尺寸scratch/guide图像、相机宽高比、输出绑定与 Z-Sobol R。离线冻结姿态保持不变。旧输出按最后使用的 timeline 完成值回收，不等待当前帧、不回读像素。相同尺寸重建 image view 仍刷新宿主描述符。
 
-协议尺寸边界为每轴 `1..65536`，像素总数与字节计算为宽整数；实际还须满足设备 image dimension、compute dispatch、累积 storage-buffer range，以及实时BDA分配与plane索引范围。协议接受不代表设备可分配。原固定 4096 边长限制不再使用。历史到 `2^24` 样本前重启，避免 f32 样本权重失去单位精度及整数加一溢出。
+协议尺寸边界为每轴 `1..65536`，像素总数与字节计算为宽整数；实际还须满足设备 image dimension、compute dispatch、累积 storage-buffer range，以及实时BDA分配与plane索引范围。协议接受不代表设备可分配。原固定 4096 边长限制不再使用。离线累积在 `2^24` 样本前重启，避免 f32 样本权重失去单位精度及整数加一溢出；该计数不触发实时 RR/ReSTIR 历史重置。
 
 Offline 保持逐样本在线均值、原 sequence 与随机域。当前单样本 profile 延后读取历史，host 的采样数同时决定 profile 与 push 参数；状态生命周期及有限管线变体的成本见 [PT 设计](pt-state-design.md#pt-之外的状态与当前特化)。
 

@@ -12,7 +12,7 @@
 
 CPU 未采集时的 scope 只检查空上下文，不读事件时钟、不分配事件或摘要、不注册线程、不获取采集锁。粗 CPU 快照和额外上传/OMM 统计由诊断开关控制；已有生产计数和生命周期判断仍有少量成本。显式的 legacy 开发属性可能单独开启其对应统计，比较关闭开销时需同时关闭这些属性。这里描述代码路径和行为测试契约，不据此承诺实际整帧速度。
 
-采集开始和配置事件保存实际 `ls`：0为Grid、1为功率Tree、2为TreeSphere。它来自帧边界应用后的有效设置；游戏内切换会记录新的配置值。Grid更新范围为 `lg.*`，两种树的世界表为 `lt.*`，球界局部树为 `ls.local`；共同的 `geom.lights` 是父范围，不能与子任务重复相加。一次切换的已发布灯页重建记录为 `lights.switch`，其摘要保存目标 `ls` 和页数 `pg`；完整切换还包括宿主等待、管线和输出重建，应与稳态分开分析。
+采集开始和配置事件保存实际 `ls`：0为Grid、1为功率距离Tree、2为TreeSphere。它来自帧边界应用后的有效设置；游戏内切换会记录新的配置值。Grid更新范围为 `lg.*`，两种树的世界表为 `lt.*`，球界局部树为 `ls.local`；共同的 `geom.lights` 是父范围，不能与子任务重复相加。一次切换的已发布灯页重建记录为 `lights.switch`，其摘要保存目标 `ls` 和页数 `pg`；完整切换还包括宿主等待、管线和输出重建，应与稳态分开分析。
 
 ## 数据、线程与时钟
 
@@ -63,6 +63,7 @@ native 块的 `r` 为 recorder 身份，`dict` 使用本会话稳定 ID；`nb` /
 | LightGrid CPU | `lg.cpu/diff/world/world_alias/ids/apply/cell_alias` 分开页差异及新页表准备、全局页规划与 alias、ID 租用、光源/cell 引用更新、dirty cell 排序/权重/alias |
 | LightGrid 资源 | `lg.update/input/stage/refs/local/world_stage/hash/pages/grow/publish` 分开输入收集、各类表 staging、实际 buffer 扩容与命令发布；`light_grid_ranges` 是其命令录制子事件 |
 | 采集传输 | `diag.flush/read/drain/alloc/copy/array/utf8/queue/stop` 分开逐帧排空、native 读取总范围、原生排空/序列化、FFM 分配、缓存块复制、byte[] 复制、UTF8 解码、后台队列写入及最终收尾 |
+| 全局时间历史失效 | `restir.history.reset` / `rr.history.reset` 仅在实际丢弃已接受历史时记录 `reason`；用于对齐闪烁与失效事件，不证明闪烁由该事件造成 |
 
 新摘要取已有长度或仅在启用时于原有循环中累计：例如 `emit/pg/dc/ent` 表示发光面、光页、dirty cell、alias 项数，`bytes/ranges/rows/copies` 表示字节、范围、目录行和复制项。不为摘要新增全场景扫描，也不对每个光源或 cell 生成独立事件。
 

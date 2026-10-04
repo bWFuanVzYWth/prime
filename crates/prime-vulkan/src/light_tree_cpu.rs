@@ -1,88 +1,12 @@
-//! Historical spatial median topology with exact 24-bit selection intervals.
-//! Integer interval traversal preserves every positive leaf and supplies the PMF consumed by MIS.
-use crate::{light_grid_cpu::Light, plan::Slots};
+//! Immutable page/reference publication for receiver-dependent tree proposals.
+//! Both TREE and TREE_SPHERE store replay paths rather than fixed light probabilities.
+use crate::{
+    light_distance_cpu::{Node, Tree as DistanceTree},
+    light_grid_cpu::Light,
+    plan::Slots,
+};
 use prime_scene::surface::{LightNode, LightRoot, build_light_forest};
 use std::{collections::BTreeMap, ops::Range};
-
-pub(crate) const SELECTORS: u32 = 1 << 24;
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct Node {
-    pub split: u32,
-    pub child: u32,
-    pub first: u32,
-    pub count: u32,
-}
-
-/// Quantize each split from its represented child powers. Bounds/topology retain the historical
-/// tree; reserving one selector for every descendant leaf repairs otherwise absent support.
-pub(crate) fn quantize(nodes: &[LightNode]) -> Result<Vec<Node>, String> {
-    if nodes.is_empty() {
-        return Ok(Vec::new());
-    }
-    let mut leaves = vec![0; nodes.len()];
-    for (at, node) in nodes.iter().enumerate().rev() {
-        if !node.power.is_finite() || node.power <= 0.0 {
-            return Err("Invalid light tree node power".into());
-        }
-        leaves[at] = if node.emitter().is_some() {
-            1u32
-        } else {
-            let child = node.child as usize;
-            if child <= at || child + 1 >= nodes.len() {
-                return Err("Invalid light tree topology".into());
-            }
-            leaves[child]
-                .checked_add(leaves[child + 1])
-                .ok_or("Light tree leaf count overflow")?
-        };
-    }
-    if leaves[0] > SELECTORS {
-        return Err("Light tree exceeds the 24-bit selector capacity".into());
-    }
-    let mut output = vec![Node::default(); nodes.len()];
-    output[0].count = SELECTORS;
-    for (at, node) in nodes.iter().enumerate() {
-        let first = output[at].first;
-        let count = output[at].count;
-        if count < leaves[at] {
-            return Err("Disconnected light tree node".into());
-        }
-        output[at].child = node.child;
-        if node.emitter().is_some() {
-            output[at].split = first + count;
-        } else {
-            let child = node.child as usize;
-            let left = f64::from(nodes[child].power);
-            let right = f64::from(nodes[child + 1].power);
-            let proposed = (f64::from(count) * (left / (left + right))).round() as u32;
-            let left_count = proposed.clamp(leaves[child], count - leaves[child + 1]);
-            output[at].split = first + left_count;
-            output[child].first = first;
-            output[child].count = left_count;
-            output[child + 1].first = first + left_count;
-            output[child + 1].count = count - left_count;
-        }
-    }
-    Ok(output)
-}
-
-pub(crate) fn leaf_pdfs(nodes: &[Node], count: usize) -> Result<Vec<f32>, String> {
-    let mut pdfs = vec![0.0; count];
-    for node in nodes {
-        if node.child & (1 << 31) != 0 {
-            let id = (node.child & !(1 << 31)) as usize;
-            let pdf = pdfs
-                .get_mut(id)
-                .ok_or("Light tree leaf exceeds its directory")?;
-            if *pdf != 0.0 {
-                return Err("Duplicate light tree leaf".into());
-            }
-            *pdf = node.count as f32 / SELECTORS as f32;
-        }
-    }
-    Ok(pdfs)
-}
 
 #[derive(Clone, Copy)]
 pub(crate) struct Input<'a> {
@@ -90,9 +14,7 @@ pub(crate) struct Input<'a> {
     pub origin: [f64; 3],
     pub root: LightNode,
     pub lights: &'a [Light],
-    pub pdfs: &'a [f32],
-    /// Sphere sampler stores a replay trail instead of a fixed local PMF.
-    pub paths: Option<&'a [u32]>,
+    pub paths: &'a [u32],
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -101,7 +23,7 @@ pub(crate) struct Page {
     pub origin: [f64; 3],
     pub first: u32,
     pub count: u32,
-    pub pdf: f32,
+    pub path: u32,
     root: LightNode,
 }
 
@@ -109,9 +31,8 @@ pub(crate) struct Page {
 pub(crate) struct Reference {
     pub page: u32,
     pub emitter: u32,
-    /// Variant-specific 32-bit word: Tree PMF or TreeSphere replay path.
-    /// Sphere paths must only round-trip through from_bits/to_bits, never float arithmetic.
-    pub pdf: f32,
+    /// Replay trail in the selected local topology; never interpreted as a float.
+    pub path: u32,
     pub inv_area: f32,
 }
 
@@ -203,23 +124,12 @@ impl Tree {
                 continue;
             }
             if input.lights.is_empty()
-                || input
-                    .paths
-                    .map_or(input.lights.len() != input.pdfs.len(), |paths| {
-                        paths.len() != input.lights.len()
-                    })
+                || input.paths.len() != input.lights.len()
                 || input.origin.iter().any(|x| !x.is_finite())
                 || input.lights.iter().enumerate().any(|(index, light)| {
-                    let valid_selection = input.paths.map_or_else(
-                        || {
-                            input
-                                .pdfs
-                                .get(index)
-                                .is_some_and(|pdf| pdf.is_finite() && *pdf > 0.0)
-                        },
-                        |paths| paths[index] >> 27 <= 27,
-                    );
-                    !light.inv_area.is_finite() || light.inv_area <= 0.0 || !valid_selection
+                    !light.inv_area.is_finite()
+                        || light.inv_area <= 0.0
+                        || input.paths[index] >> 27 > 27
                 })
             {
                 return Err("Invalid light tree page input".into());
@@ -238,7 +148,7 @@ impl Tree {
                 origin: input.origin,
                 first,
                 count,
-                pdf: 0.0,
+                path: 0,
                 root: input.root,
             });
             by_key.insert(input.key, slot);
@@ -271,11 +181,11 @@ impl Tree {
             })
             .collect();
         let source = build_light_forest(&roots)?;
-        let world = quantize(&source)?;
-        let pdfs = leaf_pdfs(&world, pages.len())?;
+        let tree = DistanceTree::world(&source, pages.len())?;
+        let world = tree.nodes;
         for (slot, page) in pages.iter_mut().enumerate() {
             if let Some(page) = page {
-                page.pdf = pdfs[slot];
+                page.path = tree.paths[slot];
             }
         }
         world_scope.count("nodes", world.len() as u64);
@@ -285,13 +195,10 @@ impl Tree {
         let mut ranges = Vec::with_capacity(added.len());
         for (slot, first, input) in added {
             for (index, light) in input.lights.iter().enumerate() {
-                let pdf = input
-                    .paths
-                    .map_or_else(|| input.pdfs[index], |paths| f32::from_bits(paths[index]));
                 self.refs[first as usize + index] = Reference {
                     page: slot,
                     emitter: index as u32,
-                    pdf,
+                    path: input.paths[index],
                     inv_area: light.inv_area,
                 };
             }
@@ -333,57 +240,10 @@ mod tests {
         .unwrap()
     }
 
-    fn select(tree: &[Node], target: u32) -> u32 {
-        let mut node = tree[0];
-        while node.child & (1 << 31) == 0 {
-            node = tree[node.child as usize + usize::from(target >= node.split)];
-        }
-        node.child & !(1 << 31)
-    }
-
-    #[test]
-    fn exact_intervals_cover_selector_lattice_and_forward_reverse_agree() {
-        let tree = quantize(&nodes(&[1.0, 3.0, 5.0, 7.0])).unwrap();
-        let pdfs = leaf_pdfs(&tree, 4).unwrap();
-        let mut counts = [0u32; 4];
-        for target in 0..SELECTORS {
-            counts[select(&tree, target) as usize] += 1;
-        }
-        assert_eq!(counts.iter().sum::<u32>(), SELECTORS);
-        for (index, &count) in counts.iter().enumerate() {
-            assert_eq!(pdfs[index], count as f32 / SELECTORS as f32);
-            assert!(
-                (pdfs[index] - [1.0, 3.0, 5.0, 7.0][index] / 16.0).abs() <= 1.0 / SELECTORS as f32
-            );
-        }
-    }
-
-    #[test]
-    fn rare_positive_emitters_keep_support_and_singleton_has_unit_pdf() {
-        let tree = quantize(&nodes(&[1.0, f32::MIN_POSITIVE, f32::MIN_POSITIVE])).unwrap();
-        let pdfs = leaf_pdfs(&tree, 3).unwrap();
-        assert!(pdfs.iter().all(|&pdf| pdf > 0.0));
-        assert_eq!(pdfs.iter().sum::<f32>(), 1.0);
-        for node in &tree {
-            if node.child & (1 << 31) != 0 {
-                assert_eq!(select(&tree, node.first), node.child & !(1 << 31));
-                assert_eq!(
-                    select(&tree, node.first + node.count - 1),
-                    node.child & !(1 << 31)
-                );
-            }
-        }
-        assert_eq!(
-            leaf_pdfs(&quantize(&nodes(&[4.0])).unwrap(), 1).unwrap(),
-            [1.0]
-        );
-    }
-
     #[test]
     fn snapshots_preserve_ids_update_anchor_and_reuse_removed_ranges() {
         let source = nodes(&[1.0, 3.0]);
-        let local = quantize(&source).unwrap();
-        let pdfs = leaf_pdfs(&local, 2).unwrap();
+        let local = DistanceTree::world(&source, 2).unwrap();
         let lights = [
             Light {
                 power: 1.0,
@@ -401,8 +261,7 @@ mod tests {
             origin: [0.0; 3],
             root: source[0],
             lights: &lights,
-            pdfs: &pdfs,
-            paths: None,
+            paths: &local.paths,
         };
         let b = Input {
             key: 2,
@@ -423,7 +282,6 @@ mod tests {
         let c = Input { key: 3, ..a };
         tree.update(&[b, c], [10.0; 3]).unwrap();
         assert_eq!(tree.page(3).unwrap().first, first);
-        let world_pdfs = leaf_pdfs(&tree.world, tree.pages.len()).unwrap();
         for (slot, page) in tree.pages.iter().enumerate() {
             if let Some(page) = page {
                 for (emitter, reference) in tree.refs
@@ -433,9 +291,14 @@ mod tests {
                 {
                     assert_eq!(reference.page as usize, slot);
                     assert_eq!(reference.emitter as usize, emitter);
-                    let forward = world_pdfs[slot] * reference.pdf * reference.inv_area;
-                    let reverse = page.pdf * reference.pdf * reference.inv_area;
-                    assert_eq!(forward, reverse);
+                    assert_eq!(reference.path, local.paths[emitter]);
+                    let mut node = tree.world[0];
+                    for depth in 0..page.path >> 27 {
+                        node =
+                            tree.world[node.child as usize + ((page.path >> depth) & 1) as usize];
+                    }
+                    assert_eq!(node.child, 1 << 31 | slot as u32);
+                    assert_eq!(reference.inv_area, lights[emitter].inv_area);
                 }
             }
         }
@@ -459,14 +322,13 @@ mod tests {
             origin: [0.0; 3],
             root: source[0],
             lights: &lights,
-            pdfs: &[1.0],
-            paths: None,
+            paths: &[0],
         };
         let mut tree = Tree::default();
         tree.update(&[input], [0.0; 3]).unwrap();
         let bad = Input {
             key: 2,
-            pdfs: &[0.0],
+            paths: &[u32::MAX],
             ..input
         };
         let before = tree.refs.clone();
@@ -502,7 +364,8 @@ mod tests {
             lights: Vec<Light>,
             nodes: Vec<LightNode>,
             root: LightNode,
-            pdfs: Vec<f32>,
+            paths: Vec<u32>,
+            emitters: Vec<prime_scene::surface::Emitter>,
             source_ns: u128,
         }
         impl Fixture {
@@ -533,6 +396,27 @@ mod tests {
                         slot: slot as u32,
                     });
                 }
+                let emitters = lights
+                    .iter()
+                    .enumerate()
+                    .map(|(quad, light)| {
+                        let c = light.center;
+                        prime_scene::surface::Emitter {
+                            quad: quad as u32,
+                            positions: [
+                                [c[0] - 0.5, c[1] - 0.5, c[2]],
+                                [c[0] + 0.5, c[1] - 0.5, c[2]],
+                                [c[0] + 0.5, c[1] + 0.5, c[2]],
+                                [c[0] - 0.5, c[1] + 0.5, c[2]],
+                            ],
+                            first_fraction: 0.5,
+                            radiance: [light.power; 3],
+                            area: 1.,
+                            power: light.power,
+                            two_sided: false,
+                        }
+                    })
+                    .collect();
                 let started = Instant::now();
                 let nodes = build_light_forest(&roots).unwrap();
                 let source_ns = started.elapsed().as_nanos();
@@ -542,12 +426,15 @@ mod tests {
                     lights,
                     root: nodes[0],
                     nodes,
-                    pdfs: Vec::new(),
+                    paths: Vec::new(),
+                    emitters,
                     source_ns,
                 }
             }
             fn local_tree(&mut self) {
-                self.pdfs = leaf_pdfs(&quantize(&self.nodes).unwrap(), self.lights.len()).unwrap();
+                self.paths = DistanceTree::local(&self.nodes, &self.emitters)
+                    .unwrap()
+                    .paths;
             }
         }
         let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -616,8 +503,7 @@ mod tests {
                                             origin: fixture.origin,
                                             root: fixture.root,
                                             lights: &fixture.lights,
-                                            pdfs: &fixture.pdfs,
-                                            paths: None,
+                                            paths: &fixture.paths,
                                         }
                                     })
                                     .collect();
@@ -654,7 +540,7 @@ mod tests {
         }
         println!("Raw CPU comparison: {}", path.display());
         println!(
-            "Fixed seed 0x6a09e667f3bcc909, serial builders/one calling thread; includes new local quantization, world tree and refs; shared historical local median construction is in separate source rows; excludes geometry compilation, Vulkan directory encoding/hash staging, uploads and GPU quality/timing."
+            "Fixed seed 0x6a09e667f3bcc909, serial builders/one calling thread; includes local distance metadata, world tree and refs; shared historical local median construction is in separate source rows; excludes geometry compilation, Vulkan directory encoding/hash staging, uploads and GPU quality/timing."
         );
     }
 }

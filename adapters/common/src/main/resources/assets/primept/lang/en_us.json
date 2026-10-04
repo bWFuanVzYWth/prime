@@ -6,7 +6,7 @@
   "primept.settings.light_sampling": "Light sampling",
   "primept.settings.light_sampling.tooltip": "Apply at the next frame boundary. Switching may pause to rebuild light sampling resources and restarts accumulation; the frozen scene and camera remain unchanged.",
   "primept.settings.light_sampling.grid": "Light grid",
-  "primept.settings.light_sampling.tree": "Power tree",
+  "primept.settings.light_sampling.tree": "Power distance tree",
   "primept.settings.light_sampling.tree_sphere": "Bounds-sphere tree",
   "primept.settings.display": "Prime PT · Display · primeDRT",
   "primept.settings.automatic": "Auto",

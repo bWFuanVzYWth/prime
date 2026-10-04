@@ -395,7 +395,6 @@ public final class PrimeClient implements ClientModInitializer {
                     if (captureFailure != null)
                         throw captureFailure;
                     if (!camera.initialized || destination.width <= 0 || destination.height <= 0) {
-                        frames.reset();
                         return;
                     }
                     float fov =
@@ -424,7 +423,6 @@ public final class PrimeClient implements ClientModInitializer {
                     if (sentAtlas != atlas.version()) {
                         ExclusiveTerrainCapture.prepareResources(renderer.sourceBridge());
                         sentAtlas = atlas.version();
-                        frames.reset();
                     }
                     timing.resourceSubmit = timing.submit;
                     // Terrain is already synchronously published by the source request/response phase.
@@ -551,7 +549,6 @@ public final class PrimeClient implements ClientModInitializer {
         if (INSTANCE.renderer == null)
             throw new IllegalStateException("Missing resource renderer");
         INSTANCE.renderer.prepareResources();
-        INSTANCE.frames.reset();
     }
     private void reset(long epoch, RenderProfile.Frame timing) {
         long start = Diagnostics.clock();

@@ -238,7 +238,37 @@ impl Fixture {
         sequence: u32,
         bounces: u32,
     ) -> Snapshot {
-        let camera = camera();
+        self.run_with_cameras(scene, instances, [camera(); 2], jitter, sequence, bounces)
+    }
+
+    fn run_with_cameras(
+        &mut self,
+        scene: &Scene,
+        instances: &InstanceScene,
+        [camera, previous]: [Camera; 2],
+        jitter: [f32; 2],
+        sequence: u32,
+        bounces: u32,
+    ) -> Snapshot {
+        self.run_with_camera_jitters(
+            scene,
+            instances,
+            [camera, previous],
+            [jitter; 2],
+            sequence,
+            bounces,
+        )
+    }
+
+    fn run_with_camera_jitters(
+        &mut self,
+        scene: &Scene,
+        instances: &InstanceScene,
+        [camera, previous]: [Camera; 2],
+        [jitter, previous_jitter]: [[f32; 2]; 2],
+        sequence: u32,
+        bounces: u32,
+    ) -> Snapshot {
         self.renderer
             .configure(RenderSettings {
                 bounces,
@@ -285,7 +315,7 @@ impl Fixture {
         let aspect = OUTPUT[0] as f32 / OUTPUT[1] as f32;
         self.constants
             .write(&reconstruction_history::camera_constants(
-                camera, camera, aspect, jitter, true,
+                camera, previous, aspect, jitter, true,
             ))
             .unwrap();
         unsafe {
@@ -309,7 +339,7 @@ impl Fixture {
             .as_chunks_mut::<4>()
             .0
             .iter_mut()
-            .zip(jitter.into_iter().chain(jitter))
+            .zip(jitter.into_iter().chain(previous_jitter))
         {
             *word = value.to_le_bytes();
         }
@@ -677,4 +707,150 @@ fn gpu_restir_rr_production_guides_and_resolve_images() {
     for channel in [2, 8, 10] {
         assert!(dynamic.values(channel).iter().all(|value| *value == 0.0));
     }
+}
+
+#[test]
+#[ignore = "windowless actual ReSTIR RR pixel motion; camera/FOV, independent frame jitter and unequal extents"]
+fn gpu_restir_rr_motion_matches_independent_world_projection() {
+    let mut fixture = Fixture::new();
+    let instances = InstanceScene::default();
+    let opaque = scene(1, vec![face(0.0)]);
+    let sky = scene(2, vec![]);
+    let base = camera();
+    let mut translated = base;
+    translated.position = [8.25, 7.8, 4.15];
+    let angle = 0.12f32;
+    let pitch = -0.08f32;
+    let mut rotated = base;
+    rotated.forward = [
+        angle.sin() * pitch.cos(),
+        pitch.sin(),
+        -angle.cos() * pitch.cos(),
+    ];
+    rotated.right = [angle.cos(), 0.0, angle.sin()];
+    rotated.up = [
+        -angle.sin() * pitch.sin(),
+        pitch.cos(),
+        angle.cos() * pitch.sin(),
+    ];
+    let mut fov = rotated;
+    fov.vertical_fov_radians = 0.85;
+    let mut combined = translated;
+    combined.forward = rotated.forward;
+    combined.right = rotated.right;
+    combined.up = rotated.up;
+    combined.vertical_fov_radians = 1.15;
+    let aspect = f64::from(OUTPUT[0]) / f64::from(OUTPUT[1]);
+    let dot = |a: [f64; 3], b: [f32; 3]| {
+        a.into_iter()
+            .zip(b)
+            .map(|(a, b)| a * f64::from(b))
+            .sum::<f64>()
+    };
+    let mut max_error = 0.0f64;
+    let mut observations = 0;
+    for (case, cameras) in [
+        ("static", [base, base]),
+        ("translation", [translated, base]),
+        ("rotation", [base, rotated]),
+        ("fov", [rotated, fov]),
+        ("combined", [combined, fov]),
+    ] {
+        for [jitter, previous_jitter] in [
+            [[0.125, -0.25], [-0.375, 0.333]],
+            [[-0.375, 0.333], [0.125, -0.25]],
+        ] {
+            for (label, source) in [("plane", &opaque), ("sky", &sky)] {
+                // One vertex leaves the rough reflection distance at zero. All three dense
+                // fields then refer to the same known physical point/direction, rather than
+                // a random continuation sample or the selected temporal reservoir.
+                let actual = fixture.run_with_camera_jitters(
+                    source,
+                    &instances,
+                    cameras,
+                    [jitter, previous_jitter],
+                    71,
+                    1,
+                );
+                actual.complete();
+                if case == "static" {
+                    actual.static_motion();
+                }
+                let [current, previous] = cameras;
+                let tangent = (f64::from(current.vertical_fov_radians) * 0.5).tan();
+                let old_tangent = (f64::from(previous.vertical_fov_radians) * 0.5).tan();
+                let fields = [actual.values(2), actual.values(8), actual.values(10)];
+                let depths = actual.values(1);
+                for pixel in 0..(INPUT[0] * INPUT[1]) as usize {
+                    let uv = [
+                        (f64::from(pixel as u32 % INPUT[0]) + 0.5 + f64::from(jitter[0]))
+                            / f64::from(INPUT[0]),
+                        (f64::from(pixel as u32 / INPUT[0]) + 0.5 + f64::from(jitter[1]))
+                            / f64::from(INPUT[1]),
+                    ];
+                    // Independent f64 oracle: intersect the actual world z=0 plane, then
+                    // project that world point into the unjittered previous camera. RR
+                    // motion excludes the previous/current jitter delta. Sky uses only
+                    // ray direction and deliberately ignores both camera translations.
+                    let ray: [f64; 3] = std::array::from_fn(|axis| {
+                        f64::from(current.forward[axis])
+                            + f64::from(current.right[axis])
+                                * (2.0 * uv[0] - 1.0)
+                                * tangent
+                                * aspect
+                            - f64::from(current.up[axis]) * (2.0 * uv[1] - 1.0) * tangent
+                    });
+                    let relative = if label == "sky" {
+                        assert_eq!(depths[pixel], f32::MAX);
+                        ray
+                    } else {
+                        let distance = -f64::from(current.position[2]) / ray[2];
+                        let point: [f64; 3] = std::array::from_fn(|axis| {
+                            f64::from(current.position[axis]) + distance * ray[axis]
+                        });
+                        assert!((0.0..16.0).contains(&point[0]));
+                        assert!((0.0..16.0).contains(&point[1]));
+                        let expected_depth = distance * dot(ray, current.forward);
+                        assert!(
+                            (f64::from(depths[pixel]) - expected_depth).abs() < 0.000_01,
+                            "actual primary guide depth matches world plane intersection"
+                        );
+                        std::array::from_fn(|axis| point[axis] - f64::from(previous.position[axis]))
+                    };
+                    let z = dot(relative, previous.forward);
+                    assert!(z > 0.0);
+                    let old_uv = [
+                        0.5 + 0.5 * dot(relative, previous.right) / (z * old_tangent * aspect),
+                        0.5 - 0.5 * dot(relative, previous.up) / (z * old_tangent),
+                    ];
+                    for (channel, field) in [2, 8, 10].into_iter().zip(&fields) {
+                        for component in 0..2 {
+                            let expected =
+                                (old_uv[component] - uv[component]) * f64::from(INPUT[component]);
+                            let value = f64::from(field[2 * pixel + component]);
+                            let error = (value - expected).abs();
+                            max_error = max_error.max(error);
+                            let half_ulp = if expected.abs() < 2f64.powi(-14) {
+                                2f64.powi(-24)
+                            } else {
+                                2f64.powi(expected.abs().log2().floor() as i32 - 10)
+                            };
+                            // One actual FP16 ULP plus FP32 projection error is allowed.
+                            // A fixed 0.002 limit is too tight above four input pixels.
+                            // Wrong sign, output-extent scaling and residual jitter fail.
+                            assert!(
+                                error <= half_ulp + 0.000_02,
+                                "{case}/{label}, jitter {jitter:?}/{previous_jitter:?}, binding {}, pixel {pixel}, component {component}: {value} != {expected}",
+                                CHANNELS[channel].0
+                            );
+                            observations += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    eprintln!(
+        "ReSTIR RR world-projection motion with unequal frame jitter: {observations} FP16 components, max absolute error {max_error} input pixels; input={INPUT:?}, output={OUTPUT:?}"
+    );
 }

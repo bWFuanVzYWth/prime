@@ -1,6 +1,6 @@
 package dev.primept.render;
 
-/** A sample set belongs to one actual render-target extent, including after suspension. */
+/** Sampling sequence for an actual target extent; skipped frames retain the sequence. */
 public final class FrameSequence {
     private int width, height, next;
 
@@ -12,7 +12,7 @@ public final class FrameSequence {
             this.height = height;
             next = 0;
         }
-        // Packet carries the unsigned 32-bit bit pattern. Wrap explicitly begins a new history.
+        // Packet carries the unsigned 32-bit bit pattern; wrap does not invalidate temporal history.
         return next++;
     }
 

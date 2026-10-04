@@ -6,7 +6,7 @@
   "primept.settings.light_sampling": "光源采样方式",
   "primept.settings.light_sampling.tooltip": "下一帧边界生效。切换会重新准备光源采样资源，可能暂停，并重新开始累积；冻结的场景和相机保持不变。",
   "primept.settings.light_sampling.grid": "光源网格",
-  "primept.settings.light_sampling.tree": "功率树",
+  "primept.settings.light_sampling.tree": "功率距离树",
   "primept.settings.light_sampling.tree_sphere": "包围盒球界树",
   "primept.settings.display": "Prime PT · 显示 · primeDRT",
   "primept.settings.automatic": "自动",

@@ -171,7 +171,7 @@ public LightSample sampleLocalLight(TraceScene resources, float4 selectors, floa
     selectTreeSphereLight(tree, selectors.zw, receiver, proposalNormal, selectionPdf, page,
                           reference);
 #else
-    selectTreeLight(tree, selectors.zw, selectionPdf, page, reference);
+    selectTreeLight(tree, selectors.zw, receiver, selectionPdf, page, reference);
 #endif
 #else
     uint selectedLight = selectGridLight(grid, receiver, selectors, selectionPdf);
@@ -231,7 +231,7 @@ public float emissiveHitPdf(TraceScene resources, SurfaceHit hit, float3 previou
     float areaPdf = treeSphereLightPdf(tree, hit.light, previous, proposalNormal) *
                     tree.emitters[hit.light].inverseArea;
 #else
-    float areaPdf = treeLightPdf(tree, hit.light) * tree.emitters[hit.light].inverseArea;
+    float areaPdf = treeLightPdf(tree, hit.light, previous) * tree.emitters[hit.light].inverseArea;
 #endif
 #else
     LightGrid grid = *((LightGrid *)resources.staticTrianglePages[0].lightGrid);

@@ -640,21 +640,14 @@ impl Renderer {
     pub fn configure(&mut self, settings: RenderSettings) -> Result<(), String> {
         settings.validate()?;
         let sampler_changed = settings.light_sampling != self.settings.light_sampling;
-        let domain_changed = settings.integrator != self.settings.integrator
-            || settings.bounces != self.settings.bounces
-            || sampler_changed;
+        let mode_changed = settings.mode != self.settings.mode;
+        let integrator_changed = settings.integrator != self.settings.integrator;
+        let rr_changed = settings.ray_reconstruction != self.settings.ray_reconstruction;
         let transport_changed = !settings.transport_matches(self.settings);
         let lighting_changed = settings.astronomy != self.settings.astronomy
             || settings.sun != self.settings.sun
             || settings.sky != self.settings.sky
             || settings.stars != self.settings.stars;
-        let preserve_updated_lighting = settings.mode == RenderMode::Realtime
-            && (settings.integrator == Integrator::RestirPt || self.reconstruction.is_some());
-        let reset_temporal = settings.mode != self.settings.mode
-            || domain_changed
-            || transport_changed && !preserve_updated_lighting
-            || settings.ray_reconstruction != self.settings.ray_reconstruction
-            || settings.reconstruction_quality != self.settings.reconstruction_quality;
         if self.failed || self.pending_temporal_serial != 0 {
             return Err("Cannot configure a failed renderer".into());
         }
@@ -672,31 +665,42 @@ impl Renderer {
             }
             self.fg_prepared = false;
         }
-        if settings.integrator != self.settings.integrator
+        if integrator_changed
             || sampler_changed
-            || settings.mode != self.settings.mode
-            || settings.mode == RenderMode::Realtime
-                && settings.ray_reconstruction != self.settings.ray_reconstruction
+            || mode_changed
+            || settings.mode == RenderMode::Realtime && rr_changed
             || settings.frame_generation != self.settings.frame_generation
         {
             self.failed = true;
             self.context.wait_host_idle()?;
-            drop(self.reconstruction.take());
+            if let Some(rr) = &mut self.reconstruction {
+                // Present consumers can outlive completed world work even if RR itself stays.
+                rr.suspend_frame_generation()?;
+                if mode_changed || rr_changed {
+                    rr.reset("render_domain");
+                    drop(self.reconstruction.take());
+                }
+            }
             drop(self.output.take());
             drop(self.pipeline.take());
-            drop(self.restir.take());
+            if mode_changed || integrator_changed {
+                if let Some(restir) = &mut self.restir {
+                    restir.invalidate("render_domain");
+                }
+                drop(self.restir.take());
+            }
             self.fg_prepared = false;
             self.context.completed_serial()?; // Drain the retired images/buffers using completed host work.
-            self.reconstruction_error = None;
-            self.reconstruction = (settings.mode == RenderMode::Realtime
-                && settings.ray_reconstruction)
-                .then(|| {
-                    reconstruction::Reconstruction::new(
-                        &self.context,
-                        &mut self.reconstruction_error,
-                    )
-                })
-                .flatten();
+            if self.reconstruction.is_none()
+                && settings.mode == RenderMode::Realtime
+                && settings.ray_reconstruction
+            {
+                self.reconstruction_error = None;
+                self.reconstruction = reconstruction::Reconstruction::new(
+                    &self.context,
+                    &mut self.reconstruction_error,
+                );
+            }
             self.pipeline = Some(Pipeline::new(
                 &self.context,
                 settings.integrator,
@@ -710,6 +714,9 @@ impl Renderer {
                 settings.light_sampling,
                 &self.energy_lut,
             )?);
+            if let Some(rr) = &mut self.reconstruction {
+                rr.invalidate_descriptors();
+            }
             self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
             self.samples = 0;
             self.failed = false;
@@ -718,22 +725,19 @@ impl Renderer {
                 && settings.reconstruction_quality != self.settings.reconstruction_quality
         {
             self.samples = 0;
-            if reset_temporal && let Some(rr) = &mut self.reconstruction {
-                rr.reset();
-            }
         }
         if let Some(geometry) = &mut self.geometry {
             if sampler_changed {
                 geometry.set_light_sampling(settings.light_sampling);
             }
             geometry.set_omm(settings.opacity_micromap && self.context.opacity_micromap.is_some());
-            if reset_temporal {
+            if mode_changed {
                 geometry.objects.reset_motion();
             }
         }
-        if reset_temporal && let Some(restir) = &mut self.restir {
-            restir.invalidate();
-        } else if lighting_changed && let Some(restir) = &mut self.restir {
+        if (lighting_changed || sampler_changed || settings.bounces != self.settings.bounces)
+            && let Some(restir) = &mut self.restir
+        {
             restir.lighting_changed();
         }
         self.display = display;
@@ -792,7 +796,7 @@ impl Renderer {
             restir.reset_world();
         }
         if let Some(rr) = &mut self.reconstruction {
-            rr.reset();
+            rr.reset("world");
         }
         if let Some(resources) = &self.scene_resources {
             let mut resources = resources.borrow_mut();
@@ -1058,10 +1062,10 @@ impl Renderer {
                     .is_some_and(|g| !g.history_owner_matches(scene))
                 {
                     if let Some(restir) = &mut self.restir {
-                        restir.invalidate();
+                        restir.invalidate("scene_owner");
                     }
                     if let Some(rr) = &mut self.reconstruction {
-                        rr.reset();
+                        rr.reset("scene_owner");
                     }
                 }
                 self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
@@ -1076,10 +1080,10 @@ impl Renderer {
                 } else {
                     // End the previous CPU owner before constructing another cache domain.
                     if let Some(rr) = &mut self.reconstruction {
-                        rr.reset();
+                        rr.reset("scene_owner");
                     }
                     if let Some(restir) = &mut self.restir {
-                        restir.invalidate();
+                        restir.invalidate("scene_owner");
                     }
                     // Borrowed GPU resources still retire by their recorded completion serials.
                     self.geometry.take();
@@ -1148,9 +1152,6 @@ impl Renderer {
                 self.settings.mode,
             )?);
             self.samples = 0;
-            if let Some(restir) = &mut self.restir {
-                restir.invalidate();
-            }
         }
         // Float accumulation loses unit sample precision beyond 2^24; start a
         // fresh history before then, without overflowing sample + 1 in the shader.
@@ -1198,9 +1199,6 @@ impl Renderer {
                     self.settings.light_sampling,
                     &self.energy_lut,
                 )?);
-                if let Some(restir) = &mut self.restir {
-                    restir.invalidate();
-                }
                 self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
                 eprintln!("[Prime PT] DLSS RR setup failed; using native raw output: {message}");
                 self.reconstruction_error = Some(message);
@@ -1402,7 +1400,6 @@ impl Renderer {
             accumulation,
             self.settings.mode == RenderMode::Realtime,
             linear,
-            self.frame_seed,
             jitter,
             anchor,
             identity,

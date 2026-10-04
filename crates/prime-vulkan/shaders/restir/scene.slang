@@ -224,6 +224,7 @@ public bool restirNeeMayReconnectAtSurface(SurfaceHit hit) {
     // such a terminal NEE sample as its emitter endpoint, whose PMF is re-evaluated.
     return hit.optical || (hit.materialFlags & 1u) == 0;
 #else
+    // TREE and GRID depend on the preserved RC position, not its changed incident view.
     return true;
 #endif
 }

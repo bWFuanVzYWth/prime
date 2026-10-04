@@ -11,6 +11,7 @@
 | [大气资产与缓存](atmosphere.md) | 固定物理场、天空/太阳/空气透视、GPU 遮挡列与更新依赖 |
 | [固定资产格式与分发](assets.md) | KTX2/Safetensors 选择、Zstd 压缩、Git LFS 存储、语义与来源身份、加载峰值及迁移验收 |
 | [星图、曝光与HDR显示](display.md) | 旧算法移植、测光与冻结、scRGB标定、UI覆盖及帧生成显示输入 |
+| [图像、相机与重投影坐标](coordinates.md) | top-left核心、像素中心与抖动、运动单位、SDK矩阵/深度、宿主呈现转换与纹理UV边界 |
 | [工程结构与路由边界](structure.md) | Rust crate、Java 版本适配、公共层依赖、Rust 版本适配、分页路由与矩形分解边界 |
 | [源路由边界与批量数据流](capture-boundaries.md) | 外观描述与下游计算的分界、接管后的 Java 截断、兼容范围、缓存与接入状态 |
 | [全局空间网格与几何合批](spatial-batching.md) | 4×4×4 区块段对齐、翻译层归属、静态/动态分离及光源采样归属边界 |

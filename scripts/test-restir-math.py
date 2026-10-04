@@ -229,7 +229,16 @@ def main():
         expected = int(epoch != 0 and epoch <= accepted and primitive < live_count)
         assert struct.unpack_from("<4I", result, index * 16) == (expected, 0, 0, 0)
     print("PASS scene identity watermark/liveness/primitive bounds:", len(identity_cases), "cases")
-    report = {"status": "passed", "rng_cases": 4096, "ris_paths": count, "ris_mean": means, "ris_merge_mean": merge_means, "pairwise_cases": 4096, "paired_entries": len(cases), "paired_transforms": 5, "flag_cases": 65536, "identity_cases": len(identity_cases), "bda_strides": strides, "scalar_block_layout_required": True, "execution": "Slang-generated C++ CPU; SPIR-V validation with scalarBlockLayout and binary ABI; no GPU/game execution"}
+    budget_cases = [(length, nee, budget, 0)
+                    for length in range(256)
+                    for nee in (0, 1)
+                    for budget in range(1, 65)]
+    result = execute(9, len(budget_cases), b"".join(struct.pack("<4I", *case) for case in budget_cases))
+    for index, (length, nee, budget, _) in enumerate(budget_cases):
+        expected = int(length + (0 if nee else 1) < budget)
+        assert struct.unpack_from("<4I", result, index * 16) == (expected, 0, 0, 0)
+    print("PASS retained path budget support:", len(budget_cases), "NEE/BSDF endpoint cases")
+    report = {"status": "passed", "rng_cases": 4096, "ris_paths": count, "ris_mean": means, "ris_merge_mean": merge_means, "pairwise_cases": 4096, "paired_entries": len(cases), "paired_transforms": 5, "flag_cases": 65536, "identity_cases": len(identity_cases), "budget_cases": len(budget_cases), "bda_strides": strides, "scalar_block_layout_required": True, "execution": "Slang-generated C++ CPU; SPIR-V validation with scalarBlockLayout and binary ABI; no GPU/game execution"}
     (output / "results.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print("PASS Vulkan BDA ABI:", strides)
 

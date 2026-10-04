@@ -14,17 +14,19 @@ RR 能力还要求实际启用 `VK_KHR_synchronization2` 和 `synchronization2` 
 
 游戏的 early interposer 路径另要求实际 Vulkan 1.3 和 `privateData` feature，后者通过单独的 `VkPhysicalDevicePrivateDataFeatures` 查询/启用，不把已有 synchronization2 重复塞入一个1.3结构。SDK在创建宿主逻辑设备时就构造 private-data slot，因此这项不以当前是否选 PT/RR 为条件。仅有物理设备支持不构成实际启用证明。
 
-现有 native CPU 诊断区分 `rr_requested`（实时设置）、`rr_capable`（宿主已启用能力）、`rr_ready`（运行时初始化且未失败）及 `rr_evaluation_succeeded`（当前历史最近一次 SDK 录制成功）；`rr_input`/`rr_output` 给出实际内部与输出尺寸。录制成功仍不等于 GPU 完成或画质验收。`rr_error` 保留初始化、配置或 evaluate 的失败原因，切回 raw 后仍可查询；诊断/历史重置期间不沿用成功标记。
+现有 native CPU 诊断区分 `rr_requested`（实时设置）、`rr_capable`（宿主已启用能力）、`rr_ready`（运行时初始化且未失败）及 `rr_evaluation_succeeded`（当前历史最近一次 SDK 录制成功）；`rr_input`/`rr_output` 给出实际内部与输出尺寸。录制成功仍不等于 GPU 完成或画质验收。`rr_error` 保留初始化、配置或 evaluate 的失败原因，切回 raw 后仍可查询；历史重置后不沿用成功标记。
 
 Streamline 是进程级状态，一次只允许一个 Prime RR owner。游戏在 LWJGL 创建 Vulkan loader、instance 和 device 前加载锁定的 `sl.interposer.dll`，RR/FG/PCL/Reflex 共用这一次初始化；SDK 的自动设备接入不再重复调用仅用于 manual 模式的 `slSetVulkanInfo`。世界 PT、RR 和显示仍在宿主 command buffer/queue 中录制，真实 acquire/Present 由 interposer 接管。标题/加载帧也通过进程 native 入口调用一次 Present，不等待世界 owner；FG 插件加载但关闭时仍可能异步接管，错误由公开 SDK 回调保留，不要求同步写回 `pResults`。独立 manual RR 诊断仍保留，与 `-Interposed` 检查分别验证。固定 SDK 的设备与 Present hook 合同必须在升级时一起复核，详见[native 桥接](../native/streamline/README.md)。
 
 两条初始化路径均启用 `eUseFrameBasedResourceTagging`，使资源标记属于真实 frame token 与 viewport；只有 late RR 启用 manual hooking。SDK 要求该标志配合按帧标记接口，不能以 `slSetTagForFrame` 返回成功代替初始化模式的证明。取消或释放当前 FG 标记只清理相应 token，其他帧的最后消费者证明仍独立有效。
 
+采样sequence与SDK逻辑帧编号独立。manual RR 每次evaluate让 `slGetNewFrameToken` 自动推进SDK内部编号，不把重复零、间隔或采样编号回绕复用为同一SDK token；interposed路径仍使用真实宿主 `prime_sl_frame` 创建的共享RR/FG token。采样编号本身不请求全局历史重置。
+
 ## 图像和坐标合同
 
 普通 PT 实时采用 K1主表面/delta/guides → K2主要输运 → post 三段。RR的K1写入主表面guides及首纯delta透明面的独立反射运动；K2只可能完成一个已移交的实际反射次段距离。`realtime_rr.slang` 合成FP32 prefix+tail、执行原相机空气段aerial与清洗，写入noisy color，并补全其余像素的反射运动。原始实时不分配RR图像，Offline不进入这两个实时PT kernel。阶段布局见[PT设计](pt-state-design.md)。[ReSTIR PT](restir-pt.md) 在自身生成阶段共享首交点并发布同合同的独立规范 guides，在 resolve 写入最终重采样 radiance 与 aerial；不执行普通 PT 的照明阶段。
 
-RR主射线在像素中心加CPU Halton帧采样偏移；Streamline接收投影位移，XY均为采样偏移的相反数，单位是输入像素。相机矩阵不含抖动；普通 PT 的 coverage 与照明随机域继续由 Z-Sobol 产生。ReSTIR 保留原 TinyUniform RNG 与路径 seed/位置哈希 coverage；首 guide 共享实际首交点及所选材质，独立 guide 后缀使用既有 Z-Sobol coverage 域。guide 从同一主射线开始，之后按确定的几何事件选择独立终点，不随照明的首透明0.5分支或roulette改变。
+RR主射线在像素中心加CPU Halton帧采样偏移；Streamline接收投影位移，XY均为采样偏移的相反数，单位是输入像素。相机矩阵不含抖动；普通 PT 的 coverage 与照明随机域继续由 Z-Sobol 产生。ReSTIR 保留原 TinyUniform RNG 与路径 seed/位置哈希 coverage；首 guide 共享实际首交点及所选材质，独立 guide 后缀使用既有 Z-Sobol coverage 域。guide 从同一主射线开始，之后按确定的几何事件选择独立终点，不随照明的首透明0.5分支或roulette改变。原点、像素中心、相机基、矩阵布局、呈现翻转与 FG 尚未统一的方向边界见[坐标契约](coordinates.md)。
 
 | Binding | 图像/常量 | 格式与语义 |
 | --- | --- | --- |
@@ -64,13 +66,17 @@ K1 从真实 object-to-world/world-to-object 得到前帧物理点，静态光�
 
 非零距离仍由post按主view depth恢复相机射线上的主点，再沿该射线增加距离，构造局部虚拟点并重投影。这个分支只估计相机运动，不检测或补偿次段目标的物体运动，也不是GGX反射终点的精确光流。粗糙反射次段miss写距离65504，仍按有限远点投影，不能视为严格无平移视差的天空。只有主depth为天空或K1显式guide真实escape时使用D0方向代理。K1显式R guide仅输出反射运动，其距离保持初始化的0；状态值4使post保留该运动，不再计算或存储无消费者的R距离。SDK始终消费完整的specular motion图，而非仅透明像素有效的稀疏输入。
 
-`rr_display.slang` 与 `rr_linear.slang` 在输出分辨率显示。只有SDK录制成功且当前双线性输入足迹的四个状态均满足 `(flags & 3)==0` 时才消费RR输出，前景位8不影响完成判断；否则使用该足迹的本帧noisy color。一般evaluate失败时本帧恢复raw，下一帧在完成证明后切回原生管线；异常导致命令录制状态不安全时直接走帧失败/退休契约，不读取可能处于未知布局的输入。诊断色/深度/法线显示实际内部数据，期间不消费RR历史，回到最终输出时重置；仅写宿主目标时翻转Y。
+`rr_display.slang` 与 `rr_linear.slang` 在输出分辨率显示。只有SDK录制成功且当前双线性输入足迹的四个状态均满足 `(flags & 3)==0` 时才消费RR输出，前景位8不影响完成判断；否则使用该足迹的本帧noisy color。一般evaluate失败时本帧恢复raw，下一帧在完成证明后切回原生管线；异常导致命令录制状态不安全时直接走帧失败/退休契约，不读取可能处于未知布局的输入。诊断色/深度/法线显示实际内部数据，同时继续正常 RR evaluate，使模型与已接受相机历史同步推进；返回最终输出不重置。这意味着诊断显示仍有正常 RR 的 GPU 成本。仅写宿主目标时翻转Y。
 
-内部完成图保证的是未解析像素的输出退路，不保证SDK内部历史隔离、邻域空间滤波隔离或恢复有效后的历史清除。当前不接入 `BiasCurrentColorHint`，不把通用tag注释外推为锁定RR preset F的逐像素历史拒绝保证。严格SDK reset仍是整个viewport/frame级别；不为按像素条件增加CPU读回或整帧等待。
+内部完成图保证的是未解析像素的输出退路，不保证SDK内部历史隔离、邻域空间滤波隔离或恢复有效后的历史清除。旧项目设置中的 `[-1, 1]`、默认 `-0.25` 输入为 **RR Responsivity Mask**：输入分辨率的单通道 R16F，旧直接NGX桥接通过 `pInResponsivityMask` 提交统一的有符号值；该值不是引擎guide完成标记，也不是 `BiasCurrentColorHint`。它是SDK可调的响应偏置，不声明严格的逐像素历史拒绝。
+
+锁定的 Streamline 2.14.1 官方源码读取、缓存并转换 `kBufferTypeResponsivityMask` 的资源状态，但 DLSS-D 的 Vulkan 分支缺少向 NGX 设置 `NVSDK_NGX_Parameter_DLSSD_ResponsivityMask` 的步骤；设置该资源指针只出现在 D3D 分支。公共NGX evaluate包装直接传入已有参数，不补齐这个输入。因而当前Vulkan集成不暴露此设置，不分配或标记一个没有已核实消费通路的图像。恢复该输入需要修正并验证DLSS-D插件的Vulkan参数转发，或另行评估直接NGX后端；仅新增通用tag不能证明模型收到它。SDK与来源锁定见 [SDK说明](../third_party/streamline/README.md)。严格SDK reset仍是整个viewport/frame级别；不为按像素条件增加CPU读回或整帧等待。
 
 ## 历史、同步与成本
 
-首次帧、尺寸/质量/模式/开关变化、源 owner/epoch 或纹理资源 owner/generation 替换、明确采样序列重启、积分器/顶点预算/光源采样方式变化使历史失效。非零序列编号有间隔或随机 seed 变化仍使用最近一次实际接受的前帧。相机平移、旋转和 FOV 改变使用重投影与 guide 完成状态；不以距离/角度阈值推断整个画面已改变。scene anchor 变化先对前相机精确重定位，再计算相对运动。局部源、纹理和实时天文/太阳/天空/星光更新保留重建历史；曝光/primeDRT 改变不重置场景线性历史。
+无可用历史的首次帧、实际图像尺寸/质量重配、实时/离线或 RR 开关切换、世界/source owner 或 epoch 更换及实际 evaluate 失败是全局失效边界。不能确认整个复用域已失效时继续接收历史，交给 motion、完成状态和模型更新处理。采样编号归零、回绕、跳号、随机 seed、暂时跳帧、局部 atlas 更新、纹理资源 owner/generation、积分器、顶点预算及光源采样方式变化不再隐式清除 RR 历史；重建 PT 管线时重新绑定所有 RR descriptors。相机平移、旋转和 FOV 改变使用重投影；不以距离/角度阈值推断整个画面已改变。scene anchor 变化先对前相机精确重定位，再计算相对运动。局部源、纹理和实时天文/太阳/天空/星光更新保留重建历史；曝光/primeDRT 改变不重置场景线性历史。
+
+启用性能录制时，实际丢弃已接受历史记录 `rr.history.reset` 及 `reason`，便于把闪烁与真实失效事件对齐；没有逐像素读回或额外等待。采样 sequence 只选择随机域，SDK frame token 表示实际帧，二者不能混用。
 
 输入/输出图像跨帧复用，同一宿主队列的写后读、读后写依赖覆盖 K1 → K2 → compose → RR → 显示及下一帧；K1的prefix/guide写入、K2距离写入和post完成状态/反射运动写入都必须对后续消费可见。可变描述符和144B常量按宿主 timeline 完成槽复用。录制返回与 `encoder.execute` 不提交时间历史：两版实际 `Submission.close` 成功接受对应 serial 后才同时提交相机与实例姿态；未提交/失败录制不推进。纯姿态变化的元数据在接受后另有一次回归当前姿态的稀疏 settle 更新，稳态不扫描全实例。
 

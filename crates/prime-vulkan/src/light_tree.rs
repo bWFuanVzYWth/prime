@@ -1,9 +1,9 @@
-//! Device publication for the power or directional sphere page/world proposal.
+//! Device publication for the power-distance or directional sphere page/world proposal.
 //! Immutable local trees belong to their source LightPage; only changed ranges and world metadata
 //! are uploaded here. Sampler changes replace metadata at an explicit completion boundary.
 use crate::{
     arena::{Arena, Lease},
-    light_tree_cpu::{Input, Node, Tree as CpuTree},
+    light_tree_cpu::{Input, Tree as CpuTree},
     resources::{Buffer, Context},
     surface::LightPage,
 };
@@ -86,8 +86,7 @@ impl LightTree {
                 origin,
                 root: tree.root,
                 lights: &source.lights,
-                pdfs: &tree.pdfs,
-                paths: tree.sphere_root.map(|_| tree.paths.as_slice()),
+                paths: &tree.paths,
             });
         }
         let changes = self.cpu.update(&inputs, anchor)?;
@@ -151,7 +150,7 @@ impl LightTree {
                     for word in [
                         reference.page,
                         reference.emitter,
-                        reference.pdf.to_bits(),
+                        reference.path,
                         reference.inv_area.to_bits(),
                     ] {
                         bytes.extend_from_slice(&word.to_le_bytes());
@@ -172,7 +171,7 @@ impl LightTree {
             let mut world = prime_diagnostics::scope("lt.world_stage");
             world.fail();
             let bytes = sphere.as_ref().map_or_else(
-                || node_bytes(&self.cpu.world),
+                || crate::light_distance_cpu::node_bytes(&self.cpu.world),
                 |tree| crate::light_sphere_cpu::node_bytes(&tree.nodes),
             );
             world.count("nodes", self.cpu.world.len() as u64);
@@ -240,16 +239,6 @@ impl LightTree {
     }
 }
 
-pub(crate) fn node_bytes(nodes: &[Node]) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(nodes.len() * 8);
-    for node in nodes {
-        for word in [node.split, node.child] {
-            bytes.extend_from_slice(&word.to_le_bytes());
-        }
-    }
-    bytes
-}
-
 fn page_bytes(
     cpu: &CpuTree,
     anchor: [f64; 3],
@@ -270,7 +259,7 @@ fn page_bytes(
                 }
                 bytes.extend_from_slice(&relative.to_le_bytes());
             }
-            let selection = paths.map_or(page.pdf.to_bits(), |paths| paths[slot]);
+            let selection = paths.map_or(page.path, |paths| paths[slot]);
             for word in [source.format, page.first, page.count, selection, 0] {
                 bytes.extend_from_slice(&word.to_le_bytes());
             }
@@ -357,38 +346,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn gpu_integer_nodes_and_header_have_explicit_little_endian_layout() {
-        let bytes = node_bytes(&[
-            Node {
-                split: 42,
-                child: 1,
-                first: 11,
-                count: 31,
-            },
-            Node {
-                split: 0x10203040,
-                child: 1 << 31 | 7,
-                first: 11,
-                count: 13,
-            },
-            Node {
-                split: 0x50607080,
-                child: 1 << 31 | 9,
-                first: 24,
-                count: 18,
-            },
-        ]);
-        assert_eq!(bytes.len(), 24);
-        let words: Vec<_> = bytes
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .map(|word| u32::from_le_bytes(*word))
-            .collect();
-        assert_eq!(
-            words,
-            [42, 1, 0x10203040, 1 << 31 | 7, 0x50607080, 1 << 31 | 9]
-        );
+    fn gpu_header_has_explicit_little_endian_layout() {
         let header = header_bytes(
             [0x1020304050607080, 0x9080706050403020, 0x0102030405060708],
             1.25,

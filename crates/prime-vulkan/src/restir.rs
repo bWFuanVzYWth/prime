@@ -399,12 +399,16 @@ impl State {
             lighting_changed: false,
         })
     }
-    pub fn invalidate(&mut self) {
+    pub fn invalidate(&mut self, reason: &'static str) {
+        if self.history.valid {
+            let mut event = prime_diagnostics::scope("restir.history.reset");
+            event.value("reason", reason);
+        }
         self.history.invalidate();
         self.temporal_this_frame = false;
     }
     pub fn reset_world(&mut self) {
-        self.invalidate();
+        self.invalidate("world");
         self.scratch = None;
     }
     pub fn commit(&mut self) {
@@ -428,7 +432,6 @@ impl State {
         accumulation: u64,
         realtime: bool,
         linear: bool,
-        sequence: u32,
         jitter: [f32; 2],
         anchor: [f64; 3],
         identity: crate::geometry::HistoryIdentityInput,
@@ -439,7 +442,7 @@ impl State {
             .is_none_or(|scratch| scratch.extent != extent)
         {
             self.scratch = Some(Scratch::new(context, extent)?);
-            self.invalidate();
+            self.invalidate("input_extent");
         }
         let mut previous = self.history.previous;
         for i in 0..3 {
@@ -448,9 +451,6 @@ impl State {
             previous[start..start + 4].copy_from_slice(
                 &((f64::from(position) + self.history.anchor[i] - anchor[i]) as f32).to_le_bytes(),
             );
-        }
-        if sequence == 0 {
-            self.invalidate();
         }
         let scratch = self.scratch.as_ref().unwrap();
         self.temporal_this_frame = realtime && self.history.valid;

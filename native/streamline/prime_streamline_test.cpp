@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <limits>
 #include <map>
+#include <set>
 #include <thread>
 #include <vector>
 
@@ -17,6 +18,10 @@ struct Token : sl::FrameToken {
     }
 };
 std::map<uint32_t, Token> tokens;
+std::set<uint32_t> constants_tokens;
+uint32_t automatic_frame_index{};
+int automatic_token_calls{}, explicit_token_calls{};
+std::vector<uint32_t> evaluated_tokens;
 std::map<std::pair<uint32_t, sl::BufferType>, void *> frame_tags;
 bool frame_tagging_enabled{}, seen_manual_hooking{};
 int initializations{};
@@ -85,11 +90,19 @@ sl::Result mock_release(sl::Feature feature, const sl::ViewportHandle &) {
 sl::Result mock_shutdown() {
     ++shutdowns;
     frame_tags.clear();
+    constants_tokens.clear();
     return sl::Result::eOk;
 }
 sl::Result mock_token(sl::FrameToken *&output, const uint32_t *index) {
-    auto &token = tokens[*index];
-    token.index = *index;
+    const uint32_t logical_index = index ? *index : ++automatic_frame_index;
+    if (index)
+        ++explicit_token_calls;
+    else {
+        ++automatic_token_calls;
+        expected_token = logical_index;
+    }
+    auto &token = tokens[logical_index];
+    token.index = logical_index;
     output = &token;
     return sl::Result::eOk;
 }
@@ -98,7 +111,13 @@ sl::Result mock_constants(const sl::Constants &constants, const sl::FrameToken &
     assert(static_cast<uint32_t>(current) == expected_token);
     ++constants_calls;
     seen_constants = constants;
-    return fg_io_failure == 1 ? sl::Result::eErrorIO : sl::Result::eOk;
+    if (fg_io_failure == 1)
+        return sl::Result::eErrorIO;
+    // Like the pinned SDK, one viewport cannot publish constants twice on the
+    // same logical token, even when their bytes happen to be identical.
+    return constants_tokens.insert(static_cast<uint32_t>(current)).second
+                   ? sl::Result::eOk
+                   : sl::Result::eErrorDuplicatedConstants;
 }
 sl::Result mock_evaluate(sl::Feature feature, const sl::FrameToken &current,
                          const sl::BaseStructure **inputs, uint32_t count, sl::CommandBuffer *cmd) {
@@ -120,6 +139,7 @@ sl::Result mock_evaluate(sl::Feature feature, const sl::FrameToken &current,
         seen_tags.push_back(tag.type);
     }
     ++evaluates;
+    evaluated_tokens.push_back(static_cast<uint32_t>(current));
     if (emit_error)
         log_message(sl::LogType::eError, "NGX evaluate feature failed mock");
     return evaluation_result;
@@ -349,6 +369,21 @@ int main() {
     evaluation_result = sl::Result::eErrorExceptionHandler;
     assert(prime_sl_evaluate(ctx, &frame) == -100);
     assert(prime_sl_configure(ctx, 1280, 720, 3, &size) == 0 && released == 1);
+    const std::array<uint32_t, 7> sample_sequences = {0, 0, 17, 1, UINT32_MAX, 0, 37};
+    frame = make_frame(*ctx);
+    frame.reset = 0;
+    evaluation_result = sl::Result::eOk;
+    const uint32_t first_manual_index = automatic_frame_index;
+    const int prior_automatic_tokens = automatic_token_calls;
+    const int prior_explicit_tokens = explicit_token_calls;
+    for (size_t i = 0; i < sample_sequences.size(); ++i) {
+        frame.frame_index = sample_sequences[i];
+        assert(prime_sl_evaluate(ctx, &frame) == 0);
+        assert(evaluated_tokens.back() == first_manual_index + i + 1);
+        assert(automatic_token_calls == prior_automatic_tokens + i + 1);
+        assert(explicit_token_calls == prior_explicit_tokens);
+        assert(seen_constants.reset == sl::Boolean::eFalse);
+    }
     for (auto expected :
          {VK_SUCCESS, VK_SUBOPTIMAL_KHR, VK_ERROR_OUT_OF_DATE_KHR, VK_ERROR_DEVICE_LOST}) {
         present_result = expected;
@@ -441,6 +476,15 @@ int main() {
     frame.jitter[0] += 0.25f;
     assert(prime_sl_fg_prepare(ctx, &fg) < 0 && constants_calls == prior_constants_calls + 1);
     frame.jitter[0] -= 0.25f;
+    const int prior_interposed_automatic_tokens = automatic_token_calls;
+    const int prior_interposed_explicit_tokens = explicit_token_calls;
+    for (uint32_t sequence : sample_sequences) {
+        frame.frame_index = sequence;
+        assert(prime_sl_evaluate(ctx, &frame) == 0 && evaluated_tokens.back() == 1);
+        assert(constants_calls == prior_constants_calls + 1);
+    }
+    assert(automatic_token_calls == prior_interposed_automatic_tokens &&
+           explicit_token_calls == prior_interposed_explicit_tokens);
     ctx->present_mode = PresentMode::Uninitialized; // FG may prepare before the first Present.
     fg_io_failure = 4;
     assert(prime_sl_fg_prepare(ctx, &fg) == -101 && ctx->fg_enabled &&

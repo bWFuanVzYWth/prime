@@ -23,7 +23,6 @@ pub(crate) struct LightPage {
 pub(crate) struct TreePage {
     pub nodes: Buffer,
     pub root: prime_scene::surface::LightNode,
-    pub pdfs: Vec<f32>,
     pub sphere_root: Option<crate::light_sphere_cpu::Root>,
     pub paths: Vec<u32>,
 }
@@ -158,7 +157,6 @@ fn sampler(
                 vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
             )?,
             root: source.nodes[0],
-            pdfs: Vec::new(),
             sphere_root: Some(tree.root()),
             paths: tree.paths,
         };
@@ -167,10 +165,9 @@ fn sampler(
     } else if method == LightSampling::Tree {
         let mut trace = prime_diagnostics::scope("lt.local");
         trace.fail();
-        let nodes = crate::light_tree_cpu::quantize(&source.nodes)?;
-        let pdfs = crate::light_tree_cpu::leaf_pdfs(&nodes, source.emitters.len())?;
-        let bytes = crate::light_tree::node_bytes(&nodes);
-        trace.count("nodes", nodes.len() as u64);
+        let distance = crate::light_distance_cpu::Tree::local(&source.nodes, &source.emitters)?;
+        let bytes = crate::light_distance_cpu::node_bytes(&distance.nodes);
+        trace.count("nodes", distance.nodes.len() as u64);
         trace.count("bytes", bytes.len() as u64);
         let tree = TreePage {
             nodes: Buffer::upload_device(
@@ -179,9 +176,8 @@ fn sampler(
                 vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
             )?,
             root: source.nodes[0],
-            pdfs,
             sphere_root: None,
-            paths: Vec::new(),
+            paths: distance.paths,
         };
         trace.succeed();
         Some(tree)

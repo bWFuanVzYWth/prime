@@ -12,6 +12,7 @@ mod display_pipeline;
 mod dynamic;
 mod exposure;
 mod hdr;
+mod light_distance_cpu;
 mod light_grid;
 mod light_grid_cpu;
 #[cfg(all(test, feature = "shader-tests"))]

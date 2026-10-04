@@ -5,6 +5,7 @@ import "restir/reservoir.slang";
 import "restir/pairwise.slang";
 import "restir/paired_neighbors.slang";
 import "restir/identity.slang";
+import "restir/history_support.slang";
 
 [[vk::binding(0, 0)]] StructuredBuffer<uint4> inputs;
 [[vk::binding(1, 0)]] RWStructuredBuffer<uint4> outputs;
@@ -90,6 +91,12 @@ import "restir/identity.slang";
     } else if (config.x == 8u) {
         uint4 record = inputs[i];
         outputs[i] = uint4(restirHistoryRecordValid(record.xy, record.z, record.w), 0, 0, 0);
+    } else if (config.x == 9u) {
+        uint4 record = inputs[i];
+        ReSTIRPathFlags path = {};
+        path.insertPathLength(record.x);
+        path.insertLastVertexNEE(record.y != 0u);
+        outputs[i] = uint4(restirPathFitsBudget(path, record.z), 0, 0, 0);
     } else if (config.x == 7u) {
         ReSTIRPathFlags flags = {};
         flags.tryInsertBounceTypesBeforeRcVertex(i & 63u, true);

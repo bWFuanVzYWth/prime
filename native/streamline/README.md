@@ -87,6 +87,12 @@ engine's raw fallback mask. Anonymous raw batches lack real owner/submission/par
 correspondence. Moving optical interfaces remain unsupported. This does not
 establish that all moving content has been denoising-validated in the game.
 
+Sampling sequence numbers are independent of SDK logical frames. Manual RR
+asks `slGetNewFrameToken` to advance its internal frame counter for every
+evaluation; repeating zero, a sequence gap or sampling-counter wrap does not
+reuse an SDK token or request history reset. The interposed path continues to
+share the token created by the real host `prime_sl_frame` boundary with RR/FG.
+
 Descriptor memory is borrowed through `evaluate`; images and views remain alive
 through host GPU completion. Tagged resources enter and leave GENERAL. Tags are
 valid through evaluation and require no extra volatile-tag copy. SDK
@@ -170,7 +176,10 @@ Run production argument/dispatch contracts without a GPU or window:
 Tests cover RR mode/preset/alpha and guides, one-time shared constants, FG
 formats/tags/options, Reflex/PCL markers, public-fence timeout retention, tag
 clearing, unavailable extents, all seven SDK I/O failure boundaries, host shutdown
-and actual Present result precedence. They do not prove runtime quality or game
+and actual Present result precedence. Production bridge dispatch additionally
+checks that repeated/gapped/wrapping sample indices generate fresh manual SDK
+tokens, while interposed RR reuses its real host token without duplicate
+constants. They do not prove runtime quality or game
 performance. Startup tests additionally cover the title path without a world,
 unwritten asynchronous results, cross-thread delayed errors, callback retention
 through ON/OFF, and the strictly gated synchronous fallback. The interposed

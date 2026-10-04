@@ -122,9 +122,9 @@ cargo test -p prime_engine --no-default-features --lib --locked
 
 客户端命令 `/primept renderer vanilla`、`/primept renderer path_trace` 与 `/primept renderer restir_pt` 只请求切换，实际资源移交在下一外层帧边界执行。验证时覆盖 Prime→原版→Prime、世界退出/重进、标题界面资源重载及退休失败；等待资源加载完成再采样，不把切换暂停计入稳态。首个 Prime 后端使用宿主事件驱动的源路由，加载完成的判据包括待路由地形事件清空，不能仅等待首帧输出。新增后端通过惰性工厂注册，并遵守公共 `RendererSlot` 的完成/失败契约。
 
-光源采样方式在光照组选择，默认 `GRID`，另可选 `TREE` 功率树和 `TREE_SPHERE` 包围盒中心球界方向树。游戏内修改在下一外层帧边界生效，无需重启；关闭设置页保存选择。切换先完成旧宿主提交，重建所选独立shader管线和灯表，保留已发布几何/BLAS与共享GPU发光记录。RR历史与离线累积会重置，冻结相机与源保持；切换可能有一次暂停，不计入稳态性能。稳态没有采样方式的GPU运行时分支；为切换保留的CPU灯源有实际驻留成本，见[PT设计](docs/pt-state-design.md#光源采样特化与切换成本)。
+光源采样方式在光照组选择，默认 `GRID`，另可选 `TREE` 功率距离树和 `TREE_SPHERE` 包围盒中心球界方向树。游戏内修改在下一外层帧边界生效，无需重启；关闭设置页保存选择。切换先完成旧宿主提交，重建所选独立shader管线和灯表，保留已发布几何/BLAS与共享GPU发光记录。实时 RR 与 ReSTIR 历史继续复用，ReSTIR 在当前场景更新后缀/PDF；离线累积重置，冻结相机与源保持。切换可能有一次暂停，不计入稳态性能。稳态没有采样方式的GPU运行时分支；为切换保留的CPU灯源有实际驻留成本，见[PT设计](docs/pt-state-design.md#光源采样特化与切换成本)。
 
-对比时固定同一世界副本、相机/移动路线、种子、预算、原生1920×1080、RR/OMM与硬件；每种方式各录制加载/更新及停止更新后的稳态窗口，保留离群帧。JSON `cap.start`/`cfg` 的 `ls=0/1/2` 分别表示Grid/功率Tree/TreeSphere；以实际录制的配置和切换事件划分窗口。比较 `lg.*`/`lt.*`/`ls.*`、`lights.switch`、总static/提取与GPU K2/整帧时间。球界树仍是游戏实测候选，小样板的连续PMF、选光微基准或单场景收益不能外推生产质量与帧率，也不足以决定默认方式。
+对比时固定同一世界副本、相机/移动路线、种子、预算、原生1920×1080、RR/OMM与硬件；每种方式各录制加载/更新及停止更新后的稳态窗口，保留离群帧。JSON `cap.start`/`cfg` 的 `ls=0/1/2` 分别表示Grid/功率距离Tree/TreeSphere；以实际录制的配置和切换事件划分窗口。比较 `lg.*`/`lt.*`/`ls.*`、`lights.switch`、总static/提取与GPU K2/整帧时间。球界树仍是游戏实测候选，小样板的连续PMF、选光微基准或单场景收益不能外推生产质量与帧率，也不足以决定默认方式。
 
 ### 用户手动检查重点
 
@@ -137,12 +137,12 @@ cargo test -p prime_engine --no-default-features --lib --locked
 
 6. 在“Esc → 选项 → 视频设置”列表顶部检查四组 Prime PT 控件、默认恢复与关闭后持久化；标题画面的视频设置也应显示同一组控件。覆盖简体中文/英语、不同 GUI 缩放，确认四个组标题都有 Prime PT 前缀，没有翻译键、截断或重复控件，原版视频选项仍可用；RR 与 OMM 开关应位于诊断组。确认新默认饱和度补偿为20%，已有合法保存值（包括8%）不被覆盖，重新启动后配置生效。退出客户端后将 `config/primept.properties` 的 `version` 改成不匹配的值，再启动应整份回退默认，日志说明原因。
 7. 世界加载完成后用 Ctrl+Alt+F2 进入离线，确认视角/实体/粒子固定、噪点持续减少；按 Esc 打开菜单仍保持离线。曝光、primeDRT 和每帧采样数可以修改，路径/光照固定。调整尺寸后重新累积；再次按快捷键应重新捕获当前世界，地图/动态纹理不能过期。覆盖冻结时 F3+T 重载、切原版、退出/重进世界。
-8. 实时诊断依次查看原始噪声色、线性深度、世界法线；检查物体边缘、alpha 表面和天空（深度/法线预览为黑）。修改深度范围只改变预览；回到最终输出后 primeDRT 正常。开启 RR 时这些诊断显示实际内部输入；返回最终输出会重置重建历史。
+8. 实时诊断依次查看原始噪声色、线性深度、世界法线；检查物体边缘、alpha 表面和天空（深度/法线预览为黑）。修改深度范围只改变预览；回到最终输出后 primeDRT 正常。开启 RR 时这些诊断显示实际内部输入；诊断显示期间继续执行 RR 并推进已接受的相机历史，返回最终输出不触发重置；因此诊断仍包含正常 RR 的 GPU 成本。
 9. 使用声明 `format=lab-pbr/1.3` 的资源包，检查 `_n` 法线与远处粗糙度、`_s` 的介质/金属分类、玻璃 IOR、发光零值和 255 哨兵；覆盖地形与 atlas UV 的物品、纹理动画、资源重载、实时/离线切换。分类通道 G/B 应保持基础层身份，动画分类采用当前帧；缺图遵循全局缺省和已有宿主源规则。高度解码与自动 foliage 材质选择的支持边界见 [材质契约](docs/materials.md)。
 10. 检查星图方向、明暗、前景边缘与水面反射，覆盖星图强度零值、RR 开关、天空亮度和冻结；天空亮度与星图强度分别控制。检查暗室/明亮室外间曝光适应、手动曝光只乘一次、进入离线后的固定曝光，以及同时切换模式和曝光补偿强度时的重测。
 11. 在启用 Windows HDR 的实际显示器测试 HDR 开关、SDR 白自动/指定值、峰值、跨显示器移动与 scRGB swapchain；检查 HUD/手部、标题菜单和无世界时的亮度/方位。FG 默认关闭，只有实时 RR 最终输出及 SDK 能力满足时生效；分别检查 SDR/HDR 下 HUD 稳定、真实 Present、窗口变化、后端/模式切换与关闭资源。离屏测试不证明实际生成帧、显示器标定或整帧速度，见[显示合同](docs/display.md)。
 12. 两版分别检查诊断和“录制性能 JSON”：默认关闭、终端不输出慢帧长日志；开启后覆盖稳态、移动/编辑、实时/离线。关闭采集应后台导出一份可解析 JSON，再次开启产生新会话；退出世界、后端切换和关闭客户端也应收尾。检查线程/frame/parent、GPU delayed serial 与 pending/null，保留尖峰；确认关闭采集但保留诊断时仍能导出完整尾部。游戏性能比较另外固定场景和预算，区分采集开销。
-13. 在已加载的同一场景依次切换网格、功率树、球界方向树，再切回网格，检查无需重启即可生效、世界不因采样方式消失、灯和发光命中无缺失。分别覆盖raw、RR及冻结Offline；Offline姿态、光照和种子保持，切换后从新累积开始。记录切换暂停及切换后的稳态窗口，检查JSON `cfg.ls`与设置一致；世界重进和重载后仍使用保存的方式。检查validation日志，切换失败不能继续创建或使用资源。
+13. 在已加载的同一场景依次切换网格、功率距离树、球界方向树，再切回网格，检查无需重启即可生效、世界不因采样方式消失、灯和发光命中无缺失。分别覆盖raw、RR及冻结Offline；Offline姿态、光照和种子保持，切换后从新累积开始。记录切换暂停及切换后的稳态窗口，检查JSON `cfg.ls`与设置一致；世界重进和重载后仍使用保存的方式。检查validation日志，切换失败不能继续创建或使用资源。
 
 正确性检查时显式追加 `-PprimeptValidation=true`，此时不作性能结论。性能采样保持 validation、legacy profile、细叶计时和 capture audit 关闭，在游戏内启用性能采集，固定场景、相机、画质、射线预算与原生1920×1080分辨率，停止后保存 JSON。积压清空后的原型稳态应只交换请求/响应头，`requested/compiled/tint_requests` 为0；覆盖边缘可能仍不完整，pending=0 不能证明全部64段单元齐备。分别记录稳态及更新阶段；CPU 优化目前非阻塞，不以即时 FPS 达标作为本轮检查的前提。
 
@@ -162,7 +162,7 @@ TreeSphere的CPU拓扑、叶数、路径和保守球界使用 `cargo test -p pri
 
 `PRIME_REGISTER_TREE_BUILD=saoh|balanced` 仅在上述 `shader-tests` 无窗口测试中选择TreeSphere构树方式，默认沿用SAOH。balanced按最长质心轴等分真实叶子，在世界层与每个页内分别平衡，不增加虚拟灯或GPU方法分支；各层叶深为floor/ceil(log2 N)，组合深度仍随页灯数变化。metadata记录策略和实际local叶深分布，日志记录每次world构树的叶深分布；局部路径统计在预加载后、正式计时前扫描一次，不计作生产开销。拓扑改变会改变proposal及收敛，必须另测质量；该测试选项不进入游戏设置或生产构建。
 
-Grid/功率Tree的合成CPU对比需显式运行 `cargo test -p prime_vulkan --release --lib cpu_sampler_comparison --locked -- --ignored --nocapture`。默认CSV保存在 `artifacts/light-sampler-restoration/cpu-comparison.csv`，保留全部轮次和共同源准备成本；不包含TreeSphere、Vulkan上传、GPU时间或画面质量。生产三种方式按前文同场景录制步骤分别验收。
+Grid/旧纯功率Tree的合成CPU对比需显式运行 `cargo test -p prime_vulkan --release --lib cpu_sampler_comparison --locked -- --ignored --nocapture`。默认CSV保存在 `artifacts/light-sampler-restoration/cpu-comparison.csv`，保留全部轮次和共同源准备成本；不代表当前功率距离Tree，也不包含TreeSphere、Vulkan上传、GPU时间或画面质量。生产三种方式按前文同场景录制步骤分别验收。
 
 ### ReSTIR PT Enhanced
 

@@ -5,6 +5,132 @@ use realtime_tests::camera;
 use restir_adapter_tests::{fixtures, run_probe};
 
 #[test]
+#[ignore = "requires windowless Vulkan; accepted history across sampling/resource/configuration changes"]
+fn gpu_restir_retains_history_without_a_proved_global_change() {
+    let settings = RenderSettings {
+        integrator: Integrator::RestirPt,
+        mode: RenderMode::Realtime,
+        bounces: 6,
+        sun: 1. / 256.,
+        sky: 1. / 256.,
+        stars: 0.,
+        auto_exposure_compensation: 0.,
+        ray_reconstruction: false,
+        opacity_micromap: false,
+        ..Default::default()
+    };
+    let mut renderer =
+        Renderer::with_settings_and_workers(settings, Arc::new(CpuWorkers::new(1).unwrap()))
+            .unwrap();
+    let mut scene = frame::tests::plane();
+    let camera = frame::tests::camera();
+    renderer.render(&scene, &camera, 17, 9, 0).unwrap();
+    assert!(!renderer.restir.as_ref().unwrap().temporal_this_frame);
+    assert!(renderer.restir.as_ref().unwrap().accepted_history().0);
+    let scratch = renderer
+        .restir
+        .as_ref()
+        .unwrap()
+        .history_for_test()
+        .0
+        .address();
+    let table_handles = renderer
+        .geometry
+        .as_ref()
+        .unwrap()
+        .history_identity_buffers_for_test()
+        .map(|buffer| buffer.buffer);
+    // Zero may be the host's sampling restart after an atlas edit or a skipped
+    // draw. The real accepted GPU history remains valid on repeated zero frames.
+    renderer.render(&scene, &camera, 17, 9, 0).unwrap();
+    assert!(renderer.restir.as_ref().unwrap().temporal_this_frame);
+    let context = renderer.context.clone();
+    let previous_revision = renderer
+        .geometry
+        .as_mut()
+        .unwrap()
+        .shader_history_identity(&context, 0)
+        .unwrap()
+        .revision;
+    let mut resource_source = prime_scene::SourceScene::default();
+    resource_source
+        .publish_resource_textures(1, Vec::new())
+        .unwrap();
+    scene.resources = resource_source.translate([0.; 3]).unwrap().resources;
+    renderer.render(&scene, &camera, 17, 9, 0).unwrap();
+    assert!(renderer.restir.as_ref().unwrap().temporal_this_frame);
+    assert!(renderer.restir.as_ref().unwrap().dynamic_update_this_frame);
+    assert_eq!(
+        renderer
+            .geometry
+            .as_ref()
+            .unwrap()
+            .history_identity_buffers_for_test()
+            .map(|buffer| buffer.buffer),
+        table_handles,
+        "Texture ownership alone replaced monotonic geometry identity storage"
+    );
+    assert!(
+        renderer
+            .geometry
+            .as_mut()
+            .unwrap()
+            .shader_history_identity(&context, 0)
+            .unwrap()
+            .revision
+            > previous_revision
+    );
+    resource_source
+        .publish_resource_textures(2, Vec::new())
+        .unwrap();
+    scene.resources = resource_source.translate([0.; 3]).unwrap().resources;
+    // A real catalog replacement withdraws/rebuilds geometry via the existing
+    // range journal while preserving the global history bank and watermark.
+    scene.terrain_resource_generation += 1;
+    renderer.render(&scene, &camera, 17, 9, 73).unwrap();
+    assert!(renderer.restir.as_ref().unwrap().temporal_this_frame);
+    for (budget, method) in [
+        (2, LightSampling::Tree),
+        (8, LightSampling::TreeSphere),
+        (1, LightSampling::Grid),
+    ] {
+        let accepted = renderer.restir.as_ref().unwrap().accepted_history();
+        renderer
+            .configure(RenderSettings {
+                bounces: budget,
+                light_sampling: method,
+                ..settings
+            })
+            .unwrap();
+        assert_eq!(
+            renderer.restir.as_ref().unwrap().accepted_history(),
+            accepted
+        );
+        renderer.render(&scene, &camera, 17, 9, 0).unwrap();
+        assert!(renderer.restir.as_ref().unwrap().temporal_this_frame);
+        assert!(renderer.restir.as_ref().unwrap().dynamic_update_this_frame);
+        assert_eq!(
+            renderer
+                .restir
+                .as_ref()
+                .unwrap()
+                .history_for_test()
+                .0
+                .address(),
+            scratch
+        );
+    }
+    renderer.render(&scene, &camera, 19, 9, 0).unwrap();
+    assert!(!renderer.restir.as_ref().unwrap().temporal_this_frame);
+    scene.epoch += 1;
+    renderer.render(&scene, &camera, 19, 9, 11).unwrap();
+    assert!(!renderer.restir.as_ref().unwrap().temporal_this_frame);
+    eprintln!(
+        "ReSTIR history retained across zero/gap sequence, resource owner/generation and sampler/budget changes; actual extent/world epoch reset"
+    );
+}
+
+#[test]
 #[ignore = "requires windowless Vulkan; production dynamic temporal cached-suffix update"]
 fn gpu_restir_temporal_update_replays_all_cached_suffix_cases() {
     let settings = RenderSettings {

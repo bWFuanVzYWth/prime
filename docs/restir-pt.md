@@ -40,7 +40,9 @@ TreeSphere 下，带法线贴图的非光学接收面的采样法线会随入射
 
 身份仍有效不代表旧光照有效。变化帧按上游动态分支重新求值环境端点、发光端点、连接点 NEE 或固定随机种子的后缀，包含当前可见性、材质、PDF/MIS 和介质吸收。源 integrand/weight 保留原 MIS 源项的顺序，合并选择更新后的 cache 并最终归一化。Prime 分离天空/太阳 proposal，失去原端点支持时拒绝，不伪造环境旋转。静态帧继续复用缓存；持续太阳运动会增加后缀重放查询，尚无整帧收益测量。此处采用原版无旧场景的更新模式，不声明任意动态场景下的精确旧场景 MIS。
 
-首次使用、世界/场景 owner 或 epoch 更换、纹理资源 owner/generation 更换、尺寸/重建配置、积分器/顶点预算/光源采样方式变化、明确序列重启与失败录制仍是全局失效边界。非零序列跳号与随机 seed 变化继续使用最近一次已接受历史。RR 的当前 guide、motion 和完成状态由其重建合同负责；保留历史不构成 SDK 内部逐像素拒绝的保证。显示参数只影响 resolve/display。
+首次使用、世界/场景 owner 或 epoch 更换、实际内部尺寸变化及实时/离线或积分器域切换仍是全局失效边界。不能证明整个复用域失效时继续接收历史。采样编号归零、回绕、跳号、seed、暂时跳帧、纹理资源 owner/generation、顶点预算、光源采样方式或 FG 切换继续使用最近一次已接受历史。纹理换代保留单调身份表，并按真实变更日志更新相关 static/dynamic/emitter slot。预算和光源 proposal 改变按已有当前场景后缀更新处理，不保存旧 proposal/场景；维持当前动态模式的近似边界，不声明任意 proposal 切换下的严格无偏性。预算降低仅拒绝超过新支持的路径：NEE 端点的 `pathLength < budget`，BSDF-hit/escape 的 `pathLength+1 < budget`。
+
+启用性能录制时，实际丢弃已接受历史记录 `restir.history.reset` 与 `reason`，可对齐实机闪烁；不增加逐像素读回或等待。RR 的当前 guide、motion 和完成状态由其[重建合同](reconstruction.md)负责，图像转换见[坐标契约](coordinates.md)；保留历史不构成 SDK 内部逐像素拒绝的保证。显示参数只影响 resolve/display。
 
 前帧 reservoir 在本帧全部读取完成后才被空间 merge 覆写。primary 使用两个 bank，前帧相机和 bank 交换只在宿主接受提交后提交；取消录制不会推进历史。resize、后端切换和关闭沿用已有 GPU 完成或取消证明后回收的规则，不按经过的帧数猜测资源寿命。
 

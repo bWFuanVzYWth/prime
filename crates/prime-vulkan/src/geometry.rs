@@ -14,7 +14,7 @@ pub(super) use history_identity::HistoryIdentityInput;
 use prime_scene::instances::InstanceInput;
 use prime_scene::{
     geometry::MeshGeometry,
-    incremental::{ResourceIdentity, SceneInput, ScenePublication},
+    incremental::{SceneInput, ScenePublication},
     scene::{InstanceScene, Scene},
     spatial::Cell,
     surface::SurfaceCompiler,
@@ -132,7 +132,6 @@ impl Cluster {
 
 pub(super) struct Geometry {
     history_identity: Option<HistoryIdentity>,
-    history_resources: ResourceIdentity,
     workers: Arc<prime_scene::workers::CpuWorkers>,
     indices: [Buffer; crate::packing::FORMATS],
     builds: crate::arena::Arena,
@@ -268,7 +267,6 @@ impl Geometry {
             objects: Objects::new(context, workers)?,
             directory: crate::static_directory::StaticDirectory::default(),
             history_identity: None,
-            history_resources: scene.resource_identity(),
             light_sources: BTreeMap::new(),
             capabilities: [0; 3],
             top_dirty: true,
@@ -352,11 +350,10 @@ impl Geometry {
         self.anchor
     }
 
-    // Numeric slot revisions are local to this scene/resource ownership domain.
+    // Texture replacement uses the existing slot/support journals. Only a new
+    // world/source domain loses the numeric geometry identities themselves.
     pub fn history_owner_matches(&self, scene: SceneInput<'_>) -> bool {
-        self.same_owner(scene)
-            && self.epoch == scene.epoch
-            && self.history_resources == scene.resource_identity()
+        self.same_owner(scene) && self.epoch == scene.epoch
     }
 
     // Allocated only when ReSTIR actually consumes history. Subsequent calls upload changed
@@ -634,9 +631,6 @@ impl Geometry {
             compiler.set_cutout_squares(self.opacity_micromap);
         }
         let mut plan = self.static_planner.plan_input_limited(scene, cell_budget)?;
-        if self.history_resources != scene.resource_identity() {
-            self.history_identity = None;
-        }
         plan.placements_changed |= instance_flags_changed;
         let published_changed = plan.content_changed;
         let history_changed_cells: BTreeSet<_> = if self.history_identity.is_some() {
@@ -1151,7 +1145,6 @@ impl Geometry {
             self.revision = scene.publication();
             self.anchor = scene.anchor;
             self.resource_revision = resources.revision;
-            self.history_resources = scene.resource_identity();
             self.resource_occlusion_revision = resources.occlusion_revision;
             self.omm_revision = resources.omm_revision;
             resources.coverage_changed.clear();
@@ -1359,7 +1352,6 @@ impl Geometry {
         self.revision = scene.publication();
         self.anchor = scene.anchor;
         self.resource_revision = resources.revision;
-        self.history_resources = scene.resource_identity();
         self.resource_occlusion_revision = resources.occlusion_revision;
         self.omm_revision = resources.omm_revision;
         resources.coverage_changed.clear();

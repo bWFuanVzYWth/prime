@@ -171,7 +171,7 @@ flags 的 bit0 表示已在这台逻辑设备启用 `VK_EXT_opacity_micromap` �
 
 ## 设置结构与文件 schema
 
-`prime_configure(handle,&settings)` 借用104 B `PrimeSettings`，header使用公共ABI v12。`light_sampling` 位于96字节偏移，0为Grid、1为Tree功率树、2为TreeSphere球界方向树，其他值拒绝；创建时采用当前值，之后允许在外层帧边界变更。宿主先提交并证明旧命令完成，native重建所选管线，并在下一次录制中完成灯表和目录更新后才dispatch。JAR与DLL仍须配套重建，旧DLL不接受新枚举值。末字段 `integrator` 位于100字节偏移，0为PathTrace、1为RestirPt，其他值拒绝。磁盘 `primept.properties` 为schema v8，合法值为`GRID`、`TREE`、`TREE_SPHERE`；旧版本或字段不完整按既有严格规则整份回退默认，不以旧控制字节序列作为生产输入。
+`prime_configure(handle,&settings)` 借用104 B `PrimeSettings`，header使用公共ABI v12。`light_sampling` 位于96字节偏移，0为Grid、1为Tree功率距离树、2为TreeSphere球界方向树，其他值拒绝；创建时采用当前值，之后允许在外层帧边界变更。宿主先提交并证明旧命令完成，native重建所选管线，并在下一次录制中完成灯表和目录更新后才dispatch。JAR与DLL仍须配套重建，旧DLL不接受新枚举值。末字段 `integrator` 位于100字节偏移，0为PathTrace、1为RestirPt，其他值拒绝。磁盘 `primept.properties` 为schema v8，合法值为`GRID`、`TREE`、`TREE_SPHERE`；旧版本或字段不完整按既有严格规则整份回退默认，不以旧控制字节序列作为生产输入。
 
 | 字段 | 范围/语义 |
 | --- | --- |
@@ -189,7 +189,7 @@ flags 的 bit0 表示已在这台逻辑设备启用 `VK_EXT_opacity_micromap` �
 | auto_exposure_compensation | `[0,1]`，默认0.6；0关闭，其余为旧算法的补偿强度，并非EV |
 | hdr / hdr_reference_white | 0/1请求；0自动参考白，否则1–10000 nit；实际启用需surface及标定支持 |
 | frame_generation | 0/1请求，默认0；实时RR、早期interposer及实际SDK支持全部成立才准备 |
-| light_sampling | 0 Grid默认、1 Tree功率树、2 TreeSphere球界方向树；帧边界切换并重置采样历史 |
+| light_sampling | 0 Grid默认、1 Tree功率距离树、2 TreeSphere球界方向树；帧边界切换，重置离线累积，实时历史继续复用 |
 | integrator | 0 PathTrace默认、1 RestirPt Enhanced；独立管线与历史，帧边界切换 |
 
 结构尺寸/版本、枚举、有限性及范围完整验证后应用。模式、采样方式或实时RR布局改变前宿主先提交encoder并证明旧提交完成，在外层帧边界切换；native依旧资源最后consumer退休。显示控制和格预算无需模式切换等待。冻结拒绝实时源变更入口，但允许替换采样proposal；仅更新快照设置的`light_sampling`，保留姿态和其他冻结输运参数。资源及显示边界见[渲染模式](renderers.md)。

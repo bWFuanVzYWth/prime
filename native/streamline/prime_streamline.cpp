@@ -671,7 +671,9 @@ extern "C" int32_t prime_sl_evaluate(void *context, const PrimeSlFrame *frame) {
     if (result)
         return result;
     sl::FrameToken *token = ctx.interposed ? ctx.frame_token : nullptr;
-    if (!token && (result = check(ctx.get_token(token, &frame->frame_index), "slGetNewFrameToken")))
+    // Sampling indices can restart, repeat or wrap independently of SDK logical
+    // frames. Manual RR needs a fresh SDK token for each evaluation.
+    if (!token && (result = check(ctx.get_token(token, nullptr), "slGetNewFrameToken")))
         return result;
     if ((result = set_common_constants(ctx, *frame, *token)))
         return result;

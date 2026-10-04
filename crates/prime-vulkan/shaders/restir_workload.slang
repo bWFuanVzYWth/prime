@@ -33,6 +33,7 @@ import "restir/pairing.slang";
 import "restir/paired_neighbors.slang";
 import "restir/types.slang";
 import "restir/reservoir.slang";
+import "restir/history_support.slang";
 import "frame.slang";
 
 int2 previousPixel(RestirScene resources, RestirPrimary primary, SurfaceHit hit) {
@@ -80,7 +81,9 @@ int2 previousPixel(RestirScene resources, RestirPrimary primary, SurfaceHit hit)
                 uint previousOffset = restirOffset(uint2(pixel), extent);
                 HitInfo previousHit = parameters.previousPrimary[previousOffset].hit;
                 PathReservoir history = parameters.history[previousOffset];
-                if (previousHit.isValid() && restirHistoryHitValid(resources, previousHit) &&
+                if (restirPathFitsBudget(history.pathFlags,
+                                         asuint(parameters.frame.displayExtra.z)) &&
+                    previousHit.isValid() && restirHistoryHitValid(resources, previousHit) &&
                     (!history.reconnectionHit.isValid() ||
                      restirHistoryHitValid(resources, history.reconnectionHit))) {
                     mask.data = 1u;

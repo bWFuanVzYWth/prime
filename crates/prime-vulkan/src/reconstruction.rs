@@ -114,9 +114,16 @@ impl Reconstruction {
                 (self.previous.is_some(), images.input, images.output)
             })
     }
-    pub fn reset(&mut self) {
+    pub fn reset(&mut self, reason: &'static str) {
+        if self.previous.is_some() {
+            let mut event = prime_diagnostics::scope("rr.history.reset");
+            event.value("reason", reason);
+        }
         self.previous = None;
         self.pending = None;
+    }
+    pub fn invalidate_descriptors(&mut self) {
+        self.descriptor_dirty.fill(true);
     }
     /// The host proves actual ordered submission, independently of CPU recording.
     pub fn commit(&mut self) {
@@ -205,7 +212,7 @@ impl Reconstruction {
         frame_generation: bool,
     ) -> Result<(), String> {
         if self.epoch != Some(epoch) {
-            self.reset();
+            self.reset("world_epoch");
             self.epoch = Some(epoch);
         }
         if self
@@ -245,7 +252,7 @@ impl Reconstruction {
                 visible: None,
             });
             self.descriptor_dirty.fill(true);
-            self.reset();
+            self.reset("configuration");
             eprintln!(
                 "[Prime PT] DLSS RR preset F {:?}: {}x{} -> {}x{}",
                 quality, input[0], input[1], output[0], output[1]
@@ -285,8 +292,9 @@ impl Reconstruction {
             .previous
             .map(|p| history::rebase(p.camera, p.anchor, anchor));
         // Camera/FOV changes are evaluated by reprojection and guide completion per pixel.
-        let valid = sequence != 0 && previous.is_some();
-        let previous_camera = previous.filter(|_| valid).unwrap_or(camera);
+        // Sequence is a sampling identity; zero or a gap does not prove a camera cut.
+        let valid = previous.is_some();
+        let previous_camera = previous.unwrap_or(camera);
         self.constants[slot].write(&history::camera_constants(
             camera,
             previous_camera,
@@ -409,7 +417,9 @@ impl Reconstruction {
         self.barrier(command, true);
         let images = self.images.as_ref().unwrap();
         let mut success = false;
-        if view == DiagnosticView::Output && !self.failed() {
+        // Keep the model and accepted camera history advancing together while guides
+        // are displayed. A diagnostic view only changes the final display selection.
+        if !self.failed() {
             self.last_serial = serial;
             let result = self.runtime.as_mut().unwrap().evaluate(
                 command,
@@ -426,7 +436,7 @@ impl Reconstruction {
                 }
                 Err(failure) => {
                     self.error = Some(failure.message.clone());
-                    self.reset();
+                    self.reset("evaluation_failure");
                     if failure.unsafe_recording {
                         return Err(failure.message);
                     }
@@ -437,7 +447,9 @@ impl Reconstruction {
                 }
             }
         } else {
-            self.reset();
+            // A permanently failed model did not consume this camera. Raw fallback
+            // must not promote it as accepted SDK history.
+            self.pending = None;
         }
         self.barrier(command, false);
         let images = self.images.as_ref().unwrap();

@@ -8,6 +8,29 @@ use reference::{cross, dot, inverse, normalized, sub, transform};
 #[test]
 #[ignore = "windowless execution of production sphere proposal, finite selectors and PDF replay"]
 fn gpu_sphere_tree_integer_support_forward_reverse_and_geometry_boundaries() {
+    for extreme_power in [false, true] {
+        tree_integer_support_forward_reverse_and_geometry_boundaries(
+            prime_scene::settings::LightSampling::TreeSphere,
+            extreme_power,
+        );
+    }
+}
+
+#[test]
+#[ignore = "windowless execution of production distance proposal, finite selectors and PDF replay"]
+fn gpu_distance_tree_integer_support_forward_reverse_and_geometry_boundaries() {
+    for extreme_power in [false, true] {
+        tree_integer_support_forward_reverse_and_geometry_boundaries(
+            prime_scene::settings::LightSampling::Tree,
+            extreme_power,
+        );
+    }
+}
+
+fn tree_integer_support_forward_reverse_and_geometry_boundaries(
+    sampler: prime_scene::settings::LightSampling,
+    extreme_power: bool,
+) {
     use prime_scene::{
         geometry::CompiledQuad,
         settings::LightSampling,
@@ -41,7 +64,9 @@ fn gpu_sphere_tree_integer_support_forward_reverse_and_geometry_boundaries() {
                 };
                 let mut face = SurfaceFace::from_quad(quad);
                 face.emission = Emission {
-                    radiance: [if id == 0 {
+                    radiance: [if !extreme_power {
+                        1.0
+                    } else if id == 0 {
                         1e-20
                     } else if id == 2 {
                         1e20
@@ -55,15 +80,9 @@ fn gpu_sphere_tree_integer_support_forward_reverse_and_geometry_boundaries() {
             })
             .collect();
         let mesh = SurfaceMesh::from_resolved(key, faces).unwrap();
-        let page = crate::surface::upload_lights(
-            &context,
-            &mesh,
-            &textures,
-            key,
-            LightSampling::TreeSphere,
-        )
-        .unwrap()
-        .unwrap();
+        let page = crate::surface::upload_lights(&context, &mesh, &textures, key, sampler)
+            .unwrap()
+            .unwrap();
         pages.push(page);
     }
     let sources: std::collections::BTreeMap<_, _> = pages
@@ -72,14 +91,8 @@ fn gpu_sphere_tree_integer_support_forward_reverse_and_geometry_boundaries() {
         .collect();
     let mut uploads = crate::arena::Arena::new(&context, true);
     let mut tree = crate::light_tree::LightTree::new(&context);
-    tree.update(
-        &context,
-        [0.; 3],
-        &sources,
-        &mut uploads,
-        LightSampling::TreeSphere,
-    )
-    .unwrap();
+    tree.update(&context, [0.; 3], &sources, &mut uploads, sampler)
+        .unwrap();
     let address = tree.header_address();
     let receivers = [
         ([17., 0., 0.125], [0., 0., 1.]), // face center, d2 == 0 and zero projected receiver bound
@@ -87,7 +100,8 @@ fn gpu_sphere_tree_integer_support_forward_reverse_and_geometry_boundaries() {
         ([18., 1., 0.125], [0., 0., 1.]), // coplanar edge/corner
         ([23., 2., 8.], [0., 0., -1.]),
         ([23., 2., -8.], [0., 0., 1.]),
-        ([23., 2., 8.], [0.; 3]), // optical full-hemisphere proposal
+        ([23., 2., 8.], [0.; 3]),      // optical full-hemisphere proposal
+        ([23., 2., 8.], [0., 0., 1.]), // same receiver, opposite shading normal
     ];
     let lights: Vec<_> = pages
         .iter()
@@ -107,7 +121,11 @@ fn gpu_sphere_tree_integer_support_forward_reverse_and_geometry_boundaries() {
     }
     let output = run(
         &context,
-        prime_shader_tests::sphere_tree(),
+        if sampler == LightSampling::Tree {
+            prime_shader_tests::light_tree()
+        } else {
+            prime_shader_tests::sphere_tree()
+        },
         &input,
         input.len() / 12 * 8,
         [0, (input.len() / 12) as u32],
@@ -148,6 +166,29 @@ fn gpu_sphere_tree_integer_support_forward_reverse_and_geometry_boundaries() {
             assert_eq!(worlds.values().copied().sum::<u32>(), 1 << 24);
             assert!(locals.values().all(|&n| n == 1 << 24));
             assert!((total - 1.0).abs() < 2e-7, "actual PMF sum {total}");
+        }
+    }
+    if sampler == LightSampling::Tree {
+        let case_words = lights.len() * 2 * 8;
+        let at = |case| &output[case * case_words..(case + 1) * case_words];
+        assert_eq!(
+            at(3),
+            at(5),
+            "distance proposal ignores zero shading normal"
+        );
+        assert_eq!(
+            at(3),
+            at(6),
+            "distance proposal ignores reversed shading normal"
+        );
+        if !extreme_power {
+            assert!(
+                at(0)
+                    .chunks_exact(8)
+                    .zip(at(3).chunks_exact(8))
+                    .any(|(a, b)| a[1] != b[1]),
+                "moving the receiver must change the distance proposal"
+            );
         }
     }
 }
