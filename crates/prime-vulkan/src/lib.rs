@@ -13,10 +13,6 @@ mod dynamic;
 mod exposure;
 mod hdr;
 mod light_distance_cpu;
-mod light_grid;
-mod light_grid_cpu;
-#[cfg(all(test, feature = "shader-tests"))]
-mod light_grid_tests;
 mod light_sampler;
 #[cfg(feature = "light-sampling-bench")]
 pub mod light_sampling;
@@ -78,6 +74,7 @@ pub use surface_display::HdrSurface;
 #[cfg(test)]
 mod surface_tests;
 mod target;
+mod temporal_reset;
 mod texture_asset;
 mod textures;
 pub use benchmark::HostBenchmark;
@@ -460,16 +457,9 @@ impl Pipeline {
             }
             // A frame-boundary configuration selects one binary; no per-path method branch.
             let shader: &[u8] = match (mode, reconstruction, light_sampling) {
-                (RenderMode::Offline, _, LightSampling::Grid) => prime_shaders::path_trace(),
                 (RenderMode::Offline, _, LightSampling::Tree) => prime_shaders::path_trace_tree(),
                 (RenderMode::Offline, _, LightSampling::TreeSphere) => {
                     prime_shaders::path_trace_tree_sphere()
-                }
-                (RenderMode::Realtime, true, LightSampling::Grid) => {
-                    prime_shaders::realtime_transport_rr()
-                }
-                (RenderMode::Realtime, false, LightSampling::Grid) => {
-                    prime_shaders::realtime_transport()
                 }
                 (RenderMode::Realtime, true, LightSampling::Tree) => {
                     prime_shaders::realtime_transport_rr_tree()

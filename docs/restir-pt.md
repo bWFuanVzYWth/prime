@@ -10,7 +10,9 @@
 
 材质适配使用 Prime 已接入的 OpenPBR/LabPBR、真实源色、发光、覆盖、介质与透射契约。自定义材质走上游不支持 BSDF component indexing 的 PDF roughness 判定；没有用单一粗糙度值代替混合 BSDF 的采样 PDF。上游默认的显式材质 LOD 0 保留，因此本渲染器没有采用普通 PT 的传播 ray-cone 纹理过滤。覆盖随机域使用固定的路径 seed 与位置哈希；重放不会再次执行宿主回调。命中身份保存实际复合表面的材质选择，避免重建浮点误差改变涂层来源。
 
-Prime 的局部光源 proposal 可能依赖接收点和法线。连接到光源时重新计算目的点的 Grid/Tree/TreeSphere PDF；不能照搬位置无关光源选择的简化。天空与太阳具有不同 NEE 竞争规则，初始 RIS 分开保存它们。吸收介质属于 prefix replay 的显式数据，连接可见性继续使用 Prime 的透射查询。
+Prime 的局部光源 proposal 依赖接收点，TreeSphere 另依赖法线。两种树都在世界与页内逐层评分，逆向 PDF 也按实际接收点重放；TreeSphere 另计算角度界及 quad 两半的法线。连接到光源时重新计算目的点的 PDF，不能缓存旧接收点的 PMF；静止历史不保证跳过这些求值。天空与太阳具有不同 NEE 竞争规则，初始 RIS 分开保存它们。吸收介质属于 prefix replay 的显式数据，连接可见性继续使用 Prime 的透射查询。
+
+求交起点复用 Prime 的重心/仿射误差界：静态命中和发光端点用 `reconstructStaticSurface`，动态命中用 `reconstructSurface`；初始路径与 prefix/suffix 重放的下一跳调用 `spawnRay`。有限 NEE 和 shift 重连接按实际方向在两端分别偏移后构造可见性线段，PDF/Jacobian 使用原物理点。`RESTIR_DISTANCE_THRESHOLD` 是重连接分类阈值，不是求交 epsilon。硬件误差常量仍基于 NVIDIA RTX，其他硬件与极端几何验证边界见 [PT-006](../HACK.md)。
 
 TreeSphere 下，带法线贴图的非光学接收面的采样法线会随入射方向修正。该情形沿用上游强制终端光源连接，把接收面保留在重放 prefix 中，避免复用过期的接收点 proposal PDF；生成和目的路径判定一致。代价是这类候选多一个 prefix 顶点和最近命中查询，可能多进入一个 Compact job，不增加常驻字段。
 
@@ -36,13 +38,15 @@ TreeSphere 下，带法线贴图的非光学接收面的采样法线会随入射
 
 局部源发布、动态快照、纹理/动画、太阳、大气眼高和 scene anchor 改变保留时间阶段。相机历史先转换到当前 anchor；普通相机运动由重投影处理。静态页、动态 placement 和 emitter 页保存最后身份修订与有效 primitive 数；历史主交点和连接点在任何几何或矩阵读取前检查 slot 存活、索引范围与已接受水位。替换、回收复用、dense 重排和未知对应只拒绝相关路径，不把旧索引解释成新几何。每 slot 的 GPU 记录为8 B，另有 CPU 镜像、变更记录与 emitter 身份 key；不扩大80 B reservoir，也不保存旧 TLAS/材质/纹理。身份表仅为 ReSTIR 延迟创建；首次构建扫描现有记录，之后静态/动态记录消费真实变更范围，光源页列表或采样器变更时比较当前全部 emitter 页身份。一般更新合并脏范围上传，容量增长全量上传对应表。稳态不扫描或上传身份表。
 
-纹理的 mip0 backing、尺寸、当前 region/next/blend 或删除事件另行累积采样支持变化，直到静态和动态消费者均处理。动画所有帧的 OMM 覆盖证明不能证明当前采样仍选择同一透明度或涂层叶；受影响页、动态有效纹理依赖和同身份光源页立即更新身份修订，即使 OMM 重编译仍在排队。事件帧扫描现有静态依赖、动态 placement 和相关光源身份，不增加 shader 求交；无事件时不扫描。动态原型依赖集合在实际 packing 时建立。当前不增加逐 texel 透明度证明，未知 RGB backing 或动画阶段变化也保守拒绝依赖页，可能使持续动画页的历史不能累积；材质或 mip-only 更新继续走后缀求值。
+纹理的 mip0 backing、尺寸、当前 region/next/blend 或删除事件累积实际采样支持变化，直到静态和动态消费者均处理。恒定 alpha 的不可变动画族例外：首发时只扫描完整族的 mip0 sprite 窗口，缓存一个 alpha 字节；后续相位变化复用已验证的族身份，不逐帧扫描像素。RGB 动画仍更新当前场景后缀，但不重复拒绝其未变的 coverage/coating 叶。族未知、alpha 非恒定、采样尺寸或 alpha 实际变化仍保留局部拒绝。动画所有帧的 OMM 覆盖证明不能证明当前采样仍选择同一透明度或涂层叶；受影响页、动态有效纹理依赖和同身份光源页立即更新身份修订，即使 OMM 重编译仍在排队。事件帧扫描现有静态依赖、动态 placement 和相关光源身份，不增加 shader 求交；无事件时不扫描。动态原型依赖集合在实际 packing 时建立。当前不增加逐 texel 透明度证明，未知 RGB backing 或动画阶段变化也保守拒绝依赖页，可能使持续动画页的历史不能累积；材质或 mip-only 更新继续走后缀求值。
 
 身份仍有效不代表旧光照有效。变化帧按上游动态分支重新求值环境端点、发光端点、连接点 NEE 或固定随机种子的后缀，包含当前可见性、材质、PDF/MIS 和介质吸收。源 integrand/weight 保留原 MIS 源项的顺序，合并选择更新后的 cache 并最终归一化。Prime 分离天空/太阳 proposal，失去原端点支持时拒绝，不伪造环境旋转。静态帧继续复用缓存；持续太阳运动会增加后缀重放查询，尚无整帧收益测量。此处采用原版无旧场景的更新模式，不声明任意动态场景下的精确旧场景 MIS。
 
-首次使用、世界/场景 owner 或 epoch 更换、实际内部尺寸变化及实时/离线或积分器域切换仍是全局失效边界。不能证明整个复用域失效时继续接收历史。采样编号归零、回绕、跳号、seed、暂时跳帧、纹理资源 owner/generation、顶点预算、光源采样方式或 FG 切换继续使用最近一次已接受历史。纹理换代保留单调身份表，并按真实变更日志更新相关 static/dynamic/emitter slot。预算和光源 proposal 改变按已有当前场景后缀更新处理，不保存旧 proposal/场景；维持当前动态模式的近似边界，不声明任意 proposal 切换下的严格无偏性。预算降低仅拒绝超过新支持的路径：NEE 端点的 `pathLength < budget`，BSDF-hit/escape 的 `pathLength+1 < budget`。
+首次使用为无历史冷启动；世界/场景 owner 或 epoch 更换、实际内部尺寸变化及实时/离线或积分器域切换仍是全局失效边界。不能证明整个复用域失效时继续接收历史。采样编号归零、回绕、跳号、seed、暂时跳帧、纹理资源 owner/generation、顶点预算、光源采样方式或 FG 切换继续使用最近一次已接受历史。纹理换代保留单调身份表，并按真实变更日志更新相关 static/dynamic/emitter slot。整张 atlas 重装通过 `resourceGeneration` 撤销旧资源引用和重新编译，不推进世界 epoch；同 epoch 的资源目录替换保留 `SourceScene` 的 source owner，真实世界重置才更换该身份。预算和光源 proposal 改变按已有当前场景后缀更新处理，不保存旧 proposal/场景；维持当前动态模式的近似边界，不声明任意 proposal 切换下的严格无偏性。预算降低仅拒绝超过新支持的路径：NEE 端点的 `pathLength < budget`，BSDF-hit/escape 的 `pathLength+1 < budget`。
 
-启用性能录制时，实际丢弃已接受历史记录 `restir.history.reset` 与 `reason`，可对齐实机闪烁；不增加逐像素读回或等待。RR 的当前 guide、motion 和完成状态由其[重建合同](reconstruction.md)负责，图像转换见[坐标契约](coordinates.md)；保留历史不构成 SDK 内部逐像素拒绝的保证。显示参数只影响 resolve/display。
+全局重置采用共享封闭黑名单，入口只接受预定义事件类型：世界替换、世界 epoch、场景身份域替换、渲染域、内部尺寸及 RR feature 配置/求值失败。普通 tick、内容修订、动画和采样编号没有全局重置事件。每次请求直接写日志中的 `event/action/valid`，性能录制另保存 `restir.history.reset` / `rr.history.reset` 的 `reason/ignored/valid`；不依赖开启录制才知道原因。首次没有历史是冷启动，实际 scratch/SDK feature 重建另记 `*.history.storage`，不能把未初始化存储标成有效历史。
+
+诊断组的“忽略所有全局重置”默认关闭；开启时忽略上述显式请求，继续执行局部支持拒绝、当前场景更新和提交接受合同。存储实际重建仍冷启动。保留跨世界 reservoir 时，新身份域从已接受修订水位后继开始，避免相同数值 ID 错配旧几何。`restir.history.frame` 的 `temporal/update/revision/accepted` 和 `restir.identity.frame` 的脏范围计数可区分全局重置、局部支持变化与正常后缀更新，不增加逐像素读回或等待。RR 的当前 guide、motion 和完成状态由其[重建合同](reconstruction.md)负责，图像转换见[坐标契约](coordinates.md)；保留历史不构成 SDK 内部逐像素拒绝的保证。显示参数只影响 resolve/display。
 
 前帧 reservoir 在本帧全部读取完成后才被空间 merge 覆写。primary 使用两个 bank，前帧相机和 bank 交换只在宿主接受提交后提交；取消录制不会推进历史。resize、后端切换和关闭沿用已有 GPU 完成或取消证明后回收的规则，不按经过的帧数猜测资源寿命。
 

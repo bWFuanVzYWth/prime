@@ -71,6 +71,9 @@ fn settings(budget: u32) -> RenderSettings {
         bounces: 1,
         terrain_batches_per_frame: budget,
         opacity_micromap: false,
+        // Compare geometry output against a fresh renderer at one fixed manual
+        // exposure. Offline auto-exposure freezes its first scene's metering.
+        auto_exposure_compensation: 0.,
         ..Default::default()
     }
 }
@@ -248,16 +251,30 @@ fn gpu_terrain_budget_resource_generation_replaces_entire_old_domain_before_drai
         );
     }
     assert!(
-        !current
-            .geometry
-            .as_ref()
-            .unwrap()
-            .needs_update((&scene).into())
+        !current.geometry.as_ref().unwrap().terrain_updates_pending(),
+        "resource-domain terrain queue did not drain within its three-cell budget"
     );
     let mut fresh = renderer(128);
     assert_eq!(
         drained,
         render(&mut fresh, &scene, 0),
         "new resource generation differs from a fresh full build"
+    );
+    // The final BLAS's compact-size query is recorded after this update resolves
+    // older queries. A following frame consumes it even though all terrain has
+    // already drained; address maintenance must preserve geometry and accumulation.
+    render(&mut current, &scene, 4);
+    let geometry = current.geometry.as_ref().unwrap();
+    assert_eq!(geometry.rebuilt_clusters, 0);
+    assert_eq!(geometry.triangle_count, 6);
+    assert_visible(&query(&current), [true; 3]);
+    assert_eq!(
+        current.samples, 2,
+        "compaction maintenance reset offline history"
+    );
+    assert!(!geometry.terrain_updates_pending());
+    assert!(
+        !geometry.needs_update((&scene).into()),
+        "BLAS maintenance did not settle"
     );
 }

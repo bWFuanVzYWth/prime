@@ -1,6 +1,7 @@
 use super::*;
 use crate::cpu_profile::{CpuProfile, FrameCpu, Stage};
 use crate::gpu_timing::{QUERY_COUNT, Stage as GpuStage};
+use crate::temporal_reset::{GlobalReset, StorageCold};
 use prime_scene::incremental::SceneInput;
 
 struct HostRecordScope(Arc<Context>);
@@ -383,6 +384,7 @@ impl Renderer {
             descriptor_keys: [[0; 7]; FRAME_SLOTS],
             cpu_profile,
         };
+        result.set_history_reset_policy(settings.ignore_global_history_resets);
         result.set_diagnostics(
             crate::cpu_profile::enabled() || result.context.diagnostics_enabled(),
         )?;
@@ -651,6 +653,7 @@ impl Renderer {
         if self.failed || self.pending_temporal_serial != 0 {
             return Err("Cannot configure a failed renderer".into());
         }
+        self.set_history_reset_policy(settings.ignore_global_history_resets);
         let display = PrimeDrtSettings {
             exposure_multiplier: settings.exposure,
             hue_compensation: settings.hue,
@@ -677,7 +680,8 @@ impl Renderer {
                 // Present consumers can outlive completed world work even if RR itself stays.
                 rr.suspend_frame_generation()?;
                 if mode_changed || rr_changed {
-                    rr.reset("render_domain");
+                    rr.reset(GlobalReset::RenderDomainChanged);
+                    rr.storage_cold(StorageCold::RenderDomainReleased);
                     drop(self.reconstruction.take());
                 }
             }
@@ -685,7 +689,8 @@ impl Renderer {
             drop(self.pipeline.take());
             if mode_changed || integrator_changed {
                 if let Some(restir) = &mut self.restir {
-                    restir.invalidate("render_domain");
+                    restir.invalidate(GlobalReset::RenderDomainChanged);
+                    restir.storage_cold(StorageCold::RenderDomainReleased);
                 }
                 drop(self.restir.take());
             }
@@ -760,6 +765,7 @@ impl Renderer {
             self.hdr_calibration = None;
         }
         self.settings = settings;
+        self.set_history_reset_policy(settings.ignore_global_history_resets);
         Ok(())
     }
 
@@ -779,8 +785,8 @@ impl Renderer {
     /// Release the old world's geometry and frame storage without rebuilding device resources.
     /// The host must submit and complete its previous work before this world boundary.
     pub fn reset_world(&mut self) -> Result<(), String> {
-        if self.failed {
-            return Err("Cannot reset a failed renderer".into());
+        if self.failed || self.pending_temporal_serial != 0 {
+            return Err("World reset requires an accepted or cancelled host recording".into());
         }
         self.failed = true;
         let completed = self.context.completed_serial()?;
@@ -796,7 +802,7 @@ impl Renderer {
             restir.reset_world();
         }
         if let Some(rr) = &mut self.reconstruction {
-            rr.reset("world");
+            rr.reset(GlobalReset::WorldReplaced);
         }
         if let Some(resources) = &self.scene_resources {
             let mut resources = resources.borrow_mut();
@@ -1016,6 +1022,15 @@ impl Renderer {
     }
 
     #[allow(clippy::too_many_arguments)]
+    fn set_history_reset_policy(&mut self, ignore: bool) {
+        if let Some(restir) = &mut self.restir {
+            restir.set_history_reset_policy(ignore);
+        }
+        if let Some(rr) = &mut self.reconstruction {
+            rr.set_history_reset_policy(ignore);
+        }
+    }
+
     fn prepare(
         &mut self,
         scene: SceneInput<'_>,
@@ -1040,6 +1055,7 @@ impl Renderer {
         {
             return Err("Camera contains invalid vectors or vertical FOV".into());
         }
+        self.set_history_reset_policy(self.settings.ignore_global_history_resets);
         self.prepare_scene_resources(scene, completed)?;
         if let Some(geometry) = &mut self.geometry {
             geometry.begin_frame(&self.context, completed);
@@ -1062,10 +1078,10 @@ impl Renderer {
                     .is_some_and(|g| !g.history_owner_matches(scene))
                 {
                     if let Some(restir) = &mut self.restir {
-                        restir.invalidate("scene_owner");
+                        restir.invalidate(GlobalReset::SceneDomainReplaced);
                     }
                     if let Some(rr) = &mut self.reconstruction {
-                        rr.reset("scene_owner");
+                        rr.reset(GlobalReset::SceneDomainReplaced);
                     }
                 }
                 self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
@@ -1079,12 +1095,7 @@ impl Renderer {
                     )?
                 } else {
                     // End the previous CPU owner before constructing another cache domain.
-                    if let Some(rr) = &mut self.reconstruction {
-                        rr.reset("scene_owner");
-                    }
-                    if let Some(restir) = &mut self.restir {
-                        restir.invalidate("scene_owner");
-                    }
+                    // An existing domain replacement was handled above; first creation is cold.
                     // Borrowed GPU resources still retire by their recorded completion serials.
                     self.geometry.take();
                     self.geometry = Some(Geometry::new_with_resources(
@@ -1169,6 +1180,7 @@ impl Renderer {
             sample_index
         };
         if let Some(rr) = &mut self.reconstruction {
+            rr.set_history_reset_policy(self.settings.ignore_global_history_resets);
             let prepared = rr.prepare(
                 slot,
                 *camera,
@@ -1188,6 +1200,7 @@ impl Renderer {
                 // must retire before switching to the native-resolution direct pipeline.
                 self.context
                     .wait_host_serial(*self.host_serials.iter().max().unwrap())?;
+                rr.storage_cold(StorageCold::RrSetupFailed);
                 drop(self.reconstruction.take());
                 drop(self.pipeline.take());
                 self.pipeline = Some(Pipeline::new(
@@ -1381,6 +1394,11 @@ impl Renderer {
             .unwrap()
             .shader_instance_input(&self.context, slot)?;
         let geometry = self.geometry.as_mut().unwrap();
+        geometry.set_history_revision_floor(
+            self.restir
+                .as_ref()
+                .map_or(0, |state| state.accepted_revision()),
+        );
         let identity = geometry.shader_history_identity(&self.context, slot)?;
         let anchor = geometry.anchor();
         let jitter = self
@@ -1390,6 +1408,10 @@ impl Renderer {
         if self.restir.is_none() {
             self.restir = Some(restir::State::new(&self.context)?);
         }
+        self.restir
+            .as_mut()
+            .unwrap()
+            .set_history_reset_policy(self.settings.ignore_global_history_resets);
         self.restir.as_mut().unwrap().prepare(
             &self.context,
             slot,

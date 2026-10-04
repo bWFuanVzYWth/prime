@@ -173,6 +173,10 @@ impl Engine {
         span.count("omm", u64::from(self.settings.opacity_micromap));
         span.count("ls", self.settings.light_sampling as u64);
         span.count(
+            "ignore_global_resets",
+            u64::from(self.settings.ignore_global_history_resets),
+        );
+        span.count(
             "terrain_budget",
             u64::from(self.settings.terrain_batches_per_frame),
         );
@@ -733,7 +737,6 @@ mod tests {
         for method in [
             prime_scene::settings::LightSampling::TreeSphere,
             prime_scene::settings::LightSampling::Tree,
-            prime_scene::settings::LightSampling::Grid,
         ] {
             engine
                 .configure(RenderSettings {

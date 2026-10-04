@@ -15,6 +15,8 @@ use std::{
 
 pub(super) struct Textures {
     pub(crate) source: BTreeMap<u32, Texture>,
+    // Proven constant alpha over every validated immutable sprite-family window.
+    constant_alpha: BTreeMap<u32, u8>,
     pub(crate) coverage_changed: BTreeSet<u32>,
     pub(crate) history_support_changed: BTreeSet<u32>,
     pub(crate) occlusion_changed: bool,
@@ -200,6 +202,7 @@ impl Textures {
         slots.allocate(1)?;
         let mut result = Self {
             source: BTreeMap::new(),
+            constant_alpha: BTreeMap::new(),
             coverage_changed: BTreeSet::new(),
             history_support_changed: BTreeSet::new(),
             occlusion_changed: false,
@@ -218,6 +221,7 @@ impl Textures {
     }
 
     fn remove(&mut self, id: u32) {
+        self.constant_alpha.remove(&id);
         if let Some(old) = self.source.remove(&id) {
             self.coverage_changed.insert(id);
             self.history_support_changed.insert(id);
@@ -349,19 +353,30 @@ impl Textures {
             if self.source.get(id).is_some_and(|old| old.same(texture)) {
                 continue;
             }
-            if self
+            let same_family = self
                 .source
                 .get(id)
-                .is_none_or(|old| !coverage_same(old, texture))
-            {
+                .is_some_and(|old| coverage_same(old, texture));
+            if !same_family {
                 self.coverage_changed.insert(*id);
             }
-            if self
-                .source
-                .get(id)
-                .is_none_or(|old| !history_support::base_sample_same(old, texture))
-            {
+            let previous_alpha = self.constant_alpha.get(id).copied();
+            let constant_alpha = if same_family {
+                previous_alpha
+            } else {
+                history_support::constant_family_alpha(texture)
+            };
+            if self.source.get(id).is_none_or(|old| {
+                !history_support::base_support_same(old, texture, previous_alpha, constant_alpha)
+            }) {
                 self.history_support_changed.insert(*id);
+            }
+            if !same_family {
+                if let Some(alpha) = constant_alpha {
+                    self.constant_alpha.insert(*id, alpha);
+                } else {
+                    self.constant_alpha.remove(id);
+                }
             }
             let index = if let Some(&index) = self.indices.get(id) {
                 index

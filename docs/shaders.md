@@ -18,7 +18,6 @@
 | `pbr/delta.slang` | 整闭包 delta 判定、普通离散采样、首纯 delta 透明条件 pair，以及独立的几何 guide 方向；无 LUT/NEE |
 | `pbr/guide_albedo.slang` | 独立方向能量与清洗；不导入通用 PBR 分派或完整 closure |
 | `pbr.slang` | 生产 Full opaque/dielectric 源适配、thick-SSS Lite 扩展与历史 Lite 材质参考 API；重导出窄顶点/guide 接口 |
-| `grid_sampling.slang` | 默认局部 alias、全局退路及正反向混合 PDF，无资源绑定 |
 | `tree_sampling.slang`、`light_distance.slang` | 可选双层功率距离树、24-bit 支持保留及同接收点路径重放 PDF；窄距离数学模块，无资源绑定 |
 | `sphere_tree_sampling.slang`、`light_direction.slang` | 可选球界方向树、接收/发光方向摘要、24-bit 支持保留与同源路径重放 PDF，无资源绑定 |
 | `light_sampling.slang` | 显式采样实验保留的 32B 功率树节点与选择，无资源绑定 |
@@ -67,7 +66,7 @@ ReSTIR 的 `restir/parameters.slang` 只声明 uniform/pass 布局；线性地�
 
 SDR世界仍写宿主 `RGBA8_UNORM`，已编码sRGB；启用HDR或实际FG时alpha=0以记录后续手部/HUD coverage，否则alpha=1。HDR保留FP16 extended-sRGB world与独立SDR baseline，宿主选择和Windows P/W标定成功后，在界面完成时做EOTF与W/80 scRGB呈现。需要曝光/HDR/FG或RR星图时使用显式线性display入口，关闭这些功能时保留原直接显示；诊断视图不走曝光/星图/FG。自动曝光、HDR、星图合成、buffer/image读取与成本详见[显示契约](display.md)，游戏内设置与FFM控制见[渲染模式](renderers.md)。NaN/Inf辐射亮度输入置黑；负颜色在旧算法规定的位置处理。
 
-光源采样在创建或帧边界切换时选择独立编译产物：Offline、Realtime K2及RR K2各提供Grid/Tree/TreeSphere变体，K1与post共用。`PRIME_LIGHT_TREE`、`PRIME_LIGHT_TREE_SPHERE`仅为编译宏，不是push或specialization参数；未选中的采样代码与资源访问不会进入SPIR-V。每个renderer只使用所选变体的pipeline，场景特性选择和每次dispatch不检查采样方式；切换与资源完成契约见[渲染模式](renderers.md)。
+光源采样在创建或帧边界切换时选择独立编译产物：Offline、Realtime K2及RR K2各提供Tree/TreeSphere变体，K1与post共用。`PRIME_LIGHT_TREE`、`PRIME_LIGHT_TREE_SPHERE`仅为编译宏，不是push或specialization参数；未选中的采样代码与资源访问不会进入SPIR-V。每个renderer只使用所选变体的pipeline，场景特性选择和每次dispatch不检查采样方式；切换与资源完成契约见[渲染模式](renderers.md)。
 
 ## 采样域
 
@@ -81,7 +80,7 @@ BSDF事件选择使用 `sample1D(1280+bounce)`。仅实时相机第一可见表�
 
 Tree保留历史空间median拓扑，以两份独立24-bit样本分别选择光页与页内灯。分支proposal使用功率与接收点距离平方，不考虑接收/发光方向。节点为24B：中心与功率、child和后代叶数。世界层中心为AABB中点；页内内部节点为按quad两半面积质心与灯功率加权、在节点AABB中10-bit量化的位置。页内终端使用接收点到实际四角AABB的距离，距离为零时依次退到量化质心与quad两条边的平方长度之和，沿用TreeSphere距离语义。空间median保留的是拓扑；TreeSphere仍另用方向SAOH构建树。
 
-Tree前向选择与反向PDF都从每层`2^24`个整数输入开始，按同一接收点的功率距离评分划分count，每个子树至少分配其后代叶数的输入。每棵树最多`2^24`叶、路径深度最多27；页与灯引用存储32-bit重放路径，实际PMF为所选叶count除以`2^24`。发光命中MIS和ReSTIR的端点PDF在原前驱接收点重放两层划分，再乘总面积倒数；不能保存或使用固定页/灯概率。Tree不增加跨射线查询的法线状态。整数支持修正只改变proposal，不改真实发光、面积、coverage与可见性，也不证明不同多维采样域完全独立。Grid局部提议使用功率与距离近似；TreeSphere还包含接收/发射方向评分，三者均在选灯后按实际BSDF、发光和可见性计算贡献。
+Tree前向选择与反向PDF都从每层`2^24`个整数输入开始，按同一接收点的功率距离评分划分count，每个子树至少分配其后代叶数的输入。每棵树最多`2^24`叶、路径深度最多27；页与灯引用存储32-bit重放路径，实际PMF为所选叶count除以`2^24`。发光命中MIS和ReSTIR的端点PDF在原前驱接收点重放两层划分，再乘总面积倒数；不能保存或使用固定页/灯概率。Tree不增加跨射线查询的法线状态。整数支持修正只改变proposal，不改真实发光、面积、coverage与可见性，也不证明不同多维采样域完全独立。TreeSphere还包含接收/发射方向评分，两者均在选灯后按实际BSDF、发光和可见性计算贡献。
 
 TreeSphere使用相同quad发光面和两个24-bit选择域，CPU按功率、空间与方向摘要构建双层树。节点为32B：中心与功率、压缩方向、child、后代叶数和保守半径。世界层中心为已表示AABB的中点，半径按该f32中心到AABB角点的最大距离向上取整；世界叶直接保存页界，不再借页内根的功率质心作为球中心。页内内部节点保留量化功率质心距离与方向评分，终端quad按实际两半面积权重计算方向和接收余弦界，零面积半面不归一化。方向表示轴/圆锥或六个5-bit轴向功率瓣；世界球界估计接收与发光角度，在球内取宽界。评分含`1/256`角度下限，均为选光proposal近似，不改变发光、coverage、面积或真实遮挡。
 

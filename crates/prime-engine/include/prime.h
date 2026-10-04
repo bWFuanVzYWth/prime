@@ -1,7 +1,7 @@
 #ifndef PRIME_PT_H
 #define PRIME_PT_H
 #include <stdint.h>
-#define PRIME_ABI_VERSION 12
+#define PRIME_ABI_VERSION 13
 #define PRIME_MAX_BATCH_BYTES 268435456
 #define PRIME_DIAGNOSTICS_ENABLED 1
 #define PRIME_DIAGNOSTICS_CAPTURE 2
@@ -82,10 +82,14 @@ typedef struct PrimeSettings {
     uint32_t hdr;
     uint32_t hdr_reference_white;
     uint32_t frame_generation;
-    /* Frame-boundary choice: 0 = grid, 1 = power tree, 2 = bounds-sphere tree. */
+    /* Frame-boundary choice: 1 = power-distance tree (default), 2 = bounds-sphere tree.
+       Retired value 0 is accepted as 1; no grid sampler is created. */
     uint32_t light_sampling;
     /* Independent integrator: 0 = path trace, 1 = ReSTIR PT Enhanced. */
     uint32_t integrator;
+    /* Diagnostic only, default 0: suppress explicit global ReSTIR/RR history resets.
+       Does not bypass incompatible or newly allocated history resources. */
+    uint32_t ignore_global_history_resets;
 } PrimeSettings;
 
 typedef struct PrimeVulkanHost {

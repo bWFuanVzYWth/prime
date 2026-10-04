@@ -166,7 +166,7 @@ fn gpu_realtime_raw_split_cost_ab_ba() {
     .unwrap();
     for (name, shader) in [
         ("primary", prime_shaders::realtime_primary()),
-        ("transport", prime_shaders::realtime_transport()),
+        ("transport", prime_shaders::realtime_transport_tree()),
         ("post", prime_shaders::realtime()),
     ] {
         writeln!(

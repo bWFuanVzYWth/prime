@@ -68,7 +68,7 @@ K1 从真实 object-to-world/world-to-object 得到前帧物理点，静态光�
 
 `rr_display.slang` 与 `rr_linear.slang` 在输出分辨率显示。只有SDK录制成功且当前双线性输入足迹的四个状态均满足 `(flags & 3)==0` 时才消费RR输出，前景位8不影响完成判断；否则使用该足迹的本帧noisy color。一般evaluate失败时本帧恢复raw，下一帧在完成证明后切回原生管线；异常导致命令录制状态不安全时直接走帧失败/退休契约，不读取可能处于未知布局的输入。诊断色/深度/法线显示实际内部数据，同时继续正常 RR evaluate，使模型与已接受相机历史同步推进；返回最终输出不重置。这意味着诊断显示仍有正常 RR 的 GPU 成本。仅写宿主目标时翻转Y。
 
-内部完成图保证的是未解析像素的输出退路，不保证SDK内部历史隔离、邻域空间滤波隔离或恢复有效后的历史清除。旧项目设置中的 `[-1, 1]`、默认 `-0.25` 输入为 **RR Responsivity Mask**：输入分辨率的单通道 R16F，旧直接NGX桥接通过 `pInResponsivityMask` 提交统一的有符号值；该值不是引擎guide完成标记，也不是 `BiasCurrentColorHint`。它是SDK可调的响应偏置，不声明严格的逐像素历史拒绝。
+内部完成图保证的是未解析像素的输出退路，不保证SDK内部历史隔离、邻域空间滤波隔离或恢复有效后的历史清除。旧项目设置中的 `[-1, 1]`、默认 `-0.25` 输入为 **RR Responsivity Mask**：输入分辨率的单通道 R16F，旧直接NGX桥接通过 `pInResponsivityMask` 提交统一的有符号值；该值不是引擎guide完成标记，也不是 `BiasCurrentColorHint`。锁定 RR 手册限定此输入用于 Preset F：正值提高响应速度但可能增加闪烁，负值降低响应速度但可能增加拖影，0无偏置。它是SDK可调的响应偏置，不声明严格的逐像素历史拒绝。`BiasCurrentColorHint` 虽在锁定 Vulkan 插件中转发，RR 手册引用的最新 SR 模型指南不建议使用该输入，不能据通用 tag 注释宣称 RR 硬拒绝保证。
 
 锁定的 Streamline 2.14.1 官方源码读取、缓存并转换 `kBufferTypeResponsivityMask` 的资源状态，但 DLSS-D 的 Vulkan 分支缺少向 NGX 设置 `NVSDK_NGX_Parameter_DLSSD_ResponsivityMask` 的步骤；设置该资源指针只出现在 D3D 分支。公共NGX evaluate包装直接传入已有参数，不补齐这个输入。因而当前Vulkan集成不暴露此设置，不分配或标记一个没有已核实消费通路的图像。恢复该输入需要修正并验证DLSS-D插件的Vulkan参数转发，或另行评估直接NGX后端；仅新增通用tag不能证明模型收到它。SDK与来源锁定见 [SDK说明](../third_party/streamline/README.md)。严格SDK reset仍是整个viewport/frame级别；不为按像素条件增加CPU读回或整帧等待。
 
@@ -76,7 +76,7 @@ K1 从真实 object-to-world/world-to-object 得到前帧物理点，静态光�
 
 无可用历史的首次帧、实际图像尺寸/质量重配、实时/离线或 RR 开关切换、世界/source owner 或 epoch 更换及实际 evaluate 失败是全局失效边界。不能确认整个复用域已失效时继续接收历史，交给 motion、完成状态和模型更新处理。采样编号归零、回绕、跳号、随机 seed、暂时跳帧、局部 atlas 更新、纹理资源 owner/generation、积分器、顶点预算及光源采样方式变化不再隐式清除 RR 历史；重建 PT 管线时重新绑定所有 RR descriptors。相机平移、旋转和 FOV 改变使用重投影；不以距离/角度阈值推断整个画面已改变。scene anchor 变化先对前相机精确重定位，再计算相对运动。局部源、纹理和实时天文/太阳/天空/星光更新保留重建历史；曝光/primeDRT 改变不重置场景线性历史。
 
-启用性能录制时，实际丢弃已接受历史记录 `rr.history.reset` 及 `reason`，便于把闪烁与真实失效事件对齐；没有逐像素读回或额外等待。采样 sequence 只选择随机域，SDK frame token 表示实际帧，二者不能混用。
+RR与ReSTIR共用预定义全局重置事件黑名单，入口不接收任意字符串理由；每次请求直接记录日志中的 `event/action/valid`，性能录制另保存 `rr.history.reset` 的 `reason/ignored/valid`。默认关闭的“忽略所有全局重置”可保留显式请求前的历史；SDK feature或图像存储实际替换仍另记 `rr.history.storage` 并冷启动。首次无历史是冷启动，不伪装成epoch更换。没有逐像素读回或额外等待。采样 sequence 只选择随机域，SDK frame token 表示实际帧，二者不能混用。
 
 输入/输出图像跨帧复用，同一宿主队列的写后读、读后写依赖覆盖 K1 → K2 → compose → RR → 显示及下一帧；K1的prefix/guide写入、K2距离写入和post完成状态/反射运动写入都必须对后续消费可见。可变描述符和144B常量按宿主 timeline 完成槽复用。录制返回与 `encoder.execute` 不提交时间历史：两版实际 `Submission.close` 成功接受对应 serial 后才同时提交相机与实例姿态；未提交/失败录制不推进。纯姿态变化的元数据在接受后另有一次回归当前姿态的稀疏 settle 更新，稳态不扫描全实例。
 

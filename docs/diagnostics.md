@@ -1,6 +1,6 @@
 # 诊断与原始性能数据
 
-诊断是可按需启用的基础设施，开关与 shader 的颜色、法线、深度预览分开。游戏内“视频设置 → Prime PT 诊断”只提供“录制性能 JSON”开关：开启时同时启用 CPU/GPU 统计与原始事件采集，关闭时停止诊断并后台导出，不保留没有完整数据的独立即时统计状态。退出世界或关闭 native owner 同样结束当前会话，在对应版本的 `run/artifacts/performance/` 导出一个 JSON。采集开关不跨世界自动续录。
+诊断是可按需启用的基础设施，开关与 shader 的颜色、法线、深度预览分开。游戏内“视频设置 → Prime PT 诊断”的性能采集使用“录制性能 JSON”开关：开启时同时启用 CPU/GPU 统计与原始事件采集，关闭时停止诊断并后台导出，不保留没有完整数据的独立即时统计状态。退出世界或关闭 native owner 同样结束当前会话，在对应版本的 `run/artifacts/performance/` 导出一个 JSON。采集开关不跨世界自动续录。
 
 慢帧不再逐帧向终端输出长日志；尖峰、失败和离群值保留在原始事件里，不平均、去重或只保存超过阈值的帧。终端只提示采集开始、导出位置和失败。旧 JVM CSV 属性是显式兼容入口，不能替代此原始事件协议。
 
@@ -12,11 +12,11 @@
 
 CPU 未采集时的 scope 只检查空上下文，不读事件时钟、不分配事件或摘要、不注册线程、不获取采集锁。粗 CPU 快照和额外上传/OMM 统计由诊断开关控制；已有生产计数和生命周期判断仍有少量成本。显式的 legacy 开发属性可能单独开启其对应统计，比较关闭开销时需同时关闭这些属性。这里描述代码路径和行为测试契约，不据此承诺实际整帧速度。
 
-采集开始和配置事件保存实际 `ls`：0为Grid、1为功率距离Tree、2为TreeSphere。它来自帧边界应用后的有效设置；游戏内切换会记录新的配置值。Grid更新范围为 `lg.*`，两种树的世界表为 `lt.*`，球界局部树为 `ls.local`；共同的 `geom.lights` 是父范围，不能与子任务重复相加。一次切换的已发布灯页重建记录为 `lights.switch`，其摘要保存目标 `ls` 和页数 `pg`；完整切换还包括宿主等待、管线和输出重建，应与稳态分开分析。
+采集开始和配置事件保存实际 `ls`：1为功率距离Tree、2为TreeSphere（旧记录0为退役Grid）。它来自帧边界应用后的有效设置；游戏内切换会记录新的配置值。两种树的世界表为 `lt.*`，球界局部树为 `ls.local`；共同的 `geom.lights` 是父范围，不能与子任务重复相加。一次切换的已发布灯页重建记录为 `lights.switch`，其摘要保存目标 `ls` 和页数 `pg`；完整切换还包括宿主等待、管线和输出重建，应与稳态分开分析。
 
 ## 数据、线程与时钟
 
-配置摘要 `integrator` 为0时选择普通 PT，为1时选择 ReSTIR PT Enhanced。ReSTIR 的 `gpu.k1`、`gpu.k2`、`gpu.post` 分别覆盖完整初始路径生成、时间/空间重采样和 resolve；它们与普通 PT 的同名区间有不同内容，比较时按实际后端解释，不能只比较某个同名阶段。
+配置摘要 `integrator` 为0时选择普通 PT，为1时选择 ReSTIR PT Enhanced。`ignore_global_resets` 记录实际生效的全局重置诊断策略（0默认、1忽略显式请求）。ReSTIR 的 `gpu.k1`、`gpu.k2`、`gpu.post` 分别覆盖完整初始路径生成、时间/空间重采样和 resolve；它们与普通 PT 的同名区间有不同内容，比较时按实际后端解释，不能只比较某个同名阶段。
 
 每个 CPU scope 保存实际起始时刻、时长、frame/task/parent/thread 身份、状态和结构化摘要。摘要使用短任务名与整数计数，记录已有输入和结果，不为摘要另做全场景扫描。任务在完成时进入队列，因此文件顺序是完成/排空顺序，分析须按 `s` 和身份重建时间线。多线程任务可重叠；子任务时长之和不是父任务墙钟时长，父/子与粗/细 GPU 阶段也不能直接相加。
 
@@ -58,12 +58,12 @@ native 块的 `r` 为 recorder 身份，`dict` 使用本会话稳定 ID；`nb` /
 
 | 范围 | 事件与测量内容 |
 | --- | --- |
-| 静态几何 | `geom.plan/compile/material/pack/omm/as/cmd/publish/retire/compact/lights/dir` 分开规划、surface 编译、材料分配、打包、OMM 绑定、AS 准备、命令准备、cluster 发布、退休、压缩、光页收集/网格更新与目录发布；现有 `cpu.batch/chunk` 属于对应工作阶段 |
-| 发光面上传 | `light.page/encode/summary` 测量整页、发光面编码与 CPU 光源摘要；`buf.dev/dst/stage/write` 分开 device-local 上传总范围、目标分配、staging 分配与 CPU 写入；`upload` 仍只测命令录制 |
-| LightGrid CPU | `lg.cpu/diff/world/world_alias/ids/apply/cell_alias` 分开页差异及新页表准备、全局页规划与 alias、ID 租用、光源/cell 引用更新、dirty cell 排序/权重/alias |
-| LightGrid 资源 | `lg.update/input/stage/refs/local/world_stage/hash/pages/grow/publish` 分开输入收集、各类表 staging、实际 buffer 扩容与命令发布；`light_grid_ranges` 是其命令录制子事件 |
+| 静态几何 | `geom.plan/compile/material/pack/omm/as/cmd/publish/retire/compact/lights/dir` 分开规划、surface 编译、材料分配、打包、OMM 绑定、AS 准备、命令准备、cluster 发布、退休、压缩、光页收集/树表更新与目录发布；现有 `cpu.batch/chunk` 属于对应工作阶段 |
+| 发光面上传 | `light.page/encode` 测量整页和发光面编码；`buf.dev/dst/stage/write` 分开 device-local 上传总范围、目标分配、staging 分配与 CPU 写入；`upload` 仍只测命令录制 |
 | 采集传输 | `diag.flush/read/drain/alloc/copy/array/utf8/queue/stop` 分开逐帧排空、native 读取总范围、原生排空/序列化、FFM 分配、缓存块复制、byte[] 复制、UTF8 解码、后台队列写入及最终收尾 |
-| 全局时间历史失效 | `restir.history.reset` / `rr.history.reset` 仅在实际丢弃已接受历史时记录 `reason`；用于对齐闪烁与失效事件，不证明闪烁由该事件造成 |
+| 全局时间历史失效 | `restir.history.reset` / `rr.history.reset` 记录预定义事件的 `reason/ignored/valid`；每次请求同时直接写日志的 event/action/valid，未开启性能录制也可查原因 |
+| 历史存储重建 | `restir.history.storage` / `rr.history.storage` 记录实际 scratch/SDK feature 释放或替换的原因与原有效性；新存储必须冷启动，诊断开关不能伪造旧历史 |
+| 历史使用与局部支持 | `restir.history.frame` 记录 temporal/update/revision/accepted；`restir.identity.frame` 记录修订和三表脏范围数量，支持变化不等于全局重置 |
 
 新摘要取已有长度或仅在启用时于原有循环中累计：例如 `emit/pg/dc/ent` 表示发光面、光页、dirty cell、alias 项数，`bytes/ranges/rows/copies` 表示字节、范围、目录行和复制项。不为摘要新增全场景扫描，也不对每个光源或 cell 生成独立事件。
 
@@ -83,4 +83,4 @@ native 逐帧排空已完成事件，Java 通过有界队列交给本次采集�
 
 诊断 configure/frame/clock/read 控制失败会清除采集请求、尽力排空并标记 `partial`，独立通知失败，不单因诊断错误退役正常 renderer。真实渲染的设备丢失仍按渲染错误处理。默认恢复按钮结束本次会话的采集。
 
-FFI 使用 ABI v12，owner-thread 控制和排空缓冲协议见 [ABI](abi.md)。固定场景、原生1920×1080、种子、画质、预算、硬件和工具链；分开 CPU/GPU、实时/离线、稳态/更新以及采集开销。游戏开关、world exit、后端切换、重新采集和实际 GPU 查询由用户手动验收，命令见 [CONTRIBUTING](../CONTRIBUTING.md)。
+FFI 使用 ABI v13，owner-thread 控制和排空缓冲协议见 [ABI](abi.md)。固定场景、原生1920×1080、种子、画质、预算、硬件和工具链；分开 CPU/GPU、实时/离线、稳态/更新以及采集开销。游戏开关、world exit、后端切换、重新采集和实际 GPU 查询由用户手动验收，命令见 [CONTRIBUTING](../CONTRIBUTING.md)。

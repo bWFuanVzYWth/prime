@@ -1,6 +1,7 @@
 //! Streamline owns its feature; Rust owns all tagged images and their host completion lifetime.
 use super::reconstruction_history as history;
 use super::{Buffer, Context, FRAME_SLOTS, Image, Pipeline, PrimeDrtParameters};
+use crate::temporal_reset::{self, Backend, GlobalReset, StorageCold};
 use ash::vk;
 use prime_scene::scene::Camera;
 use prime_scene::settings::{DiagnosticView, ReconstructionQuality};
@@ -52,6 +53,7 @@ pub(super) struct Reconstruction {
     error: Option<String>,
     descriptor_dirty: [bool; FRAME_SLOTS],
     epoch: Option<u64>,
+    ignore_global_history_resets: bool,
 }
 
 impl Reconstruction {
@@ -86,6 +88,7 @@ impl Reconstruction {
                 error: None,
                 descriptor_dirty: [true; FRAME_SLOTS],
                 epoch: None,
+                ignore_global_history_resets: false,
             })
         };
         match create() {
@@ -114,11 +117,23 @@ impl Reconstruction {
                 (self.previous.is_some(), images.input, images.output)
             })
     }
-    pub fn reset(&mut self, reason: &'static str) {
-        if self.previous.is_some() {
-            let mut event = prime_diagnostics::scope("rr.history.reset");
-            event.value("reason", reason);
+    pub fn set_history_reset_policy(&mut self, ignore: bool) {
+        self.ignore_global_history_resets = ignore;
+    }
+    pub fn reset(&mut self, reason: GlobalReset) {
+        temporal_reset::record_global(
+            Backend::Rr,
+            reason,
+            self.previous.is_some(),
+            self.ignore_global_history_resets,
+        );
+        if !self.ignore_global_history_resets {
+            self.previous = None;
+            self.pending = None;
         }
+    }
+    pub fn storage_cold(&mut self, reason: StorageCold) {
+        temporal_reset::record_storage(Backend::Rr, reason, self.previous.is_some());
         self.previous = None;
         self.pending = None;
     }
@@ -212,7 +227,9 @@ impl Reconstruction {
         frame_generation: bool,
     ) -> Result<(), String> {
         if self.epoch != Some(epoch) {
-            self.reset("world_epoch");
+            if self.epoch.is_some() {
+                self.reset(GlobalReset::WorldEpochChanged);
+            }
             self.epoch = Some(epoch);
         }
         if self
@@ -220,6 +237,7 @@ impl Reconstruction {
             .as_ref()
             .is_none_or(|images| images.output != output || images.quality != quality)
         {
+            let replacing_images = self.images.is_some();
             // FG's consumer is independent of the host-world timeline.
             self.suspend_frame_generation()?;
             // Reconfiguration can release SDK-private history, so first prove its last use complete.
@@ -252,7 +270,10 @@ impl Reconstruction {
                 visible: None,
             });
             self.descriptor_dirty.fill(true);
-            self.reset("configuration");
+            if replacing_images {
+                self.reset(GlobalReset::RrFeatureReconfigured);
+            }
+            self.storage_cold(StorageCold::RrFeatureReconfigured);
             eprintln!(
                 "[Prime PT] DLSS RR preset F {:?}: {}x{} -> {}x{}",
                 quality, input[0], input[1], output[0], output[1]
@@ -294,6 +315,9 @@ impl Reconstruction {
         // Camera/FOV changes are evaluated by reprojection and guide completion per pixel.
         // Sequence is a sampling identity; zero or a gap does not prove a camera cut.
         let valid = previous.is_some();
+        let mut event = prime_diagnostics::scope("rr.history.frame");
+        event.count("temporal", u64::from(valid));
+        event.count("sequence", u64::from(sequence));
         let previous_camera = previous.unwrap_or(camera);
         self.constants[slot].write(&history::camera_constants(
             camera,
@@ -436,7 +460,8 @@ impl Reconstruction {
                 }
                 Err(failure) => {
                     self.error = Some(failure.message.clone());
-                    self.reset("evaluation_failure");
+                    self.reset(GlobalReset::RrEvaluationFailed);
+                    self.storage_cold(StorageCold::RrEvaluationFailed);
                     if failure.unsafe_recording {
                         return Err(failure.message);
                     }

@@ -35,11 +35,6 @@ impl LightTree {
         }
     }
 
-    pub(crate) fn begin_frame(&mut self, _completed: u64, _serial: u64) {
-        // Local/table Buffer drops use Context's completion retirement; the shared upload Arena
-        // is owned and advanced by Geometry. There are no tree-private reusable leases.
-    }
-
     pub(crate) fn has_lights(&self) -> bool {
         self.header.is_some()
     }
@@ -77,15 +72,12 @@ impl LightTree {
         trace.count("pg", sources.len() as u64);
         let mut inputs = Vec::with_capacity(sources.len());
         for (&key, &(origin, source)) in sources {
-            let tree = source
-                .tree
-                .as_ref()
-                .ok_or("Tree sampler received a grid-only light page")?;
+            let tree = &source.tree;
             inputs.push(Input {
                 key,
                 origin,
                 root: tree.root,
-                lights: &source.lights,
+                inverse_areas: &source.inverse_areas,
                 paths: &tree.paths,
             });
         }
@@ -108,7 +100,7 @@ impl LightTree {
                 .enumerate()
                 .filter_map(|(slot, page)| {
                     page.as_ref().map(|page| {
-                        let tree = sources[&page.key].1.tree.as_ref().unwrap();
+                        let tree = &sources[&page.key].1.tree;
                         let mut root = tree
                             .sphere_root
                             .ok_or("Sphere sampler received a power tree page")?;
@@ -249,7 +241,7 @@ fn page_bytes(
     for (slot, page) in cpu.pages.iter().enumerate() {
         if let Some(page) = page {
             let source = sources[&page.key].1;
-            let tree = source.tree.as_ref().ok_or("Missing local light tree")?;
+            let tree = &source.tree;
             bytes.extend_from_slice(&tree.nodes.address().to_le_bytes());
             bytes.extend_from_slice(&source.emitters.address().to_le_bytes());
             for (origin, anchor) in page.origin.into_iter().zip(anchor) {

@@ -2,7 +2,6 @@ mod build_support;
 
 fn main() {
     let mut shaders = Vec::new();
-    build_support::add(&mut shaders, "shaders/path_trace.slang", "path_trace", &[]);
     for stage in ["generate", "retrace", "shift", "temporal"] {
         build_support::samplers(
             &mut shaders,
@@ -39,7 +38,6 @@ fn main() {
             &[],
         );
     }
-    // The grid path-trace entry is already registered above.
     for stage in ["path_trace", "realtime_transport", "realtime_transport_rr"] {
         build_support::add(
             &mut shaders,
@@ -57,8 +55,6 @@ fn main() {
     for stage in [
         "realtime_primary",
         "realtime_primary_rr",
-        "realtime_transport",
-        "realtime_transport_rr",
         "realtime",
         "realtime_rr",
         "rr_display",

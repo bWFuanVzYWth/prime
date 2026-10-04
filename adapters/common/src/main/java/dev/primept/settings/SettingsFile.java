@@ -9,7 +9,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Properties;
 
-/** Exact current schema, no historical field migration or mixed-version settings. */
+/** Current schema; v8 adds the disabled reset diagnostic and maps retired GRID to TREE. */
 public final class SettingsFile {
     public record Loaded(RenderSettings settings, String resetReason) {}
     private SettingsFile() {}
@@ -27,7 +27,9 @@ public final class SettingsFile {
         try {
             var properties = new Properties();
             properties.load(new StringReader(text));
-            if (!Integer.toString(RenderSettings.VERSION).equals(properties.getProperty("version")))
+            String version = properties.getProperty("version");
+            boolean previousVersion = "8".equals(version);
+            if (!previousVersion && !Integer.toString(RenderSettings.VERSION).equals(version))
                 return new Loaded(RenderSettings.defaults(),
                                   "Settings version mismatch; defaults restored");
             var renderer = RenderSettings.Renderer.fromKey(properties.getProperty("renderer"));
@@ -37,14 +39,21 @@ public final class SettingsFile {
             String rayReconstruction = properties.getProperty("render.ray_reconstruction");
             if (!"true".equals(rayReconstruction) && !"false".equals(rayReconstruction))
                 throw new IllegalArgumentException("Invalid render.ray_reconstruction");
-            var result = RenderSettings.defaults()
-                                 .withRenderer(renderer)
-                                 .withOpacityMicromap(Boolean.parseBoolean(opacityMicromap))
-                                 .withRayReconstruction(Boolean.parseBoolean(rayReconstruction))
-                                 .withDlssQuality(RenderSettings.DlssQuality.valueOf(
-                                         properties.getProperty("render.dlss_quality", "")))
-                                 .withLightSampling(RenderSettings.LightSampling.valueOf(
-                                         properties.getProperty("render.light_sampling", "")));
+            String ignoreGlobalResets = properties.getProperty(
+                    "diagnostics.ignore_global_history_resets", previousVersion ? "false" : null);
+            if (!"true".equals(ignoreGlobalResets) && !"false".equals(ignoreGlobalResets))
+                throw new IllegalArgumentException(
+                        "Invalid diagnostics.ignore_global_history_resets");
+            var result =
+                    RenderSettings.defaults()
+                            .withRenderer(renderer)
+                            .withOpacityMicromap(Boolean.parseBoolean(opacityMicromap))
+                            .withRayReconstruction(Boolean.parseBoolean(rayReconstruction))
+                            .withIgnoreGlobalHistoryResets(Boolean.parseBoolean(ignoreGlobalResets))
+                            .withDlssQuality(RenderSettings.DlssQuality.valueOf(
+                                    properties.getProperty("render.dlss_quality", "")))
+                            .withLightSampling(RenderSettings.LightSampling.fromKey(
+                                    properties.getProperty("render.light_sampling", "")));
             for (var control : RenderSettings.Control.values())
                 result =
                         result.with(control, Integer.parseInt(properties.getProperty(control.key)));
@@ -55,12 +64,14 @@ public final class SettingsFile {
         }
     }
     public static String encode(RenderSettings settings) {
-        var text = new StringBuilder(
-                "version=" + RenderSettings.VERSION + "\nrenderer=" + settings.renderer().key +
-                "\nrender.opacity_micromap=" + settings.opacityMicromap() +
-                "\nrender.ray_reconstruction=" + settings.rayReconstruction() +
-                "\nrender.dlss_quality=" + settings.dlssQuality().name() +
-                "\nrender.light_sampling=" + settings.lightSampling().name() + "\n");
+        var text = new StringBuilder("version=" + RenderSettings.VERSION +
+                                     "\nrenderer=" + settings.renderer().key +
+                                     "\nrender.opacity_micromap=" + settings.opacityMicromap() +
+                                     "\nrender.ray_reconstruction=" + settings.rayReconstruction() +
+                                     "\nrender.dlss_quality=" + settings.dlssQuality().name() +
+                                     "\nrender.light_sampling=" + settings.lightSampling().name() +
+                                     "\ndiagnostics.ignore_global_history_resets=" +
+                                     settings.ignoreGlobalHistoryResets() + "\n");
         for (var control : RenderSettings.Control.values())
             text.append(control.key).append('=').append(settings.value(control)).append('\n');
         return text.toString();

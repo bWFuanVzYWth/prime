@@ -167,6 +167,7 @@ fn distribution_fixture(details: &mut File) -> Option<(Scene, Camera)> {
 
 struct RegisterOptions {
     light_sampling: LightSampling,
+    integrator: Integrator,
     explicit_raw: bool,
     reference: Option<(PathBuf, Vec<u8>, String)>,
 }
@@ -174,28 +175,44 @@ struct RegisterOptions {
 impl RegisterOptions {
     fn from_environment() -> Self {
         let method = std::env::var("PRIME_REGISTER_LIGHT_SAMPLING").ok();
+        let integrator = match std::env::var("PRIME_REGISTER_INTEGRATOR").as_deref() {
+            Err(_) | Ok("path_trace") => Integrator::PathTrace,
+            Ok("restir_pt") => Integrator::RestirPt,
+            Ok(other) => panic!("Unknown PRIME_REGISTER_INTEGRATOR: {other}"),
+        };
         let reference = std::env::var_os("PRIME_REGISTER_REFERENCE_SPV").map(|path| {
             let path = std::fs::canonicalize(path).expect("canonical reference SPIR-V path");
             let bytes = std::fs::read(&path).expect("read reference SPIR-V");
             let hash = format!("{:x}", Sha256::digest(&bytes));
             (path, bytes, hash)
         });
+        assert!(
+            reference.is_none() || integrator == Integrator::PathTrace,
+            "Transport reference SPIR-V is only compatible with PathTrace"
+        );
         Self {
+            integrator,
             light_sampling: match method.as_deref() {
                 None => RenderSettings::default().light_sampling,
-                Some("grid") => LightSampling::Grid,
                 Some("tree") => LightSampling::Tree,
                 Some("sphere") => LightSampling::TreeSphere,
                 Some(other) => panic!("Unknown PRIME_REGISTER_LIGHT_SAMPLING: {other}"),
             },
-            explicit_raw: method.is_some() || reference.is_some(),
+            explicit_raw: method.is_some()
+                || reference.is_some()
+                || integrator == Integrator::RestirPt,
             reference,
         }
     }
 
     fn settings(&self, mode: RenderMode, bounces: u32) -> RenderSettings {
+        assert!(
+            mode == RenderMode::Realtime || self.integrator == Integrator::PathTrace,
+            "ReSTIR benchmark requires realtime mode"
+        );
         let mut settings = RenderSettings {
             mode,
+            integrator: self.integrator,
             bounces,
             seed: 0x1357_2468,
             light_sampling: self.light_sampling,
@@ -214,6 +231,7 @@ impl RegisterOptions {
     fn write_metadata(&self, output: &mut File, mode: RenderMode, width: u32, height: u32) {
         writeln!(output, "mode={mode:?} width={width} height={height}").unwrap();
         writeln!(output, "light_sampling={:?}", self.light_sampling).unwrap();
+        writeln!(output, "integrator={:?}", self.integrator).unwrap();
         writeln!(
             output,
             "sphere_tree_build={}",
@@ -434,9 +452,10 @@ fn steady_transport_matrix() {
         }
         writeln!(details, "case={name} {}", host.device_details()).unwrap();
         eprintln!(
-            "register matrix: case={name} device={} method={:?} native=1920x1080 bounces=4 seed=0x13572468 warmup={warmup} samples={samples}",
+            "register matrix: case={name} device={} method={:?} integrator={:?} native=1920x1080 bounces=4 seed=0x13572468 warmup={warmup} samples={samples}",
             host.device_name(),
             options.light_sampling,
+            options.integrator,
         );
         if deep {
             let mut preload = 0;

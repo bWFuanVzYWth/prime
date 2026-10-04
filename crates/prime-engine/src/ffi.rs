@@ -1134,6 +1134,7 @@ mod abi_tests {
             frame_generation: 0,
             light_sampling: 0,
             integrator: 0,
+            ignore_global_history_resets: 0,
         };
         assert_eq!(unsafe { prime_configure(handle, &valid) }, 0);
         assert_eq!(unsafe { prime_configure(handle, std::ptr::null()) }, -1);
@@ -1142,6 +1143,9 @@ mod abi_tests {
         assert_eq!(unsafe { prime_configure(handle, &invalid) }, -1);
         invalid = valid;
         invalid.header.abi_version = 7;
+        assert_eq!(unsafe { prime_configure(handle, &invalid) }, -1);
+        invalid = valid;
+        invalid.ignore_global_history_resets = 2;
         assert_eq!(unsafe { prime_configure(handle, &invalid) }, -1);
         assert_eq!(
             std::thread::spawn(move || unsafe { prime_configure(handle, &valid) })

@@ -118,6 +118,19 @@ pub(super) struct HistoryIdentity {
 }
 
 impl HistoryIdentity {
+    pub fn after(accepted: u32) -> Result<Self, String> {
+        let mut identity = Self {
+            revision: accepted,
+            ..Default::default()
+        };
+        identity.advance()?;
+        Ok(identity)
+    }
+
+    pub fn revision(&self) -> u32 {
+        self.revision
+    }
+
     pub fn advance(&mut self) -> Result<(), String> {
         self.revision = self
             .revision
@@ -187,6 +200,14 @@ impl HistoryIdentity {
     ) -> Result<HistoryIdentityInput, String> {
         self.tables[0].truncate(static_count);
         self.tables[1].truncate(dynamic_count);
+        let mut event = prime_diagnostics::scope("restir.identity.frame");
+        event.count("revision", u64::from(self.revision));
+        for (name, table) in ["static", "dynamic", "emitters"]
+            .into_iter()
+            .zip(&self.tables)
+        {
+            event.count(name, table.dirty.len() as u64);
+        }
         let mut addresses = [0; 3];
         let mut counts = [0; 3];
         for ((address, count), table) in addresses.iter_mut().zip(&mut counts).zip(&mut self.tables)
@@ -212,6 +233,20 @@ mod tests {
             .records
             .get(index)
             .is_some_and(|record| record[0] != 0 && record[0] <= accepted && primitive < record[1])
+    }
+
+    #[test]
+    fn replacement_domain_is_newer_than_accepted_history_even_with_reused_numeric_ids() {
+        let mut identity = HistoryIdentity::after(41).unwrap();
+        identity.static_range(0, [6]);
+        identity.dynamic_slot(0, 8);
+        identity.synchronize_emitters([Some((20, 4))].into_iter());
+        assert_eq!(identity.revision(), 42);
+        for table in &identity.tables {
+            assert!(!valid(table, 0, 0, 41));
+            assert!(valid(table, 0, 0, 42));
+        }
+        assert!(HistoryIdentity::after(u32::MAX).is_err());
     }
 
     #[test]

@@ -19,7 +19,6 @@ impl Drop for TestPipeline {
 
 fn self_shift(renderer: &Renderer, count: u32) -> Vec<[u32; 32]> {
     let code = match renderer.settings.light_sampling {
-        LightSampling::Grid => prime_shader_tests::restir_adapter(),
         LightSampling::Tree => prime_shader_tests::restir_adapter_tree(),
         LightSampling::TreeSphere => prime_shader_tests::restir_adapter_tree_sphere(),
     };
@@ -248,11 +247,7 @@ fn gpu_restir_generate_replay_self_shift_preserves_mixed_integral_and_media() {
     let mut coverage_bits = [false; 2];
     let mut colored_endpoints = [0u32; 2];
     let mut normal_mapped_forced_nee = 0u32;
-    for method in [
-        LightSampling::Grid,
-        LightSampling::Tree,
-        LightSampling::TreeSphere,
-    ] {
+    for method in [LightSampling::Tree, LightSampling::TreeSphere] {
         renderer
             .configure(RenderSettings {
                 light_sampling: method,

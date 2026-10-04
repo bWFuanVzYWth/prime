@@ -140,3 +140,38 @@ fn same_generation_views_keep_publication_owner_and_distinct_owners_do_not_alias
         .unwrap();
     assert_ne!(source.resources, other.resources);
 }
+
+#[test]
+fn catalog_replacement_preserves_world_publication_owner_but_world_reset_changes_it() {
+    let mut source = SourceScene::default();
+    source.reset_world(1).unwrap();
+    source
+        .publish_resource_textures(1, vec![(1, pixel(17))])
+        .unwrap();
+    let world = source.id;
+    let mut translated = TranslatedScene::default();
+    translated.update(&mut source, [0.; 3]).unwrap();
+    let publication = translated.input().publication();
+    let resources = translated.input().resource_identity();
+    let terrain_generation = translated.input().terrain_resource_generation;
+
+    // New packing can replace every numeric sprite ID without replacing the world domain.
+    source
+        .publish_resource_textures(2, vec![(1, pixel(29)), (0x4000_0001, pixel(31))])
+        .unwrap();
+    assert_eq!(source.id, world);
+    assert_eq!(source.epoch(), 1);
+    translated.update(&mut source, [0.; 3]).unwrap();
+    assert!(publication.same_owner(translated.input().publication()));
+    assert_ne!(resources, translated.input().resource_identity());
+    assert_eq!(translated.input().resource_generation(), 2);
+    assert!(translated.input().terrain_resource_generation > terrain_generation);
+    assert_eq!(translated.input().textures[&1].pixels[0], 29);
+
+    source.reset_world(2).unwrap();
+    assert_ne!(source.id, world);
+    translated.update(&mut source, [0.; 3]).unwrap();
+    assert!(!publication.same_owner(translated.input().publication()));
+    assert_eq!(translated.input().epoch, 2);
+    assert_eq!(translated.input().resource_generation(), 2);
+}

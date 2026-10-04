@@ -43,7 +43,6 @@ pub enum ReconstructionQuality {
 #[repr(u32)]
 pub enum LightSampling {
     #[default]
-    Grid = 0,
     Tree = 1,
     TreeSphere = 2,
 }
@@ -73,6 +72,7 @@ pub struct RenderSettings {
     pub hdr_reference_white: u32,
     pub frame_generation: bool,
     pub light_sampling: LightSampling,
+    pub ignore_global_history_resets: bool,
 }
 impl Default for RenderSettings {
     fn default() -> Self {
@@ -99,16 +99,17 @@ impl Default for RenderSettings {
             hdr: false,
             hdr_reference_white: 0,
             frame_generation: false,
-            light_sampling: LightSampling::Grid,
+            light_sampling: LightSampling::Tree,
+            ignore_global_history_resets: false,
         }
     }
 }
 impl RenderSettings {
-    pub const VERSION: u32 = 8;
-    pub const BYTES: usize = 100;
+    pub const VERSION: u32 = 9;
+    pub const BYTES: usize = 104;
     pub fn parse(bytes: &[u8]) -> Result<Self, String> {
         if bytes.len() != Self::BYTES {
-            return Err("Settings require exactly 100 bytes".into());
+            return Err("Settings require exactly 104 bytes".into());
         }
         let word = |offset| u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
         if word(0) != Self::VERSION {
@@ -173,8 +174,7 @@ impl RenderSettings {
                 _ => return Err("Unknown frame generation setting".into()),
             },
             light_sampling: match word(92) {
-                0 => LightSampling::Grid,
-                1 => LightSampling::Tree,
+                0 | 1 => LightSampling::Tree,
                 2 => LightSampling::TreeSphere,
                 _ => return Err("Unknown light sampling method".into()),
             },
@@ -182,6 +182,11 @@ impl RenderSettings {
                 0 => Integrator::PathTrace,
                 1 => Integrator::RestirPt,
                 _ => return Err("Unknown integrator".into()),
+            },
+            ignore_global_history_resets: match word(100) {
+                0 => false,
+                1 => true,
+                _ => return Err("Unknown global history reset diagnostic setting".into()),
             },
         };
         result.validate()?;
@@ -247,8 +252,7 @@ impl RenderSettings {
                 _ => return Err("Unknown frame generation setting".into()),
             },
             light_sampling: match s.light_sampling {
-                0 => LightSampling::Grid,
-                1 => LightSampling::Tree,
+                0 | 1 => LightSampling::Tree,
                 2 => LightSampling::TreeSphere,
                 _ => return Err("Unknown light sampling method".into()),
             },
@@ -256,6 +260,11 @@ impl RenderSettings {
                 0 => Integrator::PathTrace,
                 1 => Integrator::RestirPt,
                 _ => return Err("Unknown integrator".into()),
+            },
+            ignore_global_history_resets: match s.ignore_global_history_resets {
+                0 => false,
+                1 => true,
+                _ => return Err("Unknown global history reset diagnostic setting".into()),
             },
         };
         result.validate()?;
@@ -297,7 +306,7 @@ mod tests {
     use super::*;
     fn golden() -> Vec<u8> {
         [
-            8_u32,
+            9_u32,
             1,
             12,
             1,
@@ -317,6 +326,7 @@ mod tests {
             8,
             1_f32.to_bits(),
             0.6_f32.to_bits(),
+            0,
             0,
             0,
             0,
@@ -350,7 +360,8 @@ mod tests {
             (0, 5),
             (0, 6),
             (0, 7),
-            (0, 9),
+            (0, 8),
+            (0, 10),
             (48, 91),
             (48, (-91i32) as u32),
             (52, 360),
@@ -372,6 +383,8 @@ mod tests {
             (92, u32::MAX),
             (96, 2),
             (96, u32::MAX),
+            (100, 2),
+            (100, u32::MAX),
         ] {
             let mut invalid = bytes.clone();
             invalid[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
@@ -420,9 +433,11 @@ mod tests {
     #[test]
     fn light_sampling_defaults_and_exact_wire_and_abi_values() {
         let defaults = RenderSettings::default();
-        assert_eq!(defaults.light_sampling, LightSampling::Grid);
+        assert_eq!(defaults.light_sampling, LightSampling::Tree);
+        assert_eq!(LightSampling::Tree as u32, 1);
+        assert_eq!(LightSampling::TreeSphere as u32, 2);
         for (word, method) in [
-            (0_u32, LightSampling::Grid),
+            (0_u32, LightSampling::Tree),
             (1, LightSampling::Tree),
             (2, LightSampling::TreeSphere),
         ] {
@@ -446,7 +461,7 @@ mod tests {
                     light_sampling: method,
                     ..defaults
                 }),
-                word == 0
+                method == LightSampling::Tree
             );
         }
         let abi = prime_abi::PrimeSettings {
@@ -475,15 +490,16 @@ mod tests {
             frame_generation: defaults.frame_generation as u32,
             light_sampling: 1,
             integrator: 0,
+            ignore_global_history_resets: 0,
         };
-        for method in [
-            LightSampling::Grid,
-            LightSampling::Tree,
-            LightSampling::TreeSphere,
+        for (word, method) in [
+            (0, LightSampling::Tree),
+            (1, LightSampling::Tree),
+            (2, LightSampling::TreeSphere),
         ] {
             assert_eq!(
                 RenderSettings::from_abi(&prime_abi::PrimeSettings {
-                    light_sampling: method as u32,
+                    light_sampling: word,
                     ..abi
                 })
                 .unwrap(),
@@ -502,6 +518,42 @@ mod tests {
                 .is_err()
             );
         }
+        for value in [0, 1] {
+            let parsed = RenderSettings::from_abi(&prime_abi::PrimeSettings {
+                ignore_global_history_resets: value,
+                ..abi
+            })
+            .unwrap();
+            assert_eq!(parsed.ignore_global_history_resets, value == 1);
+            assert!(defaults.transport_matches(parsed));
+        }
+        for invalid in [2, u32::MAX] {
+            assert!(
+                RenderSettings::from_abi(&prime_abi::PrimeSettings {
+                    ignore_global_history_resets: invalid,
+                    ..abi
+                })
+                .is_err()
+            );
+        }
+    }
+    #[test]
+    fn global_reset_diagnostic_defaults_off_and_does_not_change_transport() {
+        let defaults = RenderSettings::default();
+        assert!(!defaults.ignore_global_history_resets);
+        assert_eq!(RenderSettings::VERSION, 9);
+        assert_eq!(RenderSettings::BYTES, 104);
+        for value in [0_u32, 1] {
+            let mut bytes = golden();
+            bytes[100..104].copy_from_slice(&value.to_le_bytes());
+            let parsed = RenderSettings::parse(&bytes).unwrap();
+            assert_eq!(parsed.ignore_global_history_resets, value == 1);
+            assert!(parsed.transport_matches(RenderSettings {
+                ignore_global_history_resets: false,
+                ..parsed
+            }));
+        }
+        assert!(RenderSettings::parse(&golden()[..100]).is_err());
     }
     #[test]
     fn saturation_defaults_and_explicit_legacy_wire_values() {

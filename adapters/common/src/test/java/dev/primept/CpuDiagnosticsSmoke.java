@@ -11,11 +11,16 @@ public final class CpuDiagnosticsSmoke {
             bridge.reset(1);
             if (!bridge.cpuDiagnostics().contains("available=false"))
                 throw new AssertionError("Source submission cannot fabricate renderer timings");
-            bridge.configure(dev.primept.settings.RenderSettings.defaults().withLightSampling(
-                                     dev.primept.settings.RenderSettings.LightSampling.TREE_SPHERE),
-                             false, dev.primept.settings.RenderSettings.View.OUTPUT);
+            var settings =
+                    dev.primept.settings.RenderSettings.defaults()
+                            .withLightSampling(
+                                    dev.primept.settings.RenderSettings.LightSampling.TREE_SPHERE)
+                            .withIgnoreGlobalHistoryResets(true);
+            bridge.configure(settings, false, dev.primept.settings.RenderSettings.View.OUTPUT);
             bridge.diagnosticsConfigure(3);
             bridge.diagnosticsFrame(91);
+            bridge.configure(settings.withIgnoreGlobalHistoryResets(false), false,
+                             dev.primept.settings.RenderSettings.View.OUTPUT);
             long before = bridge.diagnosticsClock();
             bridge.reset(2);
             String captured = bridge.diagnosticsRead();
@@ -23,7 +28,9 @@ public final class CpuDiagnosticsSmoke {
                 !captured.contains("\"f\":91") || !captured.contains("reset"))
                 throw new AssertionError("Real native reset interval missing from capture: " +
                                          captured);
-            verifyLightSampling(captured, 2);
+            verifyNativeAttribute(captured, "ls", 2);
+            verifyNativeAttribute(captured, "ignore_global_resets", 1);
+            verifyNativeAttribute(captured, "ignore_global_resets", 0);
             bridge.diagnosticsConfigure(0);
             long stopped = bridge.diagnosticsClock();
             bridge.diagnosticsRead();
@@ -92,12 +99,12 @@ public final class CpuDiagnosticsSmoke {
                 throw new AssertionError("First native owner must inherit the current Java frame");
         }
         System.out.println(
-                "PRIME_CPU_DIAGNOSTICS_FFM_OK: ABI, bounds-sphere tree setting/metadata, real reset and transport spans/frame, final tail, UTF-8, retained clock and owner thread; no GPU");
+                "PRIME_CPU_DIAGNOSTICS_FFM_OK: ABI13 108B settings, bounds-sphere ID2, global-reset bool true/false consumed by native and captured, real reset and transport spans/frame, final tail, UTF-8, retained clock and owner thread; no GPU");
     }
 
     private record Event(long id, long parent, long frame, int name, long start, long duration,
                          boolean ok, String counts) {}
-    private static void verifyLightSampling(String captured, int expected) {
+    private static void verifyNativeAttribute(String captured, String key, int expected) {
         // Native attributes use dictionary IDs rather than repeating their field names.
         var keys = java.util.regex.Pattern.compile("\"kb\":(\\d+),\"k\":\\[([^]]*)]")
                            .matcher(captured);
@@ -106,14 +113,13 @@ public final class CpuDiagnosticsSmoke {
         int base = Integer.parseInt(keys.group(1));
         String[] entries = keys.group(2).split(",");
         for (int index = 0; index < entries.length; index++) {
-            if (entries[index].equals("\"ls\"")) {
+            if (entries[index].equals("\"" + key + "\"")) {
                 if (!captured.contains("[" + (base + index) + "," + expected + "]"))
-                    throw new AssertionError("Incorrect native light sampler metadata: " +
-                                             captured);
+                    throw new AssertionError("Incorrect native " + key + " metadata: " + captured);
                 return;
             }
         }
-        throw new AssertionError("Missing native light sampler metadata");
+        throw new AssertionError("Missing native " + key + " metadata");
     }
     private static void verifyTransport(String report, long frame) {
         var names = new java.util.HashMap<Integer, String>();

@@ -1,11 +1,18 @@
 package dev.primept.capture;
 
 import com.mojang.blaze3d.platform.NativeImage;
+import dev.primept.NativeBridge;
+import dev.primept.abi.PrimeAbi.*;
+import net.minecraft.client.renderer.block.BlockStateModelSet;
+import net.minecraft.client.renderer.block.FluidStateModelSet;
+import net.minecraft.client.renderer.texture.SpriteLoader;
 import net.minecraft.client.renderer.texture.SpriteContents;
 import net.minecraft.client.renderer.texture.TextureAtlas;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.client.resources.metadata.animation.FrameSize;
 import net.minecraft.resources.Identifier;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.chunk.LevelChunkSection;
 
 /** Real host resource values, without a GPU texture or a client window. */
 final class SourceSpriteFixture extends TextureAtlasSprite {
@@ -128,6 +135,97 @@ final class SourceSpriteFixture extends TextureAtlasSprite {
         }
         System.out.println(
                 "PRIME_PT_COMPLETE_ATLAS_SOURCE_OK: no LabPBR, used and unused actual sprites, stable IDs, 1000 sections=0 retransmission, new owner complete replacement; no GPU/window");
+    }
+    static void verifyAtlasReload(BlockStateModelSet models, FluidStateModelSet fluids,
+                                  LevelChunkSection solid) throws Exception {
+        var capture = new CaptureInbox();
+        capture.enable();
+        long epoch = capture.epoch();
+        var first = create(0, 0, 16);
+        var replacement = create(0, 0, 16);
+        var air = SectionSourcesCpuSmoke.section(Blocks.AIR.defaultBlockState());
+        long previousGeneration = 0, previousAtlas = 0;
+        try (var events = new McSourceBatch(); var output = new McSourceBatch();
+             var resources = new McSourceBatch();
+             var bridge = new NativeBridge(
+                     java.nio.file.Path.of(System.getProperty("primept.smoke.nativeLibrary")))) {
+            bridge.reset(epoch);
+            for (long batch = 1; batch <= 2; ++batch) {
+                var sprite = batch == 1 ? first : replacement;
+                capture.captureAtlas(new SpriteLoader.Preparations(
+                        16, 16, 0, sprite, java.util.Map.of(sprite.contents().name(), sprite),
+                        java.util.concurrent.CompletableFuture.completedFuture(null)));
+                if (capture.failure() != null)
+                    throw new AssertionError("Actual atlas capture failed", capture.failure());
+                if (capture.epoch() != epoch)
+                    throw new AssertionError("Atlas reload replaced the world epoch");
+                var atlas = capture.atlas();
+                long generation = capture.resourceGeneration(models, fluids);
+                if (atlas.version() <= previousAtlas || generation <= previousGeneration ||
+                    capture.resourceGeneration(models, fluids) != generation)
+                    throw new AssertionError(
+                            "Atlas reload must advance only its resource generation");
+                previousAtlas = atlas.version();
+                previousGeneration = generation;
+
+                // The replacement dictionary and old terrain withdrawal are a resource transaction
+                // in the same world. Repeated identical atlas pixels still require fresh definitions.
+                var sources = new SectionSources(models, fluids);
+                events.clear();
+                output.clear();
+                resources.clear();
+                sources.section(resources, output, 0, 0, 0, solid);
+                sources.section(resources, output, 0, 0, 0, air);
+                if (resources.states.count() == 0 || resources.models.count() == 0 ||
+                    resources.sprites.count() == 0)
+                    throw new AssertionError(
+                            "New resource generation did not republish source definitions");
+                bridge.resources(resources.resources(SectionSources.GAME_VERSION, generation, epoch,
+                                                     0, batch, true, atlas.width(), atlas.height(),
+                                                     atlas.rgba()));
+                if (batch == 1) {
+                    for (int x = 0; x < 4; ++x) {
+                        for (int z = 0; z < 4; ++z) {
+                            var event = events.events.add();
+                            PrimeMcEvent.kind(event, 1);
+                            PrimeMcEvent.x(event, x);
+                            PrimeMcEvent.y(event, 0);
+                            PrimeMcEvent.z(event, z);
+                        }
+                    }
+                }
+                output.clear();
+                var request = bridge.requestSections(
+                        events.plan(SectionSources.GAME_VERSION, generation, epoch, batch, 16, 16,
+                                    3, 0, 3, new int[] {0, 3, 0, 3}, batch));
+                long count = PrimeMcRequests.section_count(request);
+                if (count == 0)
+                    throw new AssertionError(
+                            "Resource replacement did not request terrain recompilation");
+                var sections = PrimeMcRequests.sections(request).reinterpret(
+                        Math.multiplyExact(count, PrimeMcSectionRequest.SIZE));
+                for (long i = 0; i < count; ++i) {
+                    var item = sections.asSlice(i * PrimeMcSectionRequest.SIZE,
+                                                PrimeMcSectionRequest.SIZE);
+                    int x = PrimeMcSectionRequest.x(item), y = PrimeMcSectionRequest.y(item),
+                        z = PrimeMcSectionRequest.z(item);
+                    sources.section(resources, output, x, y, z,
+                                    x == 0 && y == 0 && z == 0 ? solid : air);
+                }
+                bridge.sections(
+                        output.sections(SectionSources.GAME_VERSION, generation, epoch, batch));
+                var diagnostics = bridge.cpuDiagnostics();
+                if (!diagnostics.contains("active=64") || !diagnostics.contains("triangles=2 ") ||
+                    diagnostics.contains("compiled=0"))
+                    throw new AssertionError("Atlas reload lost actual geometry recompilation: " +
+                                             diagnostics);
+            }
+        } finally {
+            first.contents().close();
+            replacement.contents().close();
+        }
+        System.out.println(
+                "PRIME_PT_ATLAS_RELOAD_HISTORY_DOMAIN_OK: actual atlas capture keeps world epoch, resource generation advances and republishes dictionary, native recompiles geometry in the same epoch; no GPU/window");
     }
     private static java.nio.ByteBuffer read(SourcePages pages) {
         var bytes = new java.io.ByteArrayOutputStream();

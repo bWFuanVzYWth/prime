@@ -42,14 +42,15 @@ final class SectionSourcesCpuSmoke {
         var collection = new QuadCollection.Builder().addUnculledFace(quad).build();
         var model = new SingleVariant(new SimpleModelWrapper(collection, false, null));
         var opaque = new Opaque();
-        var sources = new SectionSources(
-                new BlockStateModelSet(Map.of(Blocks.STONE.defaultBlockState(), model,
-                                              Blocks.DIRT.defaultBlockState(), opaque),
-                                       model),
-                new net.minecraft.client.renderer.block.FluidStateModelSet(Map.of(), null));
+        var models = new BlockStateModelSet(Map.of(Blocks.STONE.defaultBlockState(), model,
+                                                   Blocks.DIRT.defaultBlockState(), opaque),
+                                            model);
+        var fluids = new net.minecraft.client.renderer.block.FluidStateModelSet(Map.of(), null);
+        var sources = new SectionSources(models, fluids);
         var air = section(Blocks.AIR.defaultBlockState());
         var solid = section(Blocks.STONE.defaultBlockState());
         var unknown = section(Blocks.DIRT.defaultBlockState());
+        SourceSpriteFixture.verifyAtlasReload(models, fluids, solid);
         Path fixture = Path.of(System.getProperty("primept.smoke.routingDirectory"),
                                "mc-section-source.bin");
         Files.createDirectories(fixture.getParent());

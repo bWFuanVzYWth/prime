@@ -245,7 +245,7 @@ fn gpu_light_sampling_switch_reuses_geometry_and_restarts_offline_history() {
     let _timeline = Timeline(owner.clone(), timeline);
     let settings = RenderSettings {
         mode: RenderMode::Realtime,
-        light_sampling: LightSampling::Grid,
+        light_sampling: LightSampling::Tree,
         ray_reconstruction: false,
         view: DiagnosticView::LinearDepth,
         depth_range: 4.0,
@@ -460,12 +460,7 @@ fn gpu_light_sampling_switch_reuses_geometry_and_restarts_offline_history() {
             assert_eq!(actual.3, method);
         }
     };
-    for method in [
-        LightSampling::Grid,
-        LightSampling::TreeSphere,
-        LightSampling::Tree,
-        LightSampling::Grid,
-    ] {
+    for method in [LightSampling::TreeSphere, LightSampling::Tree] {
         let selected = RenderSettings {
             light_sampling: method,
             ..settings
@@ -511,11 +506,7 @@ fn gpu_light_sampling_switch_reuses_geometry_and_restarts_offline_history() {
     frame(&mut renderer);
     frame(&mut renderer);
     assert_eq!(renderer.samples, 2);
-    for method in [
-        LightSampling::TreeSphere,
-        LightSampling::Tree,
-        LightSampling::Grid,
-    ] {
+    for method in [LightSampling::TreeSphere, LightSampling::Tree] {
         let selected = RenderSettings {
             light_sampling: method,
             ..offline

@@ -69,7 +69,7 @@ Windows 构建的 Streamline C++ 静态桥接需要 MSVC C++ 工具链；Streaml
 
 ## ABI 生成与验证
 
-公共 C ABI 为 v12，Minecraft 源 schema 为 v7，配置文件 schema 为 v8。JAR 与 DLL 必须配套重建；旧字节入口不再导出。只修改 `crates/prime-engine/include/prime.h` / `prime_mc.h`，由头文件生成 `prime_abi/src/generated.rs` 和 Java `PrimeAbi`，不要手工维护三套布局。
+公共 C ABI 为 v13，Minecraft 源 schema 为 v7，配置文件 schema 为 v9。JAR 与 DLL 必须配套重建；旧字节入口不再导出。只修改 `crates/prime-engine/include/prime.h` / `prime_mc.h`，由头文件生成 `prime_abi/src/generated.rs` 和 Java `PrimeAbi`，不要手工维护三套布局。
 
 ```powershell
 python scripts/generate-abi.py --probe clang
@@ -122,9 +122,11 @@ cargo test -p prime_engine --no-default-features --lib --locked
 
 客户端命令 `/primept renderer vanilla`、`/primept renderer path_trace` 与 `/primept renderer restir_pt` 只请求切换，实际资源移交在下一外层帧边界执行。验证时覆盖 Prime→原版→Prime、世界退出/重进、标题界面资源重载及退休失败；等待资源加载完成再采样，不把切换暂停计入稳态。首个 Prime 后端使用宿主事件驱动的源路由，加载完成的判据包括待路由地形事件清空，不能仅等待首帧输出。新增后端通过惰性工厂注册，并遵守公共 `RendererSlot` 的完成/失败契约。
 
-光源采样方式在光照组选择，默认 `GRID`，另可选 `TREE` 功率距离树和 `TREE_SPHERE` 包围盒中心球界方向树。游戏内修改在下一外层帧边界生效，无需重启；关闭设置页保存选择。切换先完成旧宿主提交，重建所选独立shader管线和灯表，保留已发布几何/BLAS与共享GPU发光记录。实时 RR 与 ReSTIR 历史继续复用，ReSTIR 在当前场景更新后缀/PDF；离线累积重置，冻结相机与源保持。切换可能有一次暂停，不计入稳态性能。稳态没有采样方式的GPU运行时分支；为切换保留的CPU灯源有实际驻留成本，见[PT设计](docs/pt-state-design.md#光源采样特化与切换成本)。
+光源采样方式在光照组选择，默认 `TREE` 功率距离树，另可选 `TREE_SPHERE` 包围盒中心球界方向树。游戏内修改在下一外层帧边界生效，无需重启；关闭设置页保存选择。切换先完成旧宿主提交，重建所选独立shader管线和灯表，保留已发布几何/BLAS与共享GPU发光记录。实时 RR 与 ReSTIR 历史继续复用，ReSTIR 在当前场景更新后缀/PDF；离线累积重置，冻结相机与源保持。切换可能有一次暂停，不计入稳态性能。稳态没有采样方式的GPU运行时分支；为切换保留的CPU灯源有实际驻留成本，见[PT设计](docs/pt-state-design.md#光源采样特化与切换成本)。
 
-对比时固定同一世界副本、相机/移动路线、种子、预算、原生1920×1080、RR/OMM与硬件；每种方式各录制加载/更新及停止更新后的稳态窗口，保留离群帧。JSON `cap.start`/`cfg` 的 `ls=0/1/2` 分别表示Grid/功率距离Tree/TreeSphere；以实际录制的配置和切换事件划分窗口。比较 `lg.*`/`lt.*`/`ls.*`、`lights.switch`、总static/提取与GPU K2/整帧时间。球界树仍是游戏实测候选，小样板的连续PMF、选光微基准或单场景收益不能外推生产质量与帧率，也不足以决定默认方式。
+对比时固定同一世界副本、相机/移动路线、种子、预算、原生1920×1080、RR/OMM与硬件；每种方式各录制加载/更新及停止更新后的稳态窗口，保留离群帧。JSON `cap.start`/`cfg` 的 `ls=1/2` 分别表示功率距离Tree/TreeSphere（旧记录的0表示已退役Grid）；以实际录制的配置和切换事件划分窗口。比较 `lt.*`/`ls.*`、`lights.switch`、总static/提取与GPU K2/整帧时间。球界树仍是游戏实测候选，小样板的连续PMF、选光微基准或单场景收益不能外推生产质量与帧率，也不足以决定默认方式。
+
+诊断组新增默认关闭的“忽略所有全局重置”，用于对照活动游戏/暂停界面历史；日志明确 event/action/valid，性能 JSON 可进一步区分 temporal、suffix update 和身份表局部支持变化。实际存储重建仍冷启动。原“DLSS光线重建”诊断选项仅改显示名为“原生分辨率含噪输出”，旧开关含义保持：关闭=原生含噪，开启=RR；不要把显示文字变化误当作布尔反转。
 
 ### 用户手动检查重点
 
@@ -154,7 +156,7 @@ cargo test -p prime_engine --no-default-features --lib --locked
 
 TreeSphere的CPU拓扑、叶数、路径和保守球界使用 `cargo test -p prime_vulkan --lib light_sphere --locked`；目录灯字段更新不改变实例/槽位使用 `cargo test -p prime_vulkan --lib static_directory --locked`。生产Slang整数支持、前向/反向PDF及面中心/边缘边界可用 `cargo test -p prime_vulkan --features shader-tests --lib --locked gpu_sphere_tree_integer_support_forward_reverse_and_geometry_boundaries -- --ignored --nocapture --test-threads=1` 执行无窗口GPU夹具，正确性检查另启用Vulkan与同步validation。这些检查不能代替两版游戏的菜单切换、完整PT质量和性能验收。
 
-完整输运的冻结shader对照使用 `register_tests::dump_transport_equivalence` 与 `register_tests::steady_transport_matrix`，显式设置 `PRIME_REGISTER_LIGHT_SAMPLING=grid|tree|sphere` 和 `PRIME_REGISTER_REFERENCE_SPV`。后者须为同模式、采样方法及当前ABI编译的产物，测试接口不自动验证这些条件。两臂都安装各自冻结产物：图像入口统一使用Offline通用bank，避免与内置single-sample特化混作性能对照。任一变量启用时，两入口明确关闭RR/OMM，使用Native、无星图及自动曝光补偿；它们不测量DLSS模型。
+完整输运的冻结shader对照使用 `register_tests::dump_transport_equivalence` 与 `register_tests::steady_transport_matrix`，显式设置 `PRIME_REGISTER_LIGHT_SAMPLING=tree|sphere` 和 `PRIME_REGISTER_REFERENCE_SPV`。后者须为同模式、采样方法及当前ABI编译的产物，测试接口不自动验证这些条件。两臂都安装各自冻结产物：图像入口统一使用Offline通用bank，避免与内置single-sample特化混作性能对照。任一变量启用时，两入口明确关闭RR/OMM，使用Native、无星图及自动曝光补偿；它们不测量DLSS模型。
 
 图像入口以 `PRIME_REGISTER_DUMP` 指定目录，保留20夹具×4预算的原始FP32图像；预算变更只更新push constant与采样历史，冻结bank只安装一次。时间入口以 `PRIME_REGISTER_CSV` 指定文件，可设 `PRIME_REGISTER_WARMUP`、`PRIME_REGISTER_SAMPLES` 和逗号分隔的 `PRIME_REGISTER_CASES`；固定原生1920×1080、4路径顶点及种子，保留预热和全部帧。GPU时间覆盖实际整份录制，不能当成K2单段时间；夹具光源树较浅，不证明真实世界深树或RR的性能。独占GPU、验证关闭并交替运行两臂，另保留工具链、源码与产物哈希和设备配置。
 
@@ -162,7 +164,7 @@ TreeSphere的CPU拓扑、叶数、路径和保守球界使用 `cargo test -p pri
 
 `PRIME_REGISTER_TREE_BUILD=saoh|balanced` 仅在上述 `shader-tests` 无窗口测试中选择TreeSphere构树方式，默认沿用SAOH。balanced按最长质心轴等分真实叶子，在世界层与每个页内分别平衡，不增加虚拟灯或GPU方法分支；各层叶深为floor/ceil(log2 N)，组合深度仍随页灯数变化。metadata记录策略和实际local叶深分布，日志记录每次world构树的叶深分布；局部路径统计在预加载后、正式计时前扫描一次，不计作生产开销。拓扑改变会改变proposal及收敛，必须另测质量；该测试选项不进入游戏设置或生产构建。
 
-Grid/旧纯功率Tree的合成CPU对比需显式运行 `cargo test -p prime_vulkan --release --lib cpu_sampler_comparison --locked -- --ignored --nocapture`。默认CSV保存在 `artifacts/light-sampler-restoration/cpu-comparison.csv`，保留全部轮次和共同源准备成本；不代表当前功率距离Tree，也不包含TreeSphere、Vulkan上传、GPU时间或画面质量。生产三种方式按前文同场景录制步骤分别验收。
+生产Grid的CPU建表、GPU表与shader变体已退役；旧`GRID`保存值迁移到功率距离Tree，保留其他设置。Tree/Sphere按前文同场景步骤分别验收。`register_tests::steady_transport_matrix`可指定`PRIME_REGISTER_INTEGRATOR=path_trace|restir_pt`；ReSTIR仅支持Realtime，禁止安装PathTrace的reference SPV。相同场景/预算并不意味着两种积分器射线总量相同，结果分别解释。
 
 ### ReSTIR PT Enhanced
 
@@ -301,7 +303,6 @@ cargo test -p prime_vulkan --features shader-tests --lib --locked -- --ignored -
 
 ```powershell
 cargo test -p prime_vulkan --features shader-tests --lib --locked object_tests:: -- --ignored --nocapture --test-threads=1
-cargo test -p prime_vulkan --features shader-tests --lib --locked light_grid -- --ignored --nocapture --test-threads=1
 cargo test -p prime_vulkan --features shader-tests --lib --locked gpu_optical_visibility -- --ignored --nocapture --test-threads=1
 cargo test -p prime_vulkan --features shader-tests --lib --locked gpu_solar_sampled_radiance -- --ignored --nocapture --test-threads=1
 cargo test -p prime_vulkan --features shader-tests --lib --locked gpu_cross_bilateral_uvs -- --ignored --nocapture --test-threads=1

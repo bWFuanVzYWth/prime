@@ -43,8 +43,8 @@ public final class CaptureInbox {
                                     spriteWidth * 4);
                 }
             }
-            // UVs from earlier compiles refer to the old packing; invalidate that entire capture epoch.
-            reset();
+            // Resource replacement revokes old packing through its own generation transaction.
+            // A new atlas does not replace the world or request whole-image temporal reset.
             atlas = new Atlas(++atlasVersion, width, height, rgba);
             sprites = java.util.List.copyOf(preparations.regions().values());
             PrimeClient.LOGGER.info("Captured block atlas {}x{}, {} bytes, resource epoch {}",

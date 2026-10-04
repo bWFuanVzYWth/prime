@@ -132,6 +132,7 @@ impl Cluster {
 
 pub(super) struct Geometry {
     history_identity: Option<HistoryIdentity>,
+    history_revision_floor: u32,
     workers: Arc<prime_scene::workers::CpuWorkers>,
     indices: [Buffer; crate::packing::FORMATS],
     builds: crate::arena::Arena,
@@ -225,7 +226,7 @@ impl Geometry {
             enabled,
             cell_budget,
             resources,
-            prime_scene::settings::LightSampling::Grid,
+            prime_scene::settings::LightSampling::Tree,
         )
     }
     pub fn new_with_resources(
@@ -267,6 +268,7 @@ impl Geometry {
             objects: Objects::new(context, workers)?,
             directory: crate::static_directory::StaticDirectory::default(),
             history_identity: None,
+            history_revision_floor: 0,
             light_sources: BTreeMap::new(),
             capabilities: [0; 3],
             top_dirty: true,
@@ -356,6 +358,12 @@ impl Geometry {
         self.same_owner(scene) && self.epoch == scene.epoch
     }
 
+    // A diagnostic can keep reservoirs across replacement of the scene's numeric ID domain.
+    // Stamp every new live slot after their accepted watermark, so none aliases an old identity.
+    pub fn set_history_revision_floor(&mut self, accepted: u32) {
+        self.history_revision_floor = self.history_revision_floor.max(accepted);
+    }
+
     // Allocated only when ReSTIR actually consumes history. Subsequent calls upload changed
     // slots only; ordinary PT neither allocates these buffers nor scans identities.
     pub fn shader_history_identity(
@@ -365,8 +373,7 @@ impl Geometry {
     ) -> Result<HistoryIdentityInput, String> {
         if self.history_identity.is_none() {
             self.objects.enable_history_identity();
-            let mut identity = HistoryIdentity::default();
-            identity.advance()?;
+            let mut identity = HistoryIdentity::after(self.history_revision_floor)?;
             for (&key, cluster) in &self.clusters {
                 let (_, first, _) = self
                     .directory
@@ -407,6 +414,10 @@ impl Geometry {
             || self.static_planner.has_pending()
             || self.resource_revision != self.resources.borrow().revision
     }
+    #[cfg(test)]
+    pub(super) fn terrain_updates_pending(&self) -> bool {
+        self.static_planner.has_pending()
+    }
     pub fn source_changed(&self, scene: SceneInput<'_>) -> bool {
         self.revision != scene.publication() || self.anchor != scene.anchor
     }
@@ -444,13 +455,11 @@ impl Geometry {
     pub(super) fn light_sampling_snapshot(&self) -> LightSamplingSnapshot {
         let mut local_depths = [0; 28];
         for (_, page) in self.light_sources.values() {
-            if let Some(tree) = &page.tree {
-                for (total, count) in local_depths
-                    .iter_mut()
-                    .zip(crate::light_sphere_cpu::leaf_depths(&tree.paths))
-                {
-                    *total += count;
-                }
+            for (total, count) in local_depths
+                .iter_mut()
+                .zip(crate::light_sphere_cpu::leaf_depths(&page.tree.paths))
+            {
+                *total += count;
             }
         }
         LightSamplingSnapshot {
@@ -718,6 +727,9 @@ impl Geometry {
             });
         self.top_dirty |= plan.placements_changed;
         if self.epoch != scene.epoch {
+            if let Some(identity) = &self.history_identity {
+                self.history_revision_floor = self.history_revision_floor.max(identity.revision());
+            }
             self.history_identity = None;
             self.compactions.cancel_sources();
             self.directory = crate::static_directory::StaticDirectory::default();
@@ -1163,13 +1175,8 @@ impl Geometry {
                 .iter()
                 .map(|(&key, (origin, page))| (key, (*origin, page.as_ref())))
                 .collect();
-            self.light_sampler.update(
-                context,
-                scene.anchor,
-                &sources,
-                &mut self.uploads,
-                self.completed,
-            )?;
+            self.light_sampler
+                .update(context, scene.anchor, &sources, &mut self.uploads)?;
             lights_trace.succeed();
         }
         let mut directory_trace = prime_diagnostics::scope("geom.dir");

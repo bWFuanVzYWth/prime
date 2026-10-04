@@ -65,10 +65,10 @@ final class SettingsTest {
                 RenderSettings.Control.BOUNCES, 12);
         String valid = SettingsFile.encode(changed);
         for (String broken : new String[] {
-                     valid.replace("version=8", "version=0"),
-                     valid.replace("version=8", "version=7"),
-                     valid.replace("version=8", "version=9"),
-                     valid.replace("version=8", ""),
+                     valid.replace("version=9", "version=0"),
+                     valid.replace("version=9", "version=7"),
+                     valid.replace("version=9", "version=10"),
+                     valid.replace("version=9", ""),
                      valid.replace("render.bounces=12", ""),
                      valid.replace("render.bounces=12", "render.bounces=65"),
                      valid.replace("terrain.batches_per_frame=8", ""),
@@ -85,9 +85,12 @@ final class SettingsTest {
                      valid.replace("render.dlss_quality=PERFORMANCE", ""),
                      valid.replace("render.dlss_quality=PERFORMANCE",
                                    "render.dlss_quality=UNKNOWN"),
-                     valid.replace("render.light_sampling=GRID", ""),
-                     valid.replace("render.light_sampling=GRID", "render.light_sampling=UNKNOWN"),
-                     valid.replace("render.light_sampling=GRID", "render.light_sampling=2"),
+                     valid.replace("render.light_sampling=TREE", ""),
+                     valid.replace("render.light_sampling=TREE", "render.light_sampling=UNKNOWN"),
+                     valid.replace("render.light_sampling=TREE", "render.light_sampling=2"),
+                     valid.replace("diagnostics.ignore_global_history_resets=false\n", ""),
+                     valid.replace("diagnostics.ignore_global_history_resets=false",
+                                   "diagnostics.ignore_global_history_resets=maybe"),
                      valid + "render.bounces=NaN\n",
                      valid + "bad=\\uXYZW\n"}) {
             var loaded = SettingsFile.decode(broken);
@@ -132,16 +135,17 @@ final class SettingsTest {
         assertEquals(0, PrimeSettings.hdr(view(bytes)));
         assertEquals(0, PrimeSettings.hdr_reference_white(view(bytes)));
         assertEquals(0, PrimeSettings.frame_generation(view(bytes)));
-        assertEquals(0, PrimeSettings.light_sampling(view(bytes)));
+        assertEquals(1, PrimeSettings.light_sampling(view(bytes)));
         assertEquals(0, PrimeSettings.integrator(view(bytes)));
-        assertEquals(104, PrimeSettings.SIZE);
+        assertEquals(0, PrimeSettings.ignore_global_history_resets(view(bytes)));
+        assertEquals(108, PrimeSettings.SIZE);
     }
     @Test
     void saturationDefaultsPreserveSavedValuesAndIndependentWire(@TempDir Path dir)
             throws Exception {
         var control = RenderSettings.Control.SATURATION;
         var defaults = RenderSettings.defaults();
-        assertEquals(8, RenderSettings.VERSION);
+        assertEquals(9, RenderSettings.VERSION);
         assertEquals(20, defaults.value(control));
         Path file = dir.resolve("primept.properties");
         assertEquals(20, SettingsFile.load(file).settings().value(control));
@@ -326,23 +330,26 @@ final class SettingsTest {
     @Test
     void lightSamplingChoicePersistsAndCopiesWithoutChangingOtherWireFields() {
         var defaults = RenderSettings.defaults();
-        assertEquals(RenderSettings.LightSampling.GRID, defaults.lightSampling());
-        assertSame(defaults, defaults.withLightSampling(RenderSettings.LightSampling.GRID));
-        assertEquals(0, RenderSettings.LightSampling.GRID.ordinal());
-        assertEquals(1, RenderSettings.LightSampling.TREE.ordinal());
-        assertEquals(2, RenderSettings.LightSampling.TREE_SPHERE.ordinal());
+        assertEquals(RenderSettings.LightSampling.TREE, defaults.lightSampling());
+        assertSame(defaults, defaults.withLightSampling(RenderSettings.LightSampling.TREE));
+        assertEquals(1, RenderSettings.LightSampling.TREE.wireId);
+        assertEquals(2, RenderSettings.LightSampling.TREE_SPHERE.wireId);
+        assertArrayEquals(
+                new RenderSettings.LightSampling[] {RenderSettings.LightSampling.TREE,
+                                                    RenderSettings.LightSampling.TREE_SPHERE},
+                RenderSettings.LightSampling.values());
         assertThrows(NullPointerException.class, () -> defaults.withLightSampling(null));
         var before = settingsBuffer();
         var after = settingsBuffer();
         for (var method : new RenderSettings.LightSampling[] {
                      RenderSettings.LightSampling.TREE, RenderSettings.LightSampling.TREE_SPHERE}) {
             var changed = defaults.withLightSampling(method);
-            assertNotEquals(defaults, changed);
+            assertEquals(method == defaults.lightSampling(), defaults.equals(changed));
             assertSame(changed, changed.withLightSampling(method));
             assertEquals(changed, SettingsFile.decode(SettingsFile.encode(changed)).settings());
             assertEquals(changed.hashCode(),
                          SettingsFile.decode(SettingsFile.encode(changed)).settings().hashCode());
-            assertEquals(RenderSettings.LightSampling.GRID, defaults.lightSampling());
+            assertEquals(RenderSettings.LightSampling.TREE, defaults.lightSampling());
             assertEquals(method, changed.withPathTracing(false)
                                          .withOpacityMicromap(false)
                                          .withRayReconstruction(false)
@@ -352,9 +359,90 @@ final class SettingsTest {
             for (boolean offline : new boolean[] {false, true}) {
                 defaults.write(before, offline, RenderSettings.View.OUTPUT);
                 changed.write(after, offline, RenderSettings.View.OUTPUT);
-                assertEquals(method.ordinal(), PrimeSettings.light_sampling(view(after)));
+                assertEquals(method.wireId, PrimeSettings.light_sampling(view(after)));
                 assertOnlyFieldChanged(before, after, 96);
             }
+        }
+    }
+    @Test
+    void retiredGridSettingMigratesWithoutResettingOtherValues(@TempDir Path dir) throws Exception {
+        var expected = RenderSettings.defaults()
+                               .withRenderer(RenderSettings.Renderer.RESTIR_PT)
+                               .with(RenderSettings.Control.BOUNCES, 32)
+                               .with(RenderSettings.Control.SATURATION, 8)
+                               .with(RenderSettings.Control.TERRAIN_BATCHES_PER_FRAME, 16)
+                               .with(RenderSettings.Control.EXPOSURE_EV, -4)
+                               .with(RenderSettings.Control.HDR, 1)
+                               .withOpacityMicromap(false)
+                               .withRayReconstruction(false)
+                               .withDlssQuality(RenderSettings.DlssQuality.QUALITY);
+        String legacy =
+                SettingsFile.encode(expected)
+                        .replace("version=9", "version=8")
+                        .replace("diagnostics.ignore_global_history_resets=false\n", "")
+                        .replace("render.light_sampling=TREE", "render.light_sampling=GRID");
+        var file = dir.resolve("primept.properties");
+        Files.writeString(file, legacy);
+        var loaded = SettingsFile.load(file);
+        assertEquals("", loaded.resetReason());
+        assertEquals(expected, loaded.settings());
+        var wire = settingsBuffer();
+        loaded.settings().write(wire, false, RenderSettings.View.OUTPUT);
+        assertEquals(1, PrimeSettings.light_sampling(view(wire)));
+        SettingsFile.save(file, loaded.settings());
+        String canonical = Files.readString(file);
+        assertTrue(canonical.contains("version=9\n"));
+        assertTrue(canonical.contains("diagnostics.ignore_global_history_resets=false\n"));
+        assertTrue(canonical.contains("render.light_sampling=TREE\n"));
+        assertFalse(canonical.contains("GRID"));
+        assertEquals(expected, SettingsFile.load(file).settings());
+        assertEquals(RenderSettings.LightSampling.TREE,
+                     RenderSettings.LightSampling.fromKey("GRID"));
+        assertThrows(IllegalArgumentException.class,
+                     () -> RenderSettings.LightSampling.fromKey("grid"));
+        // The migration is narrow: another missing required value still invalidates the file.
+        var malformed = SettingsFile.decode(legacy.replace("render.bounces=32\n", ""));
+        assertEquals(RenderSettings.defaults(), malformed.settings());
+        assertFalse(malformed.resetReason().isEmpty());
+    }
+    @Test
+    void globalResetDiagnosticDefaultsOffAndHasIndependentPersistenceAndAbi() {
+        var defaults = RenderSettings.defaults();
+        assertFalse(defaults.ignoreGlobalHistoryResets());
+        assertSame(defaults, defaults.withIgnoreGlobalHistoryResets(false));
+        var enabled = defaults.withIgnoreGlobalHistoryResets(true);
+        assertNotEquals(defaults, enabled);
+        assertSame(enabled, enabled.withIgnoreGlobalHistoryResets(true));
+        var before = settingsBuffer();
+        var after = settingsBuffer();
+        for (boolean offline : new boolean[] {false, true}) {
+            defaults.write(before, offline, RenderSettings.View.OUTPUT);
+            enabled.write(after, offline, RenderSettings.View.OUTPUT);
+            assertEquals(1, PrimeSettings.ignore_global_history_resets(view(after)));
+            assertOnlyFieldChanged(before, after, 104);
+        }
+        var copied = enabled.withRenderer(RenderSettings.Renderer.RESTIR_PT)
+                             .withOpacityMicromap(false)
+                             .withRayReconstruction(false)
+                             .withDlssQuality(RenderSettings.DlssQuality.QUALITY)
+                             .withLightSampling(RenderSettings.LightSampling.TREE_SPHERE)
+                             .with(RenderSettings.Control.BOUNCES, 32);
+        assertTrue(copied.ignoreGlobalHistoryResets());
+        var loaded = SettingsFile.decode(SettingsFile.encode(copied));
+        assertEquals("", loaded.resetReason());
+        assertEquals(copied, loaded.settings());
+        assertEquals(copied.hashCode(), loaded.settings().hashCode());
+        assertFalse(copied.withIgnoreGlobalHistoryResets(false).ignoreGlobalHistoryResets());
+        String current = SettingsFile.encode(defaults);
+        for (var method : RenderSettings.LightSampling.values()) {
+            String previous =
+                    current.replace("version=9", "version=8")
+                            .replace("diagnostics.ignore_global_history_resets=false\n", "")
+                            .replace("render.light_sampling=TREE\n",
+                                     "render.light_sampling=" + method.name() + "\n");
+            var migrated = SettingsFile.decode(previous);
+            assertEquals("", migrated.resetReason());
+            assertEquals(defaults.withLightSampling(method), migrated.settings());
         }
     }
     @Test

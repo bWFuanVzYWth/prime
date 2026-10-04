@@ -22,10 +22,8 @@ import "restir/identity.slang";
 __exported import "restir/types.slang";
 #if defined(PRIME_LIGHT_TREE_SPHERE)
 import "sphere_tree_sampling.slang";
-#elif defined(PRIME_LIGHT_TREE)
-import "tree_sampling.slang";
 #else
-import "grid_sampling.slang";
+import "tree_sampling.slang";
 #endif
 
 public static const uint RESTIR_LIGHT_SKY = 0;
@@ -100,13 +98,8 @@ public SurfaceHit restirLoadEmitter(RestirScene scene, HitInfo identity, float3 
                                     uint coverageSeed) {
     uint pageIndex = identity.pageID() & 0x00ffffffu;
     uint primitive = identity.primitiveIndex();
-#if defined(PRIME_LIGHT_TREE) || defined(PRIME_LIGHT_TREE_SPHERE)
     LightTree tree = *((LightTree *)scene.resources.staticTrianglePages[0].lightGrid);
     TreePage page = tree.pages[pageIndex];
-#else
-    LightGrid grid = *((LightGrid *)scene.resources.staticTrianglePages[0].lightGrid);
-    GridPage page = grid.pages[pageIndex];
-#endif
     uint words = page.format == 3 ? 108 : (page.format == 2 ? 68 : 60);
     SurfaceRecord record =
             loadQuad(page.emitters + (primitive >> 1) * words, page.format, primitive & 1u);
@@ -179,13 +172,8 @@ public SurfacePoint restirHitSurface(RestirScene scene, HitInfo identity) {
     uint pageID = identity.pageID() & 0x00ffffffu;
     uint primitive = identity.primitiveIndex();
     if ((identity.pageID() & RESTIR_EMITTER_PAGE) != 0) {
-#if defined(PRIME_LIGHT_TREE) || defined(PRIME_LIGHT_TREE_SPHERE)
         LightTree tree = *((LightTree *)scene.resources.staticTrianglePages[0].lightGrid);
         TreePage page = tree.pages[pageID];
-#else
-        LightGrid grid = *((LightGrid *)scene.resources.staticTrianglePages[0].lightGrid);
-        GridPage page = grid.pages[pageID];
-#endif
         uint words = page.format == 3 ? 108 : (page.format == 2 ? 68 : 60);
         Triangle tri =
                 loadQuad(page.emitters + (primitive >> 1) * words, page.format, primitive & 1u)
@@ -224,7 +212,7 @@ public bool restirNeeMayReconnectAtSurface(SurfaceHit hit) {
     // such a terminal NEE sample as its emitter endpoint, whose PMF is re-evaluated.
     return hit.optical || (hit.materialFlags & 1u) == 0;
 #else
-    // TREE and GRID depend on the preserved RC position, not its changed incident view.
+    // TREE depends on the preserved RC position, not its changed incident view.
     return true;
 #endif
 }
@@ -349,13 +337,8 @@ public RestirLightSample restirSampleLight(RestirScene scene, SurfaceHit receive
         result.pdf = pdf * localProbability;
         result.type = RESTIR_LIGHT_EMISSIVE;
         // Recreate the selected triangle's barycentric sample exactly as sampleLocalLight.
-#if defined(PRIME_LIGHT_TREE) || defined(PRIME_LIGHT_TREE_SPHERE)
         LightTree tree = *((LightTree *)scene.resources.staticTrianglePages[0].lightGrid);
         TreePage page = tree.pages[light.page];
-#else
-        LightGrid grid = *((LightGrid *)scene.resources.staticTrianglePages[0].lightGrid);
-        GridPage page = grid.pages[light.page];
-#endif
         uint words = page.format == 3 ? 108 : (page.format == 2 ? 68 : 60);
         float fraction = asfloat(page.emitters[light.emitter * words + 3]);
         bool first = fraction == 1.0 || sample.x < fraction;

@@ -8,7 +8,7 @@ import java.util.Arrays;
 
 /** Immutable client settings. Version adapters own widgets; native consumes the validated wire. */
 public final class RenderSettings {
-    public static final int VERSION = 8;
+    public static final int VERSION = 9;
     public static final int WIRE_BYTES = (int)PrimeSettings.SIZE;
     public enum Control {
         BOUNCES("render.bounces", 1, 64, 12),
@@ -43,7 +43,22 @@ public final class RenderSettings {
     }
     public enum View { OUTPUT, NOISY_COLOR, LINEAR_DEPTH, NORMAL }
     public enum DlssQuality { DLAA, QUALITY, BALANCED, PERFORMANCE, ULTRA_PERFORMANCE }
-    public enum LightSampling { GRID, TREE, TREE_SPHERE }
+    public enum LightSampling {
+        TREE(1),
+        TREE_SPHERE(2);
+        public final int wireId;
+        LightSampling(int wireId) {
+            this.wireId = wireId;
+        }
+        public static LightSampling fromKey(String key) {
+            // Retire the old choice without resetting unrelated saved settings.
+            return switch (key) {
+                case "GRID", "TREE" -> TREE;
+                case "TREE_SPHERE" -> TREE_SPHERE;
+                default -> throw new IllegalArgumentException("Unknown light sampling: " + key);
+            };
+        }
+    }
     public enum Renderer {
         VANILLA("vanilla", 0),
         PATH_TRACE("path_trace", 0),
@@ -66,20 +81,23 @@ public final class RenderSettings {
     private final boolean rayReconstruction;
     private final DlssQuality dlssQuality;
     private final LightSampling lightSampling;
+    private final boolean ignoreGlobalHistoryResets;
     private final int[] values;
 
     private RenderSettings(Renderer renderer, boolean opacityMicromap, boolean rayReconstruction,
-                           DlssQuality dlssQuality, LightSampling lightSampling, int[] values) {
+                           DlssQuality dlssQuality, LightSampling lightSampling,
+                           boolean ignoreGlobalHistoryResets, int[] values) {
         this.renderer = renderer;
         this.opacityMicromap = opacityMicromap;
         this.rayReconstruction = rayReconstruction;
         this.dlssQuality = dlssQuality;
         this.lightSampling = lightSampling;
+        this.ignoreGlobalHistoryResets = ignoreGlobalHistoryResets;
         this.values = values;
     }
     public static RenderSettings defaults() {
         return new RenderSettings(
-                Renderer.PATH_TRACE, true, true, DlssQuality.PERFORMANCE, LightSampling.GRID,
+                Renderer.PATH_TRACE, true, true, DlssQuality.PERFORMANCE, LightSampling.TREE, false,
                 Arrays.stream(Control.values()).mapToInt(c -> c.initial).toArray());
     }
     public boolean pathTracing() {
@@ -100,6 +118,9 @@ public final class RenderSettings {
     public LightSampling lightSampling() {
         return lightSampling;
     }
+    public boolean ignoreGlobalHistoryResets() {
+        return ignoreGlobalHistoryResets;
+    }
     public boolean hdr() {
         return value(Control.HDR) != 0;
     }
@@ -118,33 +139,40 @@ public final class RenderSettings {
         if (value == renderer)
             return this;
         return new RenderSettings(value, opacityMicromap, rayReconstruction, dlssQuality,
-                                  lightSampling, values);
+                                  lightSampling, ignoreGlobalHistoryResets, values);
     }
     public RenderSettings withOpacityMicromap(boolean value) {
         return new RenderSettings(renderer, value, rayReconstruction, dlssQuality, lightSampling,
-                                  values);
+                                  ignoreGlobalHistoryResets, values);
     }
     public RenderSettings withRayReconstruction(boolean value) {
         return new RenderSettings(renderer, opacityMicromap, value, dlssQuality, lightSampling,
-                                  values);
+                                  ignoreGlobalHistoryResets, values);
     }
     public RenderSettings withDlssQuality(DlssQuality value) {
         return new RenderSettings(renderer, opacityMicromap, rayReconstruction,
-                                  java.util.Objects.requireNonNull(value), lightSampling, values);
+                                  java.util.Objects.requireNonNull(value), lightSampling,
+                                  ignoreGlobalHistoryResets, values);
     }
     public RenderSettings withLightSampling(LightSampling value) {
         java.util.Objects.requireNonNull(value);
         if (value == lightSampling)
             return this;
         return new RenderSettings(renderer, opacityMicromap, rayReconstruction, dlssQuality, value,
-                                  values);
+                                  ignoreGlobalHistoryResets, values);
+    }
+    public RenderSettings withIgnoreGlobalHistoryResets(boolean value) {
+        if (value == ignoreGlobalHistoryResets)
+            return this;
+        return new RenderSettings(renderer, opacityMicromap, rayReconstruction, dlssQuality,
+                                  lightSampling, value, values);
     }
     public RenderSettings with(Control control, int value) {
         control.validate(value);
         int[] next = values.clone();
         next[control.ordinal()] = value;
         return new RenderSettings(renderer, opacityMicromap, rayReconstruction, dlssQuality,
-                                  lightSampling, next);
+                                  lightSampling, ignoreGlobalHistoryResets, next);
     }
     /** Named C structure, borrowed only for prime_configure; offline and view are session controls. */
     public void write(ByteBuffer target, boolean offline, View view) {
@@ -175,8 +203,9 @@ public final class RenderSettings {
         PrimeSettings.hdr(s, hdr() ? 1 : 0);
         PrimeSettings.hdr_reference_white(s, value(Control.HDR_WHITE));
         PrimeSettings.frame_generation(s, frameGeneration() ? 1 : 0);
-        PrimeSettings.light_sampling(s, lightSampling.ordinal());
+        PrimeSettings.light_sampling(s, lightSampling.wireId);
         PrimeSettings.integrator(s, renderer.integrator);
+        PrimeSettings.ignore_global_history_resets(s, ignoreGlobalHistoryResets ? 1 : 0);
         target.position(WIRE_BYTES);
     }
 
@@ -189,15 +218,17 @@ public final class RenderSettings {
                 opacityMicromap == settings.opacityMicromap &&
                 rayReconstruction == settings.rayReconstruction &&
                 dlssQuality == settings.dlssQuality && lightSampling == settings.lightSampling &&
+                ignoreGlobalHistoryResets == settings.ignoreGlobalHistoryResets &&
                 Arrays.equals(values, settings.values);
     }
     @Override
     public int hashCode() {
-        return 31 *
-                (31 * (31 * (31 * (31 * renderer.hashCode() + Boolean.hashCode(opacityMicromap)) +
-                             Boolean.hashCode(rayReconstruction)) +
-                       dlssQuality.hashCode()) +
-                 lightSampling.hashCode()) +
+        return 31 * (31 * (31 * (31 * (31 * (31 * renderer.hashCode() +
+                                             Boolean.hashCode(opacityMicromap)) +
+                                       Boolean.hashCode(rayReconstruction)) +
+                                 dlssQuality.hashCode()) +
+                           lightSampling.hashCode()) +
+                     Boolean.hashCode(ignoreGlobalHistoryResets)) +
                 Arrays.hashCode(values);
     }
 }

@@ -8,7 +8,6 @@ pub fn add(shaders: &mut Vec<ShaderSpec>, source: &str, name: &str, defines: &[&
 }
 
 pub fn samplers(shaders: &mut Vec<ShaderSpec>, source: &str, name: &str, common: &[&str]) {
-    add(shaders, source, name, common);
     let mut defines = common.to_vec();
     defines.push("PRIME_LIGHT_TREE=1");
     add(shaders, source, &format!("{name}_tree"), &defines);

@@ -426,6 +426,52 @@ fn gpu_restir_support_changes_reject_only_affected_endpoints_without_ghosts() {
     for _ in 0..12 {
         render(&mut renderer, &scene, &instances, &camera, &mut sequence);
     }
+    // RGB-only animation has identical coverage/coating support over its complete family.
+    // Exercise the real texture cache and all three device identity domains before varying alpha.
+    let constant = Texture {
+        width: 2,
+        height: 1,
+        pixels: Arc::from([255, 64, 32, 255, 32, 64, 255, 255]),
+        region: Some([0, 0, 1, 1]),
+        sampling: Some(Arc::new(TextureSampling {
+            levels: vec![],
+            next: [0, 0],
+            blend: 0.,
+            coverage_frames: Arc::from([[0, 0], [1, 0]]),
+        })),
+        material: None,
+    };
+    constant.validate().unwrap();
+    scene.textures.insert(7, constant.clone());
+    scene.revision += 1;
+    for _ in 0..8 {
+        render(&mut renderer, &scene, &instances, &camera, &mut sequence);
+    }
+    let constant_before = snapshot(&renderer);
+    let mut phase = constant;
+    phase.region = Some([1, 0, 1, 1]);
+    let sampling = Arc::make_mut(phase.sampling.as_mut().unwrap());
+    sampling.next = [0, 0];
+    sampling.blend = 0.5;
+    phase.validate().unwrap();
+    scene.textures.insert(7, phase);
+    scene.revision += 1;
+    render(&mut renderer, &scene, &instances, &camera, &mut sequence);
+    assert!(renderer.restir.as_ref().unwrap().temporal_this_frame);
+    assert!(
+        renderer.restir.as_ref().unwrap().dynamic_update_this_frame,
+        "RGB resources must still update cached radiance/PDF"
+    );
+    let constant_after = snapshot(&renderer);
+    assert_eq!(
+        constant_before.identities, constant_after.identities,
+        "constant-alpha RGB animation incorrectly stamped static/dynamic/emitter support"
+    );
+    assert!(
+        constant_after.mean(true).0 > 4.,
+        "actual history lost on RGB-only animation"
+    );
+    eprintln!("ReSTIR constant-alpha RGB phase retained all three device identity domains");
     let before = snapshot(&renderer);
     assert!(
         before.mean(false).1[0] > 0.1,

@@ -260,9 +260,10 @@ fn gpu_restir_independent_pipeline_preserves_primary_and_history_boundaries() {
     renderer.configure(updated).unwrap();
     renderer.render(&dynamic, &camera, 31, 17, 105).unwrap();
     assert!(
-        !renderer.restir.as_ref().unwrap().temporal_this_frame,
-        "changed path domain must restart history"
+        renderer.restir.as_ref().unwrap().temporal_this_frame,
+        "vertex budget changes must use current-scene update and local path support"
     );
+    assert!(renderer.restir.as_ref().unwrap().dynamic_update_this_frame);
 }
 
 #[test]
@@ -276,11 +277,7 @@ fn gpu_restir_offline_batch_matches_sequential_fp32_for_each_light_sampler() {
         offline_samples: 3,
         ..config
     });
-    for method in [
-        LightSampling::Grid,
-        LightSampling::Tree,
-        LightSampling::TreeSphere,
-    ] {
+    for method in [LightSampling::Tree, LightSampling::TreeSphere] {
         let config = RenderSettings {
             light_sampling: method,
             ..config
@@ -432,6 +429,15 @@ fn gpu_restir_borrowed_history_commits_only_at_matching_acceptance() {
             renderer.restir.as_ref().unwrap().accepted_history(),
             previous,
             "GPU completion alone advanced accepted history"
+        );
+        assert!(renderer.reset_world().is_err());
+        assert!(
+            !renderer.failed,
+            "rejected world reset poisoned a pending frame"
+        );
+        assert_eq!(
+            renderer.restir.as_ref().unwrap().accepted_history(),
+            previous
         );
         assert!(renderer.submission_accepted(serial + 1).is_err());
         assert_eq!(
@@ -763,11 +769,7 @@ fn gpu_restir_offline_mean_agrees_with_path_trace_on_direct_and_indirect_lightin
         config.seed
     );
     let mut failures = Vec::new();
-    for method in [
-        LightSampling::Grid,
-        LightSampling::Tree,
-        LightSampling::TreeSphere,
-    ] {
+    for method in [LightSampling::Tree, LightSampling::TreeSphere] {
         for bounces in [1, 3] {
             println!(
                 "ReSTIR versus PT: {method:?}, {bounces} bounces, {} samples",

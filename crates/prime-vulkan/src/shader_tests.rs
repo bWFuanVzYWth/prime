@@ -106,7 +106,8 @@ fn tree_integer_support_forward_reverse_and_geometry_boundaries(
     let lights: Vec<_> = pages
         .iter()
         .flat_map(|p| {
-            (0..p.lights.len()).map(|i| (p.key, i as u32, tree.first_emitter(p.key) + i as u32))
+            (0..p.inverse_areas.len())
+                .map(|i| (p.key, i as u32, tree.first_emitter(p.key) + i as u32))
         })
         .collect();
     let mut input = Vec::new();

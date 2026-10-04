@@ -621,6 +621,7 @@ impl SourceScene {
         texture_lifetime.inherit_retirements(&self.texture_lifetime);
         let workers = self.routing.workers().cloned();
         *self = Self {
+            id: self.id,
             epoch: self.epoch,
             revision,
             terrain_resource_generation,

@@ -1,6 +1,7 @@
 //! Independent ReSTIR PT Enhanced point profile. Scratch is queue-local GPU memory;
 //! only completed descriptor slots have mapped uniforms and temporal commits advance on acceptance.
 use super::{Buffer, Context, FRAME_SLOTS, Image, LightSampling, RenderMode, ShaderModule, error};
+use crate::temporal_reset::{self, Backend, GlobalReset, StorageCold};
 use ash::vk;
 use std::{io::Cursor, sync::Arc};
 
@@ -90,9 +91,8 @@ impl Pipelines {
             Ok(pipelines)
         };
         macro_rules! sampler_binary {
-            ($grid:ident, $tree:ident, $sphere:ident) => {
+            ($tree:ident, $sphere:ident) => {
                 match method {
-                    LightSampling::Grid => prime_shaders::$grid(),
                     LightSampling::Tree => prime_shaders::$tree(),
                     LightSampling::TreeSphere => prime_shaders::$sphere(),
                 }
@@ -100,17 +100,9 @@ impl Pipelines {
         }
         result.generate = create_group(
             if reconstruction {
-                sampler_binary!(
-                    restir_generate_rr,
-                    restir_generate_rr_tree,
-                    restir_generate_rr_tree_sphere
-                )
+                sampler_binary!(restir_generate_rr_tree, restir_generate_rr_tree_sphere)
             } else {
-                sampler_binary!(
-                    restir_generate,
-                    restir_generate_tree,
-                    restir_generate_tree_sphere
-                )
+                sampler_binary!(restir_generate_tree, restir_generate_tree_sphere)
             },
             if reconstruction {
                 1 | (u32::from(frame_generation) << 1)
@@ -120,24 +112,16 @@ impl Pipelines {
         )?;
         result.workload = create_group(prime_shaders::restir_workload(), 0)?;
         result.retrace = create_group(
-            sampler_binary!(
-                restir_retrace,
-                restir_retrace_tree,
-                restir_retrace_tree_sphere
-            ),
+            sampler_binary!(restir_retrace_tree, restir_retrace_tree_sphere),
             0,
         )?;
         result.shift = create_group(
-            sampler_binary!(restir_shift, restir_shift_tree, restir_shift_tree_sphere),
+            sampler_binary!(restir_shift_tree, restir_shift_tree_sphere),
             0,
         )?;
         if mode == RenderMode::Realtime {
             result.temporal = create_group(
-                sampler_binary!(
-                    restir_temporal,
-                    restir_temporal_tree,
-                    restir_temporal_tree_sphere
-                ),
+                sampler_binary!(restir_temporal_tree, restir_temporal_tree_sphere),
                 0,
             )?;
         }
@@ -338,6 +322,13 @@ impl History {
         self.valid = false;
         self.pending = None;
     }
+    fn request_reset(&mut self, ignore: bool) -> bool {
+        if ignore {
+            return false;
+        }
+        self.invalidate();
+        true
+    }
     fn commit(&mut self) {
         if let Some(frame) = self.pending.take() {
             self.previous = frame;
@@ -359,6 +350,7 @@ pub(super) struct State {
     pub temporal_this_frame: bool,
     pub dynamic_update_this_frame: bool,
     lighting_changed: bool,
+    ignore_global_history_resets: bool,
 }
 impl State {
     pub fn new(context: &Arc<Context>) -> Result<Self, String> {
@@ -397,19 +389,40 @@ impl State {
             temporal_this_frame: false,
             dynamic_update_this_frame: false,
             lighting_changed: false,
+            ignore_global_history_resets: false,
         })
     }
-    pub fn invalidate(&mut self, reason: &'static str) {
-        if self.history.valid {
-            let mut event = prime_diagnostics::scope("restir.history.reset");
-            event.value("reason", reason);
+    pub fn set_history_reset_policy(&mut self, ignore: bool) {
+        self.ignore_global_history_resets = ignore;
+    }
+    pub fn accepted_revision(&self) -> u32 {
+        self.history.revision
+    }
+    pub fn invalidate(&mut self, reason: GlobalReset) {
+        temporal_reset::record_global(
+            Backend::Restir,
+            reason,
+            self.history.valid,
+            self.ignore_global_history_resets,
+        );
+        if self
+            .history
+            .request_reset(self.ignore_global_history_resets)
+        {
+            self.temporal_this_frame = false;
         }
+    }
+    pub fn storage_cold(&mut self, reason: StorageCold) {
+        temporal_reset::record_storage(Backend::Restir, reason, self.history.valid);
         self.history.invalidate();
         self.temporal_this_frame = false;
     }
     pub fn reset_world(&mut self) {
-        self.invalidate("world");
-        self.scratch = None;
+        self.invalidate(GlobalReset::WorldReplaced);
+        if !self.ignore_global_history_resets {
+            self.storage_cold(StorageCold::WorldReleased);
+            self.scratch = None;
+        }
     }
     pub fn commit(&mut self) {
         if self.history.pending.is_some() {
@@ -441,8 +454,12 @@ impl State {
             .as_ref()
             .is_none_or(|scratch| scratch.extent != extent)
         {
-            self.scratch = Some(Scratch::new(context, extent)?);
-            self.invalidate("input_extent");
+            let scratch = Scratch::new(context, extent)?;
+            if self.scratch.is_some() {
+                self.invalidate(GlobalReset::InputExtentChanged);
+            }
+            self.storage_cold(StorageCold::InputExtentChanged);
+            self.scratch = Some(scratch);
         }
         let mut previous = self.history.previous;
         for i in 0..3 {
@@ -456,6 +473,11 @@ impl State {
         self.temporal_this_frame = realtime && self.history.valid;
         self.dynamic_update_this_frame = self.temporal_this_frame
             && (self.lighting_changed || identity.revision != self.history.revision);
+        let mut event = prime_diagnostics::scope("restir.history.frame");
+        event.count("temporal", u64::from(self.temporal_this_frame));
+        event.count("update", u64::from(self.dynamic_update_this_frame));
+        event.count("revision", u64::from(identity.revision));
+        event.count("accepted", u64::from(self.history.revision));
         let mut bytes = [0_u8; UNIFORM_BYTES as usize];
         bytes[..128].copy_from_slice(&frame);
         bytes[128..256].copy_from_slice(if self.temporal_this_frame {
@@ -636,5 +658,38 @@ mod tests {
         history.commit();
         assert!(!history.valid);
         assert_eq!(history.primary_bank, 0);
+    }
+    #[test]
+    fn ignored_request_keeps_accepted_and_pending_but_storage_cold_does_not() {
+        let mut history = History::default();
+        history.pending = Some([7; 128]);
+        history.pending_realtime = true;
+        history.pending_revision = 41;
+        history.commit();
+        let accepted_bank = history.primary_bank;
+        history.pending = Some([9; 128]);
+        history.pending_revision = 42;
+        assert!(!history.request_reset(true));
+        assert!(history.valid);
+        assert_eq!(history.previous, [7; 128]);
+        assert_eq!(history.primary_bank, accepted_bank);
+        assert_eq!(history.revision, 41);
+        history.commit();
+        assert!(history.valid);
+        assert_eq!(history.previous, [9; 128]);
+        assert_eq!(history.revision, 42);
+        assert_eq!(history.primary_bank, accepted_bank ^ 1);
+        history.pending = Some([11; 128]);
+        history.invalidate(); // Actual replacement calls this independently of the request policy.
+        history.commit();
+        assert!(!history.valid);
+        assert_eq!(history.previous, [9; 128]);
+        assert_eq!(history.revision, 42);
+        history.pending = Some([13; 128]);
+        history.pending_revision = 43;
+        history.commit();
+        assert!(history.valid);
+        assert!(history.request_reset(false));
+        assert!(!history.valid);
     }
 }

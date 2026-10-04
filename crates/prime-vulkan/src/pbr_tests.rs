@@ -920,7 +920,7 @@ fn pbr_spirv_bindings_match_full_production_and_lite_reference() {
     let stages: [StageContract; 23] = [
         (
             "Offline",
-            prime_shaders::path_trace(),
+            prime_shaders::path_trace_tree(),
             &[0, 2, 3, 4, 5, 7, 8, 9],
             &[0, 1, 2, 3, 4, 5, 6],
             &[(0, 2), (1, 1), (2, 1), (3, 0), (4, 0)],
@@ -941,14 +941,14 @@ fn pbr_spirv_bindings_match_full_production_and_lite_reference() {
         ),
         (
             "K2 raw",
-            prime_shaders::realtime_transport(),
+            prime_shaders::realtime_transport_tree(),
             &[0, 2, 3, 7, 8, 9],
             &[0, 1, 2, 5, 6],
             TRANSPORT_IDS,
         ),
         (
             "K2 RR",
-            prime_shaders::realtime_transport_rr(),
+            prime_shaders::realtime_transport_rr_tree(),
             &[0, 2, 3, 7, 8, 9, 16],
             &[0, 1, 2, 5, 6],
             TRANSPORT_IDS,

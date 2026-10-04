@@ -23,7 +23,8 @@ public final class PrimeVideoOptions {
     private final OptionsList list;
     private final Runnable rebuildScreen;
     private final EnumMap<Control, OptionInstance<Integer>> controls = new EnumMap<>(Control.class);
-    private OptionInstance<Boolean> offline, opacityMicromap, rayReconstruction, performanceCapture;
+    private OptionInstance<Boolean> offline, opacityMicromap, nativeNoisyOutput, performanceCapture;
+    private OptionInstance<Boolean> ignoreGlobalHistoryResets;
     private OptionInstance<Renderer> renderer;
     private OptionInstance<View> view;
     private OptionInstance<DlssQuality> dlssQuality;
@@ -102,13 +103,14 @@ public final class PrimeVideoOptions {
                 PrimeClient.settings().opacityMicromap(),
                 value
                 -> PrimeClient.updateSettings(PrimeClient.settings().withOpacityMicromap(value)));
-        rayReconstruction = OptionInstance.createBoolean(
+        nativeNoisyOutput = OptionInstance.createBoolean(
                 "primept.settings.ray_reconstruction",
                 OptionInstance.cachedConstantTooltip(
                         Component.translatable("primept.settings.ray_reconstruction.tooltip")),
-                PrimeClient.settings().rayReconstruction(),
+                !PrimeClient.settings().rayReconstruction(),
                 value
-                -> PrimeClient.updateSettings(PrimeClient.settings().withRayReconstruction(value)));
+                -> PrimeClient.updateSettings(
+                        PrimeClient.settings().withRayReconstruction(!value)));
         dlssQuality = new OptionInstance<>(
                 "primept.settings.dlss_quality",
                 OptionInstance.cachedConstantTooltip(
@@ -136,7 +138,7 @@ public final class PrimeVideoOptions {
                                                   value.name().toLowerCase(Locale.ROOT)),
                 new OptionInstance.Enum<>(
                         List.of(LightSampling.values()),
-                        Codec.STRING.xmap(LightSampling::valueOf, LightSampling::name)),
+                        Codec.STRING.xmap(LightSampling::fromKey, LightSampling::name)),
                 PrimeClient.settings().lightSampling(),
                 value
                 -> PrimeClient.updateSettings(PrimeClient.settings().withLightSampling(value)));
@@ -160,8 +162,17 @@ public final class PrimeVideoOptions {
                         Component.translatable("primept.settings.performance_export.tooltip")),
                 Diagnostics.captureRequested(), Diagnostics::setCaptureRequested);
         list.addBig(performanceCapture);
+        ignoreGlobalHistoryResets = OptionInstance.createBoolean(
+                "primept.settings.ignore_global_history_resets",
+                OptionInstance.cachedConstantTooltip(Component.translatable(
+                        "primept.settings.ignore_global_history_resets.tooltip")),
+                PrimeClient.settings().ignoreGlobalHistoryResets(),
+                value
+                -> PrimeClient.updateSettings(
+                        PrimeClient.settings().withIgnoreGlobalHistoryResets(value)));
+        list.addBig(ignoreGlobalHistoryResets);
         list.addBig(opacityMicromap);
-        list.addBig(rayReconstruction);
+        list.addBig(nativeNoisyOutput);
         view = new OptionInstance<>(
                 "primept.settings.view",
                 OptionInstance.cachedConstantTooltip(
@@ -185,6 +196,8 @@ public final class PrimeVideoOptions {
             }
         }
         syncToggle(performanceCapture, Diagnostics.captureRequested());
+        syncToggle(ignoreGlobalHistoryResets, PrimeClient.settings().ignoreGlobalHistoryResets());
+        syncToggle(nativeNoisyOutput, !PrimeClient.settings().rayReconstruction());
         if (offline.get() != PrimeClient.offlineRequested()) {
             offline.set(PrimeClient.offlineRequested());
             if (list.findOption(offline) instanceof CycleButton<?> button) {
@@ -211,7 +224,8 @@ public final class PrimeVideoOptions {
                                           PrimeClient.settings().pathTracing() &&
                                           Minecraft.getInstance().level != null;
         list.findOption(opacityMicromap).active = PrimeClient.controlsAvailable();
-        list.findOption(rayReconstruction).active = PrimeClient.controlsAvailable() && !frozen;
+        list.findOption(ignoreGlobalHistoryResets).active = PrimeClient.controlsAvailable();
+        list.findOption(nativeNoisyOutput).active = PrimeClient.controlsAvailable() && !frozen;
         list.findOption(controls.get(Control.FRAME_GENERATION)).active =
                 PrimeClient.controlsAvailable() && !frozen &&
                 PrimeClient.settings().rayReconstruction();

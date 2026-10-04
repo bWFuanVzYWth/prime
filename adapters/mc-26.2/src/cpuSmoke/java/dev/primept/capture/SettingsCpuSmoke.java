@@ -11,6 +11,7 @@ import net.minecraft.client.gui.components.CycleButton;
 import net.minecraft.client.OptionInstance;
 import dev.primept.render.OfflineMode;
 import dev.primept.settings.RenderSettings;
+import dev.primept.settings.SettingsFile;
 import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.util.HashMap;
@@ -334,6 +335,30 @@ public final class SettingsCpuSmoke {
                             (net.minecraft.client.OptionInstance<RenderSettings.DlssQuality>)field(
                                     PrimeVideoOptions.class, "dlssQuality")
                                     .get(owner);
+                    var lightSampling = (OptionInstance<RenderSettings.LightSampling>)field(
+                                                PrimeVideoOptions.class, "lightSampling")
+                                                .get(owner);
+                    var lightButton = (CycleButton<RenderSettings.LightSampling>)list.findOption(
+                            lightSampling);
+                    var ignoreGlobalResets =
+                            (OptionInstance<Boolean>)field(PrimeVideoOptions.class,
+                                                           "ignoreGlobalHistoryResets")
+                                    .get(owner);
+                    var resetButton = (CycleButton<Boolean>)list.findOption(ignoreGlobalResets);
+                    check(!ignoreGlobalResets.get(),
+                          "Global history reset diagnostic is off by default");
+                    check(translations.containsKey(
+                                  "primept.settings.ignore_global_history_resets") &&
+                                  translations.containsKey(
+                                          "primept.settings.ignore_global_history_resets.tooltip"),
+                          "The global reset diagnostic is translated");
+                    check(lightSampling.get() == RenderSettings.LightSampling.TREE,
+                          "Power-distance tree is the default sampler");
+                    check(translations.containsKey("primept.settings.light_sampling.tree") &&
+                                  translations.containsKey(
+                                          "primept.settings.light_sampling.tree_sphere") &&
+                                  !translations.containsKey("primept.settings.light_sampling.grid"),
+                          "Both active samplers have translations and GRID is retired");
                     check(rayReconstruction.get(), "RR default must be enabled");
                     check(list.findOption(opacityMicromap) instanceof CycleButton<?> &&
                                   list.findOption(rayReconstruction) instanceof CycleButton<?>,
@@ -368,6 +393,8 @@ public final class SettingsCpuSmoke {
                     screen.tick();
                     check(list.findOption(opacityMicromap).active,
                           "Frozen OMM control stays available");
+                    check(list.findOption(ignoreGlobalResets).active,
+                          "The reset diagnostic remains available while frozen");
                     check(list.findOption(terrainBatches).active,
                           "Frozen terrain scheduling control stays available");
                     check(!list.findOption(controls.get(RenderSettings.Control.STARS)).active,
@@ -388,6 +415,32 @@ public final class SettingsCpuSmoke {
                     boolean previousRunning = running.getBoolean(minecraft);
                     running.setBoolean(minecraft, true);
                     try {
+                        for (boolean enabled : new boolean[] {true, false}) {
+                            resetButton.onPress(new net.minecraft.client.input.KeyEvent(
+                                    InputConstants.KEY_RETURN, 0, 0));
+                            check(ignoreGlobalResets.get() == enabled &&
+                                          PrimeClient.settings().ignoreGlobalHistoryResets() ==
+                                                  enabled &&
+                                          offline.active() && offline.requested(),
+                                  "The actual reset diagnostic button preserves the frozen scene");
+                            check(SettingsFile.decode(SettingsFile.encode(PrimeClient.settings()))
+                                          .settings()
+                                          .equals(PrimeClient.settings()),
+                                  "The reset diagnostic callback preserves all persisted settings");
+                        }
+                        for (var sampler : List.of(RenderSettings.LightSampling.TREE_SPHERE,
+                                                   RenderSettings.LightSampling.TREE)) {
+                            lightButton.onPress(new net.minecraft.client.input.KeyEvent(
+                                    InputConstants.KEY_RETURN, 0, 0));
+                            check(lightSampling.get() == sampler &&
+                                          PrimeClient.settings().lightSampling() == sampler &&
+                                          offline.active() && offline.requested(),
+                                  "The actual sampler button cycles only the two trees without thawing");
+                            check(SettingsFile.decode(SettingsFile.encode(PrimeClient.settings()))
+                                          .settings()
+                                          .equals(PrimeClient.settings()),
+                                  "Sampler callbacks preserve all persisted settings");
+                        }
                         for (int budget : new int[] {1, 128, 8}) {
                             terrainBatches.set(budget);
                             check(PrimeClient.settings().value(
@@ -608,6 +661,9 @@ public final class SettingsCpuSmoke {
         var owner = videoOptions(screen);
         var omm = (OptionInstance<?>)field(PrimeVideoOptions.class, "opacityMicromap").get(owner);
         var rr = (OptionInstance<?>)field(PrimeVideoOptions.class, "rayReconstruction").get(owner);
+        var globalResets =
+                (OptionInstance<?>)field(PrimeVideoOptions.class, "ignoreGlobalHistoryResets")
+                        .get(owner);
         boolean diagnostics = false;
         for (int i = 0; i < vanilla; ++i) {
             Object row = list.children().get(i);
@@ -618,7 +674,8 @@ public final class SettingsCpuSmoke {
                                       .equals(Component.translatable("primept.settings.diagnostics")
                                                       .getString());
             if (((ContainerEventHandler)row).children().contains(list.findOption(omm)) ||
-                ((ContainerEventHandler)row).children().contains(list.findOption(rr)))
+                ((ContainerEventHandler)row).children().contains(list.findOption(rr)) ||
+                ((ContainerEventHandler)row).children().contains(list.findOption(globalResets)))
                 check(diagnostics, "RR and OMM belong only to the diagnostics group");
         }
         check(list.findOption(Minecraft.getInstance().options.renderDistance()) != null,

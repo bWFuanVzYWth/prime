@@ -10,7 +10,7 @@ fn main() {
         "foundations",
         "intersection",
         "display",
-        "lights",
+        "emitter_sampling",
         "light_tree",
         "sphere_tree",
         "optics",

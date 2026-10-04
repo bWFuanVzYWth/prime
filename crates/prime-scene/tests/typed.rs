@@ -338,6 +338,7 @@ fn named_frame_and_settings_validate_semantics_without_a_wire_roundtrip() {
         frame_generation: 0,
         light_sampling: 0,
         integrator: 0,
+        ignore_global_history_resets: 0,
     };
     assert_eq!(
         RenderSettings::from_abi(&settings).unwrap(),
@@ -366,6 +367,13 @@ fn named_frame_and_settings_validate_semantics_without_a_wire_roundtrip() {
         assert!(RenderSettings::from_abi(&settings).is_err());
     }
     settings.integrator = 0;
+    settings.ignore_global_history_resets = 1;
+    let diagnostic = RenderSettings::from_abi(&settings).unwrap();
+    assert!(diagnostic.ignore_global_history_resets);
+    assert!(diagnostic.transport_matches(RenderSettings::default()));
+    settings.ignore_global_history_resets = 2;
+    assert!(RenderSettings::from_abi(&settings).is_err());
+    settings.ignore_global_history_resets = 0;
     settings.saturation = 0.08;
     assert_eq!(
         RenderSettings::from_abi(&settings).unwrap().saturation,
