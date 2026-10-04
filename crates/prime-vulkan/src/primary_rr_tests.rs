@@ -439,6 +439,7 @@ impl Fixture {
             realtime_linear_post: None,
             reconstruction_display: None,
             reconstruction_linear: None,
+            restir: None,
         };
         energy_lut.prepare().unwrap();
         unsafe {

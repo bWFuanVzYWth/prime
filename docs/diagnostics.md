@@ -16,6 +16,8 @@ CPU 未采集时的 scope 只检查空上下文，不读事件时钟、不分配
 
 ## 数据、线程与时钟
 
+配置摘要 `integrator` 为0时选择普通 PT，为1时选择 ReSTIR PT Enhanced。ReSTIR 的 `gpu.k1`、`gpu.k2`、`gpu.post` 分别覆盖完整初始路径生成、时间/空间重采样和 resolve；它们与普通 PT 的同名区间有不同内容，比较时按实际后端解释，不能只比较某个同名阶段。
+
 每个 CPU scope 保存实际起始时刻、时长、frame/task/parent/thread 身份、状态和结构化摘要。摘要使用短任务名与整数计数，记录已有输入和结果，不为摘要另做全场景扫描。任务在完成时进入队列，因此文件顺序是完成/排空顺序，分析须按 `s` 和身份重建时间线。多线程任务可重叠；子任务时长之和不是父任务墙钟时长，父/子与粗/细 GPU 阶段也不能直接相加。
 
 Java 异步派发时使用 `Diagnostics.captureContext()`，工作线程通过 `Context.enter()` 安装派发时的 frame/parent，并在 scope/guard 结束时恢复原上下文；不会因为执行跨到下一帧就改标签。Rust 私有工作池自动做同样的传播。所有 scope 必须在所属线程按嵌套顺序关闭。
@@ -80,4 +82,4 @@ native 逐帧排空已完成事件，Java 通过有界队列交给本次采集�
 
 诊断 configure/frame/clock/read 控制失败会清除采集请求、尽力排空并标记 `partial`，独立通知失败，不单因诊断错误退役正常 renderer。真实渲染的设备丢失仍按渲染错误处理。默认恢复按钮结束本次会话的采集。
 
-FFI 使用 ABI v11，owner-thread 控制和排空缓冲协议见 [ABI](abi.md)。固定场景、原生1920×1080、种子、画质、预算、硬件和工具链；分开 CPU/GPU、实时/离线、稳态/更新以及采集开销。游戏开关、world exit、后端切换、重新采集和实际 GPU 查询由用户手动验收，命令见 [CONTRIBUTING](../CONTRIBUTING.md)。
+FFI 使用 ABI v12，owner-thread 控制和排空缓冲协议见 [ABI](abi.md)。固定场景、原生1920×1080、种子、画质、预算、硬件和工具链；分开 CPU/GPU、实时/离线、稳态/更新以及采集开销。游戏开关、world exit、后端切换、重新采集和实际 GPU 查询由用户手动验收，命令见 [CONTRIBUTING](../CONTRIBUTING.md)。

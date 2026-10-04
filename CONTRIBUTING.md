@@ -63,7 +63,7 @@ Windows 构建的 Streamline C++ 静态桥接需要 MSVC C++ 工具链；Streaml
 
 ## ABI 生成与验证
 
-公共 C ABI 为 v11，Minecraft 源 schema 为 v7，配置文件 schema 为 v7。JAR 与 DLL 必须配套重建；旧字节入口不再导出。只修改 `crates/prime-engine/include/prime.h` / `prime_mc.h`，由头文件生成 `prime_abi/src/generated.rs` 和 Java `PrimeAbi`，不要手工维护三套布局。
+公共 C ABI 为 v12，Minecraft 源 schema 为 v7，配置文件 schema 为 v8。JAR 与 DLL 必须配套重建；旧字节入口不再导出。只修改 `crates/prime-engine/include/prime.h` / `prime_mc.h`，由头文件生成 `prime_abi/src/generated.rs` 和 Java `PrimeAbi`，不要手工维护三套布局。
 
 ```powershell
 python scripts/generate-abi.py --probe clang
@@ -82,6 +82,10 @@ cargo test -p prime_engine --no-default-features --lib --locked
 ```powershell
 .\gradlew.bat :mc-26.2:runClient
 .\gradlew.bat :mc-26.3:runClient
+
+# ReSTIR PT Enhanced 独立后端，按对应版本手动启动
+.\gradlew.bat :mc-26.2:runClient -PprimeptRenderer=restir_pt
+.\gradlew.bat :mc-26.3:runClient -PprimeptRenderer=restir_pt
 ```
 
 按版本单独运行。各适配器的 `run/` 保存日志、选项、截图和存档。使用独立测试存档或副本，不让较新版本直接升级旧版验证存档。启动默认请求 Vulkan 和 1920×1080；仍需从实际设备日志和主 target 尺寸确认后端与分辨率。
@@ -93,7 +97,7 @@ cargo test -p prime_engine --no-default-features --lib --locked
 | Gradle 属性 | 用途 |
 | --- | --- |
 | `-PprimeptEnabled=false` | 显式关闭 Prime 启动能力；未指定时与发行包一致，默认启用 |
-| `-PprimeptRenderer=vanilla` | 启动时选择原版；默认保留之后切换 Prime 所需设备能力，未指定时使用保存的设置（初始为 path_trace） |
+| `-PprimeptRenderer=vanilla/path_trace/restir_pt` | 启动时选择独立的世界渲染器；默认保留之后切换 Prime 所需设备能力，未指定时使用保存的设置（初始为 path_trace） |
 | `-PnativeLibrary=绝对路径` | 指定引擎库，适合同一不可变 DLL 的双版本验证 |
 | `-PprimeptValidation=true` | 启用宿主 Vulkan validation |
 | `-PprimeptProfile=true` | legacy Java 捕获细计时，默认关闭；新采集使用游戏内诊断设置 |
@@ -110,7 +114,7 @@ cargo test -p prime_engine --no-default-features --lib --locked
 
 显式 legacy CSV 同时记录实时与离线帧，末列 `offline` 标识模式；`drain/prune/section_batches` 等历史列没有生产赋值，旧 `section_bytes/resource_submit` 也不代表完整 section/资源开销。不要把这些零值当作实测阶段或用于新基线。
 
-客户端命令 `/primept renderer vanilla` 与 `/primept renderer path_trace` 只请求切换，实际资源移交在下一外层帧边界执行。验证时覆盖 Prime→原版→Prime、世界退出/重进、标题界面资源重载及退休失败；等待资源加载完成再采样，不把切换暂停计入稳态。首个 Prime 后端使用宿主事件驱动的源路由，加载完成的判据包括待路由地形事件清空，不能仅等待首帧输出。新增后端通过惰性工厂注册，并遵守公共 `RendererSlot` 的完成/失败契约。
+客户端命令 `/primept renderer vanilla`、`/primept renderer path_trace` 与 `/primept renderer restir_pt` 只请求切换，实际资源移交在下一外层帧边界执行。验证时覆盖 Prime→原版→Prime、世界退出/重进、标题界面资源重载及退休失败；等待资源加载完成再采样，不把切换暂停计入稳态。首个 Prime 后端使用宿主事件驱动的源路由，加载完成的判据包括待路由地形事件清空，不能仅等待首帧输出。新增后端通过惰性工厂注册，并遵守公共 `RendererSlot` 的完成/失败契约。
 
 光源采样方式在光照组选择，默认 `GRID`，另可选 `TREE` 功率树和 `TREE_SPHERE` 包围盒中心球界方向树。游戏内修改在下一外层帧边界生效，无需重启；关闭设置页保存选择。切换先完成旧宿主提交，重建所选独立shader管线和灯表，保留已发布几何/BLAS与共享GPU发光记录。RR历史与离线累积会重置，冻结相机与源保持；切换可能有一次暂停，不计入稳态性能。稳态没有采样方式的GPU运行时分支；为切换保留的CPU灯源有实际驻留成本，见[PT设计](docs/pt-state-design.md#光源采样特化与切换成本)。
 
@@ -153,6 +157,23 @@ TreeSphere的CPU拓扑、叶数、路径和保守球界使用 `cargo test -p pri
 `PRIME_REGISTER_TREE_BUILD=saoh|balanced` 仅在上述 `shader-tests` 无窗口测试中选择TreeSphere构树方式，默认沿用SAOH。balanced按最长质心轴等分真实叶子，在世界层与每个页内分别平衡，不增加虚拟灯或GPU方法分支；各层叶深为floor/ceil(log2 N)，组合深度仍随页灯数变化。metadata记录策略和实际local叶深分布，日志记录每次world构树的叶深分布；局部路径统计在预加载后、正式计时前扫描一次，不计作生产开销。拓扑改变会改变proposal及收敛，必须另测质量；该测试选项不进入游戏设置或生产构建。
 
 Grid/功率Tree的合成CPU对比需显式运行 `cargo test -p prime_vulkan --release --lib cpu_sampler_comparison --locked -- --ignored --nocapture`。默认CSV保存在 `artifacts/light-sampler-restoration/cpu-comparison.csv`，保留全部轮次和共同源准备成本；不包含TreeSphere、Vulkan上传、GPU时间或画面质量。生产三种方式按前文同场景录制步骤分别验收。
+
+### ReSTIR PT Enhanced
+
+固定配置、资源成本和历史契约见 [ReSTIR PT](docs/restir-pt.md)。以下入口不创建窗口：
+
+```powershell
+# 执行生产 Slang 的 RNG、RIS、合并、Jacobian、pairwise MIS 与配对邻域数学行为
+python scripts/test-restir-math.py --slangc "$env:VULKAN_SDK/Bin/slangc.exe"
+cargo test -p prime_vulkan --features shader-tests --lib --locked restir::tests
+
+# 真实 GPU：generation/replay/shift、三种光源方式、离线均值、历史边界与借用提交
+$env:PRIME_VK_VALIDATION = '1'
+$env:VK_LAYER_VALIDATE_SYNC = '1'
+cargo test -p prime_vulkan --features shader-tests --lib --locked gpu_restir -- --ignored --nocapture --test-threads=1
+```
+
+`scripts/test-restir-layout.py` 接收构建生成的 `restir_*.spv` 文件列表，使用实际 SPIR-V 验证 BDA stride、uniform 偏移与能力声明；需要 `spirv-val`，逻辑设备必须启用 `scalarBlockLayout`。上述小场景和数学验证不能证明完整游戏收敛或与 Falcor 的性能差距。两版游戏按前文启动命令手动检查三后端切换、固定环境的时间复用、太阳/源更新的失效、材质和离线收敛。
 
 ### Streamline / DLSS RR
 

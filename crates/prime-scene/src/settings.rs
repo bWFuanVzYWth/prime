@@ -7,6 +7,15 @@ pub enum RenderMode {
     Offline = 1,
 }
 
+/// Independent transport algorithm, selected before recording any path work.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u32)]
+pub enum Integrator {
+    #[default]
+    PathTrace = 0,
+    RestirPt = 1,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[repr(u32)]
 pub enum DiagnosticView {
@@ -43,6 +52,7 @@ pub enum LightSampling {
 pub struct RenderSettings {
     pub astronomy: crate::environment::Astronomy,
     pub mode: RenderMode,
+    pub integrator: Integrator,
     pub bounces: u32,
     pub offline_samples: u32,
     pub terrain_batches_per_frame: u32,
@@ -69,6 +79,7 @@ impl Default for RenderSettings {
         Self {
             astronomy: Default::default(),
             mode: RenderMode::Realtime,
+            integrator: Integrator::PathTrace,
             bounces: 12,
             offline_samples: 1,
             terrain_batches_per_frame: 8,
@@ -93,11 +104,11 @@ impl Default for RenderSettings {
     }
 }
 impl RenderSettings {
-    pub const VERSION: u32 = 7;
-    pub const BYTES: usize = 96;
+    pub const VERSION: u32 = 8;
+    pub const BYTES: usize = 100;
     pub fn parse(bytes: &[u8]) -> Result<Self, String> {
         if bytes.len() != Self::BYTES {
-            return Err("Settings require exactly 96 bytes".into());
+            return Err("Settings require exactly 100 bytes".into());
         }
         let word = |offset| u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
         if word(0) != Self::VERSION {
@@ -166,6 +177,11 @@ impl RenderSettings {
                 1 => LightSampling::Tree,
                 2 => LightSampling::TreeSphere,
                 _ => return Err("Unknown light sampling method".into()),
+            },
+            integrator: match word(96) {
+                0 => Integrator::PathTrace,
+                1 => Integrator::RestirPt,
+                _ => return Err("Unknown integrator".into()),
             },
         };
         result.validate()?;
@@ -236,6 +252,11 @@ impl RenderSettings {
                 2 => LightSampling::TreeSphere,
                 _ => return Err("Unknown light sampling method".into()),
             },
+            integrator: match s.integrator {
+                0 => Integrator::PathTrace,
+                1 => Integrator::RestirPt,
+                _ => return Err("Unknown integrator".into()),
+            },
         };
         result.validate()?;
         Ok(result)
@@ -260,7 +281,8 @@ impl RenderSettings {
         Ok(())
     }
     pub fn transport_matches(self, other: Self) -> bool {
-        self.bounces == other.bounces
+        self.integrator == other.integrator
+            && self.bounces == other.bounces
             && self.astronomy == other.astronomy
             && self.sun == other.sun
             && self.sky == other.sky
@@ -275,7 +297,7 @@ mod tests {
     use super::*;
     fn golden() -> Vec<u8> {
         [
-            7_u32,
+            8_u32,
             1,
             12,
             1,
@@ -295,6 +317,7 @@ mod tests {
             8,
             1_f32.to_bits(),
             0.6_f32.to_bits(),
+            0,
             0,
             0,
             0,
@@ -326,7 +349,8 @@ mod tests {
             (0, 4),
             (0, 5),
             (0, 6),
-            (0, 8),
+            (0, 7),
+            (0, 9),
             (48, 91),
             (48, (-91i32) as u32),
             (52, 360),
@@ -346,6 +370,8 @@ mod tests {
             (88, 2),
             (92, 3),
             (92, u32::MAX),
+            (96, 2),
+            (96, u32::MAX),
         ] {
             let mut invalid = bytes.clone();
             invalid[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
@@ -371,6 +397,25 @@ mod tests {
         };
         assert!(old.validate().is_ok());
         assert!(!old.transport_matches(RenderSettings::default()));
+    }
+    #[test]
+    fn integrator_wire_values_are_exact_and_invalidate_transport_history() {
+        let defaults = RenderSettings::default();
+        assert_eq!(defaults.integrator, Integrator::PathTrace);
+        for integrator in [Integrator::PathTrace, Integrator::RestirPt] {
+            let mut bytes = golden();
+            bytes[96..100].copy_from_slice(&(integrator as u32).to_le_bytes());
+            let parsed = RenderSettings::parse(&bytes).unwrap();
+            assert_eq!(parsed.integrator, integrator);
+            assert_eq!(
+                parsed.transport_matches(RenderSettings {
+                    integrator: Integrator::PathTrace,
+                    ..parsed
+                }),
+                integrator == Integrator::PathTrace
+            );
+        }
+        assert!(RenderSettings::parse(&golden()[..96]).is_err());
     }
     #[test]
     fn light_sampling_defaults_and_exact_wire_and_abi_values() {
@@ -429,6 +474,7 @@ mod tests {
             hdr_reference_white: defaults.hdr_reference_white,
             frame_generation: defaults.frame_generation as u32,
             light_sampling: 1,
+            integrator: 0,
         };
         for method in [
             LightSampling::Grid,

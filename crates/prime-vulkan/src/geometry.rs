@@ -324,6 +324,22 @@ impl Geometry {
             self.builds.reserved_bytes() + self.uploads.reserved_bytes(),
         )
     }
+    // Reuses the already maintained 64-byte Vulkan instance input records. Only dormant-slot
+    // dirty ranges are caught up; a steady frame with no source changes copies no transforms.
+    pub fn shader_instance_input(
+        &mut self,
+        context: &Arc<Context>,
+        slot: usize,
+    ) -> Result<(u64, u32), String> {
+        let address = self.top.shader_input(
+            context,
+            &self.directory.instances,
+            &self.objects.instances,
+            slot,
+        )?;
+        Ok((address, self.directory.instances.len() as u32))
+    }
+
     pub fn needs_update(&self, scene: SceneInput<'_>) -> bool {
         self.compactions.needs_update(self.completed)
             || self.sampler_dirty

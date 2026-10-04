@@ -116,6 +116,14 @@ impl Output {
     pub(super) fn linear_buffer(&self) -> &Buffer {
         self.accumulation.as_ref().unwrap()
     }
+    #[cfg(all(test, feature = "shader-tests"))]
+    pub(super) fn linear_image(&self) -> &Image {
+        self.linear.as_ref().unwrap()
+    }
+    #[cfg(all(test, feature = "shader-tests"))]
+    pub(super) fn has_path_trace_scratch(&self) -> bool {
+        self.scratch.is_some()
+    }
     fn new(
         context: &Arc<Context>,
         width: u32,
@@ -193,7 +201,7 @@ impl Renderer {
 
     /// # Safety
     /// Handles must belong to one live Vulkan device with ray query, acceleration
-    /// structure, buffer device address and timeline semaphore features enabled.
+    /// structure, buffer device address, timeline semaphore and scalar block layout features enabled.
     /// The caller must flush its encoder before destruction and keep the host alive.
     pub unsafe fn borrowed(
         instance: u64,
@@ -308,13 +316,17 @@ impl Renderer {
     ) -> Result<Self, String> {
         settings.validate()?;
         let cpu_profile = CpuProfile::default();
-        let mut reconstruction_error = None;
-        let reconstruction = (settings.mode == RenderMode::Realtime && settings.ray_reconstruction)
+        let mut reconstruction_error = (settings.integrator == Integrator::RestirPt)
+            .then(|| restir::RAW_PROFILE_MESSAGE.to_owned());
+        let reconstruction = (settings.integrator == Integrator::PathTrace
+            && settings.mode == RenderMode::Realtime
+            && settings.ray_reconstruction)
             .then(|| reconstruction::Reconstruction::new(&context, &mut reconstruction_error))
             .flatten();
         let energy_lut = openpbr::EnergyLut::new(&context)?;
         let pipeline = Some(Pipeline::new(
             &context,
+            settings.integrator,
             settings.mode,
             reconstruction.is_some(),
             settings.frame_generation
@@ -337,6 +349,7 @@ impl Renderer {
             environment: Default::default(),
             workers,
             output: None,
+            restir: None,
             camera: None,
             samples: 0,
             frame_seed: 0,
@@ -577,6 +590,9 @@ impl Renderer {
             resources.prepare(&self.context, scene)?;
             if resources.revision != previous {
                 self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
+                if let Some(restir) = &mut self.restir {
+                    restir.invalidate();
+                }
             }
         } else {
             self.scene_resources =
@@ -627,10 +643,12 @@ impl Renderer {
     pub fn configure(&mut self, settings: RenderSettings) -> Result<(), String> {
         settings.validate()?;
         let sampler_changed = settings.light_sampling != self.settings.light_sampling;
+        let reconstruction_controls = settings.integrator == Integrator::PathTrace;
         let reset_temporal = settings.mode != self.settings.mode
             || !settings.transport_matches(self.settings)
-            || settings.ray_reconstruction != self.settings.ray_reconstruction
-            || settings.reconstruction_quality != self.settings.reconstruction_quality;
+            || reconstruction_controls
+                && (settings.ray_reconstruction != self.settings.ray_reconstruction
+                    || settings.reconstruction_quality != self.settings.reconstruction_quality);
         if self.failed || self.pending_temporal_serial != 0 {
             return Err("Cannot configure a failed renderer".into());
         }
@@ -648,21 +666,26 @@ impl Renderer {
             }
             self.fg_prepared = false;
         }
-        if sampler_changed
+        if settings.integrator != self.settings.integrator
+            || sampler_changed
             || settings.mode != self.settings.mode
-            || settings.mode == RenderMode::Realtime
-                && settings.ray_reconstruction != self.settings.ray_reconstruction
-            || settings.frame_generation != self.settings.frame_generation
+            || reconstruction_controls
+                && (settings.mode == RenderMode::Realtime
+                    && settings.ray_reconstruction != self.settings.ray_reconstruction
+                    || settings.frame_generation != self.settings.frame_generation)
         {
             self.failed = true;
             self.context.wait_host_idle()?;
             drop(self.reconstruction.take());
             drop(self.output.take());
             drop(self.pipeline.take());
+            drop(self.restir.take());
             self.fg_prepared = false;
             self.context.completed_serial()?; // Drain the retired images/buffers using completed host work.
-            self.reconstruction_error = None;
-            self.reconstruction = (settings.mode == RenderMode::Realtime
+            self.reconstruction_error = (settings.integrator == Integrator::RestirPt)
+                .then(|| restir::RAW_PROFILE_MESSAGE.to_owned());
+            self.reconstruction = (settings.integrator == Integrator::PathTrace
+                && settings.mode == RenderMode::Realtime
                 && settings.ray_reconstruction)
                 .then(|| {
                     reconstruction::Reconstruction::new(
@@ -673,6 +696,7 @@ impl Renderer {
                 .flatten();
             self.pipeline = Some(Pipeline::new(
                 &self.context,
+                settings.integrator,
                 settings.mode,
                 self.reconstruction.is_some(),
                 settings.frame_generation
@@ -687,7 +711,8 @@ impl Renderer {
             self.samples = 0;
             self.failed = false;
         } else if !settings.transport_matches(self.settings)
-            || settings.mode == RenderMode::Realtime
+            || reconstruction_controls
+                && settings.mode == RenderMode::Realtime
                 && settings.reconstruction_quality != self.settings.reconstruction_quality
         {
             self.samples = 0;
@@ -703,6 +728,9 @@ impl Renderer {
             if reset_temporal {
                 geometry.objects.reset_motion();
             }
+        }
+        if reset_temporal && let Some(restir) = &mut self.restir {
+            restir.invalidate();
         }
         self.display = display;
         if settings.mode != self.settings.mode {
@@ -756,6 +784,9 @@ impl Renderer {
         }
         drop(self.geometry.take());
         drop(self.output.take());
+        if let Some(restir) = &mut self.restir {
+            restir.reset_world();
+        }
         if let Some(rr) = &mut self.reconstruction {
             rr.reset();
         }
@@ -796,6 +827,11 @@ impl Renderer {
         let environment = environment.validate()?;
         if self.environment != environment {
             self.samples = 0;
+            let restir_changed = self.environment.sun_direction != environment.sun_direction
+                || self.environment.eye_radius_km() != environment.eye_radius_km();
+            if restir_changed && let Some(restir) = &mut self.restir {
+                restir.invalidate();
+            }
             self.environment = environment;
         }
         Ok(())
@@ -1041,6 +1077,9 @@ impl Renderer {
                 };
                 if source_changed || published_changed {
                     self.samples = 0;
+                    if let Some(restir) = &mut self.restir {
+                        restir.invalidate();
+                    }
                 }
                 if self.geometry.as_ref().unwrap().static_occlusion_changed
                     || resource_occlusion_changed
@@ -1061,6 +1100,9 @@ impl Renderer {
                 .prepare_dynamic(&self.context, &scene, instances, slot, cpu)?;
             if dynamic_changed {
                 self.samples = 0;
+                if let Some(restir) = &mut self.restir {
+                    restir.invalidate();
+                }
             }
             if occlusion_changed {
                 self.atmosphere_scene_revision = self.atmosphere_scene_revision.wrapping_add(1);
@@ -1087,6 +1129,9 @@ impl Renderer {
                 self.settings.mode,
             )?);
             self.samples = 0;
+            if let Some(restir) = &mut self.restir {
+                restir.invalidate();
+            }
         }
         // Float accumulation loses unit sample precision beyond 2^24; start a
         // fresh history before then, without overflowing sample + 1 in the shader.
@@ -1127,6 +1172,7 @@ impl Renderer {
                 drop(self.pipeline.take());
                 self.pipeline = Some(Pipeline::new(
                     &self.context,
+                    self.settings.integrator,
                     self.settings.mode,
                     false,
                     false,
@@ -1138,7 +1184,9 @@ impl Renderer {
                 self.reconstruction_error = Some(message);
             }
         }
-        if self.settings.mode == RenderMode::Realtime {
+        if self.settings.integrator == Integrator::PathTrace
+            && self.settings.mode == RenderMode::Realtime
+        {
             // RR setup/failure has now selected the actual render extent. Scratch is GPU-only,
             // reused on this queue and retired through Buffer's host serial proof on resize.
             let extent = self
@@ -1209,6 +1257,14 @@ impl Renderer {
             accumulation.map_or(0, |b| b.buffer.as_raw()),
         ];
         let descriptor = self.pipeline.as_ref().unwrap().descriptors[slot];
+        if let Some(restir) = &self.restir {
+            restir.descriptors(
+                &self.context,
+                descriptor,
+                slot,
+                output.linear.as_ref().map(|image| image.view),
+            );
+        }
         if let Some(rr) = &mut self.reconstruction {
             rr.descriptors(descriptor, slot);
         }
@@ -1270,7 +1326,9 @@ impl Renderer {
                 .buffer(b.buffer)
                 .range(b.size)]
         });
-        if let Some(info) = &accumulation_info {
+        if let Some(info) = &accumulation_info
+            && self.settings.integrator == Integrator::PathTrace
+        {
             writes.push(
                 vk::WriteDescriptorSet::default()
                     .dst_set(descriptor)
@@ -1285,12 +1343,38 @@ impl Renderer {
         self.descriptor_keys[slot] = key;
     }
 
-    fn dispatch(&self, command: vk::CommandBuffer, slot: usize, bottom_up: bool) {
-        if self.settings.mode == RenderMode::Realtime {
-            self.dispatch_realtime(command, slot, bottom_up);
-            return;
+    fn prepare_restir(&mut self, slot: usize, bottom_up: bool) -> Result<(), String> {
+        if self.settings.integrator != Integrator::RestirPt {
+            return Ok(());
         }
-        let pipeline = self.pipeline.as_ref().unwrap();
+        let frame = self.transport_frame(bottom_up);
+        let output = self.output.as_ref().unwrap();
+        let extent = [output.width, output.height];
+        let accumulation = output.accumulation.as_ref().map_or(0, Buffer::address);
+        let linear = self.needs_linear_display();
+        let (instances, terrain_count) = self
+            .geometry
+            .as_mut()
+            .unwrap()
+            .shader_instance_input(&self.context, slot)?;
+        if self.restir.is_none() {
+            self.restir = Some(restir::State::new(&self.context)?);
+        }
+        self.restir.as_mut().unwrap().prepare(
+            &self.context,
+            slot,
+            frame,
+            extent,
+            terrain_count,
+            instances,
+            accumulation,
+            self.settings.mode == RenderMode::Realtime,
+            linear,
+            self.frame_seed,
+        )
+    }
+
+    fn transport_frame(&self, bottom_up: bool) -> [u8; 128] {
         let camera = self.camera.unwrap();
         let output = self.output.as_ref().unwrap();
         let samples_this_dispatch = self.samples_per_frame();
@@ -1352,6 +1436,26 @@ impl Renderer {
         push[120..124].copy_from_slice(&self.settings.bounces.to_le_bytes());
         let view_flags = self.settings.view as u32 | (u32::from(self.needs_linear_display()) << 31);
         push[124..128].copy_from_slice(&view_flags.to_le_bytes());
+        push
+    }
+
+    fn dispatch(&self, command: vk::CommandBuffer, slot: usize, bottom_up: bool) {
+        if self.settings.integrator == Integrator::RestirPt {
+            self.dispatch_restir(command, slot);
+            return;
+        }
+        if self.settings.mode == RenderMode::Realtime {
+            self.dispatch_realtime(command, slot, bottom_up);
+            return;
+        }
+        let pipeline = self.pipeline.as_ref().unwrap();
+        let samples_this_dispatch = self.samples_per_frame();
+        let output = self.output.as_ref().unwrap();
+        let [render_width, render_height] = self
+            .reconstruction
+            .as_ref()
+            .map_or([output.width, output.height], |rr| rr.input_extent());
+        let push = self.transport_frame(bottom_up);
         self.stage_timestamp(command, slot, GpuStage::Offline, false);
         unsafe {
             self.context.device.cmd_bind_pipeline(
@@ -1464,6 +1568,151 @@ impl Renderer {
             self.stage_timestamp(command, slot, GpuStage::Post, false);
             dispatch(post, &pushes.post());
             self.stage_timestamp(command, slot, GpuStage::Post, true);
+        }
+    }
+
+    fn dispatch_restir(&self, command: vk::CommandBuffer, slot: usize) {
+        let pipeline = self.pipeline.as_ref().unwrap();
+        let passes = pipeline.restir.as_ref().unwrap();
+        let state = self.restir.as_ref().unwrap();
+        let output = self.output.as_ref().unwrap();
+        let variant = self.geometry.as_ref().map_or(0, Geometry::shader_variant);
+        let groups = [output.width.div_ceil(8), output.height.div_ceil(8)];
+        let realtime = self.settings.mode == RenderMode::Realtime;
+        let queue = state.queue_buffer();
+        if !realtime {
+            self.stage_timestamp(command, slot, GpuStage::Offline, false);
+        }
+        unsafe {
+            self.context.device.cmd_bind_descriptor_sets(
+                command,
+                vk::PipelineBindPoint::COMPUTE,
+                pipeline.layout,
+                0,
+                &[
+                    pipeline.descriptors[slot],
+                    self.atmosphere.as_ref().unwrap().descriptor(slot),
+                ],
+                &[],
+            );
+            let bind = |selected, phase: u32, sample: u32| {
+                self.context.device.cmd_bind_pipeline(
+                    command,
+                    vk::PipelineBindPoint::COMPUTE,
+                    selected,
+                );
+                let push = [phase, sample, 0, 0].map(u32::to_le_bytes);
+                self.context.device.cmd_push_constants(
+                    command,
+                    pipeline.layout,
+                    vk::ShaderStageFlags::COMPUTE,
+                    0,
+                    push.as_flattened(),
+                );
+            };
+            let dispatch = |selected, phase, sample| {
+                bind(selected, phase, sample);
+                self.context
+                    .device
+                    .cmd_dispatch(command, groups[0], groups[1], 1);
+            };
+            let workload = |phase, sample| {
+                // Last indirect and shader consumers finish before resetting the shared GPU counter.
+                self.context.device.cmd_pipeline_barrier(
+                    command,
+                    vk::PipelineStageFlags::COMPUTE_SHADER | vk::PipelineStageFlags::DRAW_INDIRECT,
+                    vk::PipelineStageFlags::TRANSFER,
+                    vk::DependencyFlags::empty(),
+                    &[vk::MemoryBarrier::default()
+                        .src_access_mask(
+                            vk::AccessFlags::SHADER_READ
+                                | vk::AccessFlags::SHADER_WRITE
+                                | vk::AccessFlags::INDIRECT_COMMAND_READ,
+                        )
+                        .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE)],
+                    &[],
+                    &[],
+                );
+                self.context
+                    .device
+                    .cmd_fill_buffer(command, queue, 0, 16, 0);
+                self.context.device.cmd_pipeline_barrier(
+                    command,
+                    vk::PipelineStageFlags::TRANSFER,
+                    vk::PipelineStageFlags::COMPUTE_SHADER,
+                    vk::DependencyFlags::empty(),
+                    &[vk::MemoryBarrier::default()
+                        .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+                        .dst_access_mask(
+                            vk::AccessFlags::SHADER_READ | vk::AccessFlags::SHADER_WRITE,
+                        )],
+                    &[],
+                    &[],
+                );
+                dispatch(passes.workload[variant], phase, sample);
+                self.realtime_barrier(command);
+                bind(passes.indirect, phase, sample);
+                self.context.device.cmd_dispatch(command, 1, 1, 1);
+                self.context.device.cmd_pipeline_barrier(
+                    command,
+                    vk::PipelineStageFlags::COMPUTE_SHADER,
+                    vk::PipelineStageFlags::COMPUTE_SHADER | vk::PipelineStageFlags::DRAW_INDIRECT,
+                    vk::DependencyFlags::empty(),
+                    &[vk::MemoryBarrier::default()
+                        .src_access_mask(vk::AccessFlags::SHADER_WRITE)
+                        .dst_access_mask(
+                            vk::AccessFlags::SHADER_READ
+                                | vk::AccessFlags::SHADER_WRITE
+                                | vk::AccessFlags::INDIRECT_COMMAND_READ,
+                        )],
+                    &[],
+                    &[],
+                );
+                bind(passes.retrace[variant], phase, sample);
+                self.context.device.cmd_dispatch_indirect(command, queue, 4);
+                self.realtime_barrier(command);
+                if phase == 1 {
+                    dispatch(passes.shift[variant], phase, sample);
+                    self.realtime_barrier(command);
+                }
+            };
+            // Offline disables temporal reuse. Each offset selects a new path/RNG stream,
+            // then resolves its correlated spatial estimator into the existing online mean.
+            for sample in 0..self.samples_per_frame() {
+                if realtime {
+                    self.stage_timestamp(command, slot, GpuStage::Primary, false);
+                }
+                dispatch(passes.generate[variant], 0, sample);
+                if realtime {
+                    self.stage_timestamp(command, slot, GpuStage::Primary, true);
+                }
+                self.realtime_barrier(command);
+                if realtime {
+                    self.stage_timestamp(command, slot, GpuStage::Transport, false);
+                }
+                if state.temporal_this_frame {
+                    workload(0, sample);
+                    dispatch(passes.temporal[variant], 0, sample);
+                    self.realtime_barrier(command);
+                }
+                workload(1, sample);
+                dispatch(passes.spatial, 1, sample);
+                if realtime {
+                    self.stage_timestamp(command, slot, GpuStage::Transport, true);
+                }
+                self.realtime_barrier(command);
+                if realtime {
+                    self.stage_timestamp(command, slot, GpuStage::Post, false);
+                }
+                dispatch(passes.resolve[variant], 1, sample);
+                if realtime {
+                    self.stage_timestamp(command, slot, GpuStage::Post, true);
+                }
+                self.realtime_barrier(command);
+            }
+        }
+        if !realtime {
+            self.stage_timestamp(command, slot, GpuStage::Offline, true);
         }
     }
 
@@ -1837,7 +2086,10 @@ impl Renderer {
             &mut FrameCpu::default(),
         )?;
         let view = self.output.as_ref().unwrap().image.as_ref().unwrap().view;
-        let selected = if self.settings.mode == RenderMode::Realtime && self.needs_linear_display()
+        self.prepare_restir(0, false)?;
+        let selected = if self.settings.integrator == Integrator::PathTrace
+            && self.settings.mode == RenderMode::Realtime
+            && self.needs_linear_display()
         {
             self.output.as_ref().unwrap().linear.as_ref().unwrap().view
         } else {
@@ -1972,6 +2224,7 @@ impl Renderer {
             drop(self.pipeline.take());
             self.pipeline = Some(Pipeline::new(
                 &self.context,
+                self.settings.integrator,
                 self.settings.mode,
                 false,
                 false,
@@ -2082,7 +2335,11 @@ impl Renderer {
         )?;
         let started = cpu.start();
         let linear_output = self.needs_linear_display();
-        let selected = if linear_output && self.settings.mode == RenderMode::Realtime {
+        self.prepare_restir(slot, true)?;
+        let selected = if self.settings.integrator == Integrator::PathTrace
+            && linear_output
+            && self.settings.mode == RenderMode::Realtime
+        {
             self.output.as_ref().unwrap().linear.as_ref().unwrap().view
         } else {
             view
@@ -2136,6 +2393,9 @@ impl Renderer {
     }
 
     fn commit_temporal(&mut self) {
+        if let Some(restir) = &mut self.restir {
+            restir.commit();
+        }
         if let Some(geometry) = &mut self.geometry {
             geometry.objects.commit_motion();
         }

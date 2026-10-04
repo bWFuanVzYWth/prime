@@ -1,0 +1,45 @@
+// Entry-point bindings share the existing self-contained scene and atmospheric resources.
+import "restir/parameters.slang";
+#if !defined(PRIME_RESTIR_MATERIAL_ONLY)
+import "restir/shift.slang";
+import "restir/path.slang";
+import "ray_query.slang";
+#else
+import "trace/closest.slang";
+#endif
+import "restir/types.slang";
+import "restir/scene.slang";
+import "restir/reservoir.slang";
+import "restir/rng.slang";
+import "restir/paired_neighbors.slang";
+import "restir/pairwise.slang";
+import "frame.slang";
+import "pbr.slang";
+#include "atmosphere/consumer_bindings.slang"
+#if !defined(PRIME_RESTIR_MATERIAL_ONLY)
+[[vk::binding(0, 0)]] RaytracingAccelerationStructure scene;
+#endif
+[[vk::binding(2, 0)]] StructuredBuffer<uint4> textures;
+[[vk::binding(3, 0)]] StructuredBuffer<uint> texels;
+[[vk::binding(7, 0)]] StructuredBuffer<InstanceMaterial> instanceMaterials;
+[[vk::binding(8, 0)]] StructuredBuffer<TrianglePage> staticTrianglePages;
+[[vk::binding(9, 0)]] Sampler3D<float4> transmissionEnergy;
+[[vk::binding(23, 0)]] ConstantBuffer<RestirParameters> parameters;
+[[vk::push_constant]] ConstantBuffer<RestirPass> pass;
+
+RestirScene restirScene(bool previous = false) {
+    RestirScene result;
+#if defined(PRIME_RESTIR_MATERIAL_ONLY)
+    result.resources = {textures, texels, instanceMaterials, staticTrianglePages};
+#else
+    result.resources = {scene, textures, texels, instanceMaterials, staticTrianglePages};
+#endif
+    result.environment = atmosphereEnvironment();
+    result.energy = {transmissionEnergy};
+    result.frame = previous ? parameters.previousFrame : parameters.frame;
+    if (!previous)
+        result.frame.target.y += pass.sampleOffset;
+    result.tlasInstances = parameters.tlasInstances;
+    result.terrainCount = parameters.control.x;
+    return result;
+}

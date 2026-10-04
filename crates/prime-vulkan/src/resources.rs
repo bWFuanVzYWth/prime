@@ -360,12 +360,14 @@ impl Context {
                     continue;
                 }
                 let mut address = vk::PhysicalDeviceBufferDeviceAddressFeatures::default();
+                let mut scalar = vk::PhysicalDeviceScalarBlockLayoutFeatures::default();
                 let mut acceleration =
                     vk::PhysicalDeviceAccelerationStructureFeaturesKHR::default();
                 let mut query = vk::PhysicalDeviceRayQueryFeaturesKHR::default();
                 let mut timeline = vk::PhysicalDeviceTimelineSemaphoreFeatures::default();
                 let mut features = vk::PhysicalDeviceFeatures2::default()
                     .push_next(&mut address)
+                    .push_next(&mut scalar)
                     .push_next(&mut acceleration)
                     .push_next(&mut query)
                     .push_next(&mut timeline);
@@ -373,6 +375,7 @@ impl Context {
                     .instance
                     .get_physical_device_features2(physical, &mut features);
                 if address.buffer_device_address == 0
+                    || scalar.scalar_block_layout == 0
                     || acceleration.acceleration_structure == 0
                     || query.ray_query == 0
                     || timeline.timeline_semaphore == 0
@@ -396,7 +399,7 @@ impl Context {
                     }
                 }
             }
-            let (physical, family, properties) = selected.ok_or("No Vulkan 1.2 device supports accelerationStructure, rayQuery, bufferDeviceAddress and timelineSemaphore")?;
+            let (physical, family, properties) = selected.ok_or("No Vulkan 1.2 device supports accelerationStructure, rayQuery, bufferDeviceAddress, scalarBlockLayout and timelineSemaphore")?;
             let priorities = [1.0];
             let queues = [vk::DeviceQueueCreateInfo::default()
                 .queue_family_index(family)
@@ -415,6 +418,8 @@ impl Context {
                 vk::PhysicalDeviceOpacityMicromapFeaturesEXT::default().micromap(omm_enabled);
             let mut address = vk::PhysicalDeviceBufferDeviceAddressFeatures::default()
                 .buffer_device_address(true);
+            let mut scalar =
+                vk::PhysicalDeviceScalarBlockLayoutFeatures::default().scalar_block_layout(true);
             let mut acceleration = vk::PhysicalDeviceAccelerationStructureFeaturesKHR::default()
                 .acceleration_structure(true);
             let mut query = vk::PhysicalDeviceRayQueryFeaturesKHR::default().ray_query(true);
@@ -432,6 +437,7 @@ impl Context {
                 .enabled_extension_names(&names)
                 .enabled_features(&optional_core)
                 .push_next(&mut address)
+                .push_next(&mut scalar)
                 .push_next(&mut acceleration)
                 .push_next(&mut query)
                 .push_next(&mut timeline);
@@ -567,12 +573,14 @@ impl Context {
     }
 
     /// Borrow a host device with accelerationStructure, bufferDeviceAddress,
-    /// rayQuery and timelineSemaphore already enabled.
+    /// scalarBlockLayout, rayQuery and timelineSemaphore already enabled.
     ///
     /// # Safety
     /// Handles must be live and belong to the supplied instance/device/queue
     /// family. The host owns queue synchronization and must flush the command
     /// encoder and keep all handles alive until this context has been destroyed.
+    /// The host must prove scalarBlockLayout was enabled at device creation: querying
+    /// physical-device support cannot reveal which logical-device features were enabled.
     pub unsafe fn borrowed(
         instance: u64,
         physical: u64,

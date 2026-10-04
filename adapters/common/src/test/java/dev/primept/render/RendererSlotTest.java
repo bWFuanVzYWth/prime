@@ -33,7 +33,7 @@ class RendererSlotTest {
     void vanillaAndMultiplePrimeBackendsShareOneLazySlot() throws Exception {
         var events = new ArrayList<String>();
         try (var slot = new RendererSlot<String, Backend>()) {
-            for (String name : List.of("vanilla", "prime-a", "prime-b", "vanilla")) {
+            for (String name : List.of("vanilla", "path_trace", "restir_pt", "vanilla")) {
                 slot.select(name, () -> {
                     assertEquals(RendererSlot.State.STARTING, slot.state());
                     events.add(name + ":construct");
@@ -46,9 +46,10 @@ class RendererSlotTest {
             }
         }
         assertEquals(List.of("vanilla:construct", "vanilla:start", "vanilla:complete-destroy",
-                             "prime-a:construct", "prime-a:start", "prime-a:complete-destroy",
-                             "prime-b:construct", "prime-b:start", "prime-b:complete-destroy",
-                             "vanilla:construct", "vanilla:start", "vanilla:complete-destroy"),
+                             "path_trace:construct", "path_trace:start",
+                             "path_trace:complete-destroy", "restir_pt:construct",
+                             "restir_pt:start", "restir_pt:complete-destroy", "vanilla:construct",
+                             "vanilla:start", "vanilla:complete-destroy"),
                      events);
     }
 

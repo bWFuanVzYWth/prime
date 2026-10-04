@@ -47,7 +47,7 @@ public struct SurfaceRecord {
     public float4 emission;
     public uint4 identity; // negative medium, positive medium, emitter, repeat/sided flags
     uint *compound;
-    uint mode;
+    public uint mode;
     uint half;
     public float4 negative;
     public float4 positive;
@@ -63,11 +63,13 @@ public struct TrianglePage {
     public uint *lightGrid; // Opaque light directory; only the lighting module decodes it.
     uint reserved1;
     uint emitterFormat;
-    float4 origin;
+    public float4 origin;
 };
 
 public struct TraceScene {
+#if !defined(PRIME_RESTIR_MATERIAL_ONLY)
     public RaytracingAccelerationStructure acceleration;
+#endif
     public StructuredBuffer<uint4> textures;
     public StructuredBuffer<uint> texels;
     public StructuredBuffer<InstanceMaterial> instanceMaterials;
@@ -363,7 +365,7 @@ public bool acceptsCoverage(TraceScene resources, SurfaceRecord record, float2 b
     return float(event >> 8) * (1.0 / 16777216.0) < alpha;
 }
 
-SurfaceRecord secondary(SurfaceRecord base) {
+public SurfaceRecord secondary(SurfaceRecord base) {
     uint *data = base.compound;
     uint a = base.half != 0 ? 2 : 0, b = base.half != 0 ? 3 : 1, c = base.half != 0 ? 0 : 2;
     float4 *colors = (float4 *)data;
@@ -410,23 +412,136 @@ public SurfaceRecord boundaryIors(TraceScene resources, SurfaceRecord record, fl
     return record;
 }
 public SurfaceRecord selectMaterial(TraceScene resources, SurfaceRecord record, bool front,
-                                    float2 bary, float3 point, uint seed) {
+                                    float2 bary, float3 point, uint seed,
+                                    out uint selectedMaterial) {
+    selectedMaterial = 0;
     if (record.mode == 1) {
         if (!front) {
             record = secondary(record);
             record.identity.w |= 2;
+            selectedMaterial = 1;
         }
     } else if (record.mode == 3 || (record.mode == 2 && front)) {
         SurfaceRecord top = secondary(record);
         top.identity.w &= ~128u; // The coating is an actual material, with its own coverage.
-        if (acceptsCoverage(resources, top, bary, point, seed))
+        if (acceptsCoverage(resources, top, bary, point, seed)) {
             record = top;
+            selectedMaterial = 1;
+        }
     }
     return record;
 }
 
-public SurfaceHit traceClosest(TraceScene resources, float3 origin, float3 direction,
-                               uint coverageSeed, float coneWidth, float coneSpread) {
+public SurfaceRecord selectMaterial(TraceScene resources, SurfaceRecord record, bool front,
+                                    float2 bary, float3 point, uint seed) {
+    uint selectedMaterial;
+    return selectMaterial(resources, record, front, bary, point, seed, selectedMaterial);
+}
+
+// Reuse exactly the closest-hit material producer when a renderer reconstructs an owned hit.
+// Instance transforms and the physical surface are supplied by that renderer's scene adapter.
+public SurfaceHit resolveSurfaceHit(TraceScene resources, SurfaceRecord record, uint instance,
+                                    uint geometry, uint primitive, float2 bary, bool front,
+                                    SurfacePoint surface, float3x4 transform, uint coverageSeed,
+                                    float3 direction, float footprint, float3 coveragePoint,
+                                    uint forcedMaterial, out uint selectedMaterial) {
+    SurfaceHit hit = {};
+    hit.found = true;
+    hit.surface = surface;
+    SurfaceRecord boundary = record;
+    Triangle tri = record.triangle;
+    if (forcedMaterial == 0xffffffffu || record.mode == 1) {
+        record = selectMaterial(resources, record, front, bary, coveragePoint, coverageSeed,
+                                selectedMaterial);
+    } else {
+        selectedMaterial = forcedMaterial;
+        if (forcedMaterial != 0) {
+            record = secondary(record);
+            if (record.mode == 1 && !front)
+                record.identity.w |= 2;
+            else
+                record.identity.w &= ~128u;
+        }
+    }
+    if ((instance & 0x00800000) != 0) {
+        record.triangle.p0.xyz = mul(transform, float4(tri.p0.xyz, 1));
+        record.triangle.p1.xyz = mul(transform, float4(tri.p1.xyz, 1));
+        record.triangle.p2.xyz = mul(transform, float4(tri.p2.xyz, 1));
+        boundary.triangle.p0.xyz = record.triangle.p0.xyz;
+        boundary.triangle.p1.xyz = record.triangle.p1.xyz;
+        boundary.triangle.p2.xyz = record.triangle.p2.xyz;
+    }
+    hit.previousPosition = hit.surface.position;
+    hit.previousPositionKnown = (instance & 0x00800000) == 0;
+    if (motionFeatures != 0 && !hit.previousPositionKnown) {
+        InstanceMaterial placement = resources.instanceMaterials[instance & 0x007fffff];
+        if ((placement.reserved0 & 1u) != 0) {
+            hit.previousPosition = primeRigidPreviousPosition(
+                    tri.p0.xyz, tri.p1.xyz, tri.p2.xyz, bary,
+                    float3x4(placement.previous0, placement.previous1, placement.previous2));
+            hit.previousPositionKnown = true;
+        }
+    }
+    boundary = boundaryIors(resources, boundary, bary, footprint);
+    record.negative = boundary.negative;
+    record.positive = boundary.positive;
+    SourceSample sampled = sourceSample(resources, record, bary, footprint);
+    hit.sourceColor = sampled.color;
+    MaterialSample material = materialSource(resources, record.triangle.texture, sampled.uv);
+    hit.materialFlags = material.maps.z;
+    uint4 maps = material.maps;
+    hit.normalSample = (hit.materialFlags & 1) != 0
+                               ? linearMaterial(resources, maps.x, material.uv, sampled.lod)
+                               : float4(0.5, 0.5, 1, 0);
+    hit.specularSample =
+            (hit.materialFlags & 2) != 0
+                    ? sampleTexture(resources.textures, resources.texels, maps.y, material.uv, 0.0)
+                    : float4(0);
+    if ((hit.materialFlags & 2) != 0) {
+        float4 continuous = linearMaterial(resources, maps.y, material.uv, sampled.lod);
+        hit.specularSample.r = continuous.r;
+        hit.specularSample.a = continuous.a;
+    }
+    hit.shadingNormal =
+            (hit.materialFlags & 1) != 0
+                    ? mappedNormal(record, sampled, hit.surface.normal, hit.normalSample)
+                    : hit.surface.normal;
+    if ((hit.materialFlags & 1) != 0)
+        hit.shadingNormal = primeEnsureValidNormalMappedReflection(hit.surface.normal, -direction,
+                                                                   hit.shadingNormal);
+    // Resident metadata guarantees authored emission has a specular map. Reuse the same
+    // selected shading record, animation frame, UV, LOD and filtered A already read above.
+    hit.emission = sourceEmissionResolved(record, sampled, dot(hit.surface.normal, direction) < 0,
+                                          hit.materialFlags, hit.specularSample.a);
+    hit.light = (instance & 0x00800000) == 0 && record.identity.z != 0xffffffffu
+                        ? resources.staticTrianglePages[instance + geometry].firstEmitter +
+                                  record.identity.z
+                        : 0xffffffffu;
+    hit.incident = front ? record.positive : record.negative;
+    hit.transmitted = front ? record.negative : record.positive;
+    hit.optical = opticalFeatures != 0 && (record.identity.w & 128) != 0;
+    hit.thin = opticalFeatures != 0 && (record.identity.w & 64) != 0;
+    hit.materialThin = primePbrSourceThinWalled(hit.thin, record.triangle.flags,
+                                                uint(round(hit.specularSample.b * 255.0)));
+    hit.staticGeometry = (instance & 0x00800000) == 0;
+    return hit;
+}
+
+// The ordinary PT uses the empty observer; it carries no extra identity through a query.
+public interface IClosestHitIdentity {
+    [mutating] void capture(uint instance, uint geometry, uint primitive, float2 bary,
+                            uint selectedMaterial);
+}
+public struct NoClosestHitIdentity : IClosestHitIdentity {
+    [mutating] public void capture(uint instance, uint geometry, uint primitive, float2 bary,
+                                   uint selectedMaterial) {}
+};
+
+#if !defined(PRIME_RESTIR_MATERIAL_ONLY)
+public SurfaceHit traceClosest<T : IClosestHitIdentity>(TraceScene resources, float3 origin,
+                                                        float3 direction, uint coverageSeed,
+                                                        float coneWidth, float coneSpread,
+                                                        inout T identity) {
     RayDesc ray;
     ray.Origin = origin;
     ray.Direction = direction;
@@ -457,92 +572,39 @@ public SurfaceHit traceClosest(TraceScene resources, float3 origin, float3 direc
         uint geometry = query.CommittedGeometryIndex();
         uint primitive = query.CommittedPrimitiveIndex();
         float2 bary = query.CommittedTriangleBarycentrics();
-        float distance = query.CommittedRayT();
         bool front = query.CommittedTriangleFrontFace();
         SurfaceRecord record = loadSurface(resources, instance, geometry, primitive);
-        // Medium endpoints belong to the physical boundary, before a coating is selected.
-        SurfaceRecord boundary = record;
         Triangle tri = record.triangle;
-        record = selectMaterial(resources, record, front, bary, origin + direction * distance,
-                                coverageSeed);
-        // Every static page has a producer-proven translation, for both record strides.
-        if ((instance & 0x00800000) == 0)
-            hit.surface = reconstructStaticSurface(
+        float3x4 transform = float3x4(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0);
+        SurfacePoint surface;
+        if ((instance & 0x00800000) == 0) {
+            surface = reconstructStaticSurface(
                     tri.p0.xyz, tri.p1.xyz, tri.p2.xyz, bary,
                     resources.staticTrianglePages[instance + geometry].origin.xyz);
-        else {
-            // Consume dynamic transforms here; later texture/medium work needs no query getter.
-            float3x4 transform = query.CommittedObjectToWorld3x4();
-            hit.surface = reconstructSurface(tri.p0.xyz, tri.p1.xyz, tri.p2.xyz, bary, transform,
-                                             query.CommittedWorldToObject3x4());
-            // Surface-local derivatives must include an instance's actual scale/shear.
-            record.triangle.p0.xyz = mul(transform, float4(tri.p0.xyz, 1));
-            record.triangle.p1.xyz = mul(transform, float4(tri.p1.xyz, 1));
-            record.triangle.p2.xyz = mul(transform, float4(tri.p2.xyz, 1));
-            boundary.triangle.p0.xyz = record.triangle.p0.xyz;
-            boundary.triangle.p1.xyz = record.triangle.p1.xyz;
-            boundary.triangle.p2.xyz = record.triangle.p2.xyz;
+        } else {
+            transform = query.CommittedObjectToWorld3x4();
+            surface = reconstructSurface(tri.p0.xyz, tri.p1.xyz, tri.p2.xyz, bary, transform,
+                                         query.CommittedWorldToObject3x4());
         }
-        hit.previousPosition = hit.surface.position;
-        hit.previousPositionKnown = (instance & 0x00800000) == 0;
-        if (motionFeatures != 0 && !hit.previousPositionKnown) {
-            InstanceMaterial placement = resources.instanceMaterials[instance & 0x007fffff];
-            if ((placement.reserved0 & 1u) != 0) {
-                hit.previousPosition = primeRigidPreviousPosition(
-                        tri.p0.xyz, tri.p1.xyz, tri.p2.xyz, bary,
-                        float3x4(placement.previous0, placement.previous1, placement.previous2));
-                hit.previousPositionKnown = true;
-            }
-        }
-        float footprint = (coneWidth + coneSpread * distance) /
-                          max(abs(dot(hit.surface.normal, direction)), 0.05);
-        boundary = boundaryIors(resources, boundary, bary, footprint);
-        record.negative = boundary.negative;
-        record.positive = boundary.positive;
-        SourceSample sampled = sourceSample(resources, record, bary, footprint);
-        hit.sourceColor = sampled.color;
-        MaterialSample material = materialSource(resources, record.triangle.texture, sampled.uv);
-        hit.materialFlags = material.maps.z;
-        uint4 maps = material.maps;
-        hit.normalSample = (hit.materialFlags & 1) != 0
-                                   ? linearMaterial(resources, maps.x, material.uv, sampled.lod)
-                                   : float4(0.5, 0.5, 1, 0);
-        hit.specularSample = (hit.materialFlags & 2) != 0
-                                     ? sampleTexture(resources.textures, resources.texels, maps.y,
-                                                     material.uv, 0.0)
-                                     : float4(0);
-        if ((hit.materialFlags & 2) != 0) {
-            float4 continuous = linearMaterial(resources, maps.y, material.uv, sampled.lod);
-            hit.specularSample.r = continuous.r;
-            hit.specularSample.a = continuous.a;
-        }
-        hit.shadingNormal =
-                (hit.materialFlags & 1) != 0
-                        ? mappedNormal(record, sampled, hit.surface.normal, hit.normalSample)
-                        : hit.surface.normal;
-        if ((hit.materialFlags & 1) != 0)
-            hit.shadingNormal = primeEnsureValidNormalMappedReflection(
-                    hit.surface.normal, -direction, hit.shadingNormal);
-        // Resident metadata guarantees authored emission has a specular map. Reuse the same
-        // selected shading record, animation frame, UV, LOD and filtered A already read above.
-        hit.emission =
-                sourceEmissionResolved(record, sampled, dot(hit.surface.normal, direction) < 0,
-                                       hit.materialFlags, hit.specularSample.a);
-        hit.light = (instance & 0x00800000) == 0 && record.identity.z != 0xffffffffu
-                            ? resources.staticTrianglePages[instance + geometry].firstEmitter +
-                                      record.identity.z
-                            : 0xffffffffu;
-        hit.incident = front ? record.positive : record.negative;
-        hit.transmitted = front ? record.negative : record.positive;
-        hit.optical = opticalFeatures != 0 && (record.identity.w & 128) != 0;
-        hit.thin = opticalFeatures != 0 && (record.identity.w & 64) != 0;
-        hit.materialThin = primePbrSourceThinWalled(hit.thin, record.triangle.flags,
-                                                    uint(round(hit.specularSample.b * 255.0)));
-        hit.staticGeometry = (instance & 0x00800000) == 0;
+        float footprint = (coneWidth + coneSpread * query.CommittedRayT()) /
+                          max(abs(dot(surface.normal, direction)), 0.05);
+        uint selectedMaterial;
+        hit = resolveSurfaceHit(resources, record, instance, geometry, primitive, bary, front,
+                                surface, transform, coverageSeed, direction, footprint,
+                                origin + direction * query.CommittedRayT(), 0xffffffffu,
+                                selectedMaterial);
+        identity.capture(instance, geometry, primitive, bary, selectedMaterial);
     }
     return hit;
+}
+public SurfaceHit traceClosest(TraceScene resources, float3 origin, float3 direction,
+                               uint coverageSeed, float coneWidth, float coneSpread) {
+    NoClosestHitIdentity identity;
+    return traceClosest(resources, origin, direction, coverageSeed, coneWidth, coneSpread,
+                        identity);
 }
 public SurfaceHit traceClosest(TraceScene resources, float3 origin, float3 direction,
                                uint coverageSeed) {
     return traceClosest(resources, origin, direction, coverageSeed, 0.0, 0.0);
 }
+#endif

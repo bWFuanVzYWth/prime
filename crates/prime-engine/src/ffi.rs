@@ -1133,6 +1133,7 @@ mod abi_tests {
             hdr_reference_white: 0,
             frame_generation: 0,
             light_sampling: 0,
+            integrator: 0,
         };
         assert_eq!(unsafe { prime_configure(handle, &valid) }, 0);
         assert_eq!(unsafe { prime_configure(handle, std::ptr::null()) }, -1);

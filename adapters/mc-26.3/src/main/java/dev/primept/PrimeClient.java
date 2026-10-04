@@ -88,7 +88,7 @@ public final class PrimeClient implements ClientModInitializer {
     }
     public static void updateSettings(RenderSettings settings) {
         INSTANCE.settings = settings;
-        INSTANCE.requested = INSTANCE.enabled && settings.pathTracing() ? "path_trace" : "vanilla";
+        INSTANCE.requested = INSTANCE.enabled ? settings.renderer().key : "vanilla";
         INSTANCE.failed = false;
         if (!settings.pathTracing())
             INSTANCE.offline.request(false);
@@ -121,7 +121,8 @@ public final class PrimeClient implements ClientModInitializer {
 
     public PrimeClient() {
         backends.put("vanilla", () -> new VanillaBackend(false));
-        backends.put("path_trace", PrimeBackend::new);
+        backends.put("path_trace", () -> new PrimeBackend(RenderSettings.Renderer.PATH_TRACE));
+        backends.put("restir_pt", () -> new PrimeBackend(RenderSettings.Renderer.RESTIR_PT));
     }
 
     @Override
@@ -134,13 +135,11 @@ public final class PrimeClient implements ClientModInitializer {
         if (!loaded.resetReason().isEmpty())
             LOGGER.warn(loaded.resetReason());
         INSTANCE.requested =
-                enabled ? System.getProperty("primept.renderer", INSTANCE.settings.pathTracing()
-                                                                         ? "path_trace"
-                                                                         : "vanilla")
+                enabled ? System.getProperty("primept.renderer", INSTANCE.settings.renderer().key)
                         : "vanilla";
         if (enabled && System.getProperty("primept.renderer") != null)
-            INSTANCE.settings =
-                    INSTANCE.settings.withPathTracing(!INSTANCE.requested.equals("vanilla"));
+            INSTANCE.settings = INSTANCE.settings.withRenderer(
+                    RenderSettings.Renderer.fromKey(INSTANCE.requested));
         LOGGER.info("Prime PT 26.3: Java thin capture → FFM → Rust → Vulkan/Slang; enabled={}",
                     enabled);
         LOGGER.info(
@@ -160,7 +159,8 @@ public final class PrimeClient implements ClientModInitializer {
                         return 0;
                     }
                     INSTANCE.requested = key;
-                    INSTANCE.settings = INSTANCE.settings.withPathTracing(!key.equals("vanilla"));
+                    INSTANCE.settings =
+                            INSTANCE.settings.withRenderer(RenderSettings.Renderer.fromKey(key));
                     if (key.equals("vanilla"))
                         INSTANCE.offline.request(false);
                     INSTANCE.failed = false;
@@ -504,6 +504,10 @@ public final class PrimeClient implements ClientModInitializer {
     }
 
     private final class PrimeBackend implements WorldRenderer {
+        private final RenderSettings.Renderer kind;
+        PrimeBackend(RenderSettings.Renderer kind) {
+            this.kind = kind;
+        }
         @Override
         public boolean readyForCapture() {
             return renderer != null && resourceReload == null && CAPTURE.atlas() != null &&
@@ -517,6 +521,7 @@ public final class PrimeClient implements ClientModInitializer {
         @Override
         public void start() throws Exception {
             HostVulkanRenderer.requireRetirementResolved();
+            settings = settings.withRenderer(kind);
             CAPTURE.enable();
             ExclusiveTerrainCapture.acquire();
             renderer = new HostVulkanRenderer();

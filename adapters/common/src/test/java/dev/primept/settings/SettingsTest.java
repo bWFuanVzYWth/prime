@@ -65,17 +65,18 @@ final class SettingsTest {
                 RenderSettings.Control.BOUNCES, 12);
         String valid = SettingsFile.encode(changed);
         for (String broken : new String[] {
-                     valid.replace("version=7", "version=0"),
-                     valid.replace("version=7", "version=6"),
-                     valid.replace("version=7", "version=8"),
-                     valid.replace("version=7", ""),
+                     valid.replace("version=8", "version=0"),
+                     valid.replace("version=8", "version=7"),
+                     valid.replace("version=8", "version=9"),
+                     valid.replace("version=8", ""),
                      valid.replace("render.bounces=12", ""),
                      valid.replace("render.bounces=12", "render.bounces=65"),
                      valid.replace("terrain.batches_per_frame=8", ""),
                      valid.replace("terrain.batches_per_frame=8", "terrain.batches_per_frame=0"),
                      valid.replace("terrain.batches_per_frame=8", "terrain.batches_per_frame=129"),
                      valid.replace("terrain.batches_per_frame=8", "terrain.batches_per_frame=NaN"),
-                     valid.replace("renderer.path_tracing=false", "renderer.path_tracing=maybe"),
+                     valid.replace("renderer=vanilla", "renderer=unknown"),
+                     valid.replace("renderer=vanilla\n", ""),
                      valid.replace("render.opacity_micromap=true", ""),
                      valid.replace("render.opacity_micromap=true", "render.opacity_micromap=maybe"),
                      valid.replace("render.ray_reconstruction=true", ""),
@@ -132,14 +133,15 @@ final class SettingsTest {
         assertEquals(0, PrimeSettings.hdr_reference_white(view(bytes)));
         assertEquals(0, PrimeSettings.frame_generation(view(bytes)));
         assertEquals(0, PrimeSettings.light_sampling(view(bytes)));
-        assertEquals(100, PrimeSettings.SIZE);
+        assertEquals(0, PrimeSettings.integrator(view(bytes)));
+        assertEquals(104, PrimeSettings.SIZE);
     }
     @Test
     void saturationDefaultsPreserveSavedValuesAndIndependentWire(@TempDir Path dir)
             throws Exception {
         var control = RenderSettings.Control.SATURATION;
         var defaults = RenderSettings.defaults();
-        assertEquals(7, RenderSettings.VERSION);
+        assertEquals(8, RenderSettings.VERSION);
         assertEquals(20, defaults.value(control));
         Path file = dir.resolve("primept.properties");
         assertEquals(20, SettingsFile.load(file).settings().value(control));
@@ -246,6 +248,42 @@ final class SettingsTest {
                               view(after)
                                       .asSlice(slice[0], slice[1])
                                       .toArray(java.lang.foreign.ValueLayout.JAVA_BYTE));
+    }
+    @Test
+    void distinctRenderersPersistAndSurviveIndependentControlChanges() {
+        var defaults = RenderSettings.defaults();
+        assertEquals(RenderSettings.Renderer.PATH_TRACE, defaults.renderer());
+        assertThrows(NullPointerException.class, () -> defaults.withRenderer(null));
+        assertThrows(IllegalArgumentException.class,
+                     () -> RenderSettings.Renderer.fromKey("restir"));
+        var before = settingsBuffer();
+        var after = settingsBuffer();
+        for (var renderer : RenderSettings.Renderer.values()) {
+            assertEquals(renderer, RenderSettings.Renderer.fromKey(renderer.key));
+            var chosen = defaults.withRenderer(renderer);
+            assertEquals(renderer != RenderSettings.Renderer.VANILLA, chosen.pathTracing());
+            assertEquals(chosen, SettingsFile.decode(SettingsFile.encode(chosen)).settings());
+            assertEquals(chosen.hashCode(),
+                         SettingsFile.decode(SettingsFile.encode(chosen)).settings().hashCode());
+            var changed = chosen.with(RenderSettings.Control.BOUNCES, 8)
+                                  .withOpacityMicromap(false)
+                                  .withRayReconstruction(false)
+                                  .withDlssQuality(RenderSettings.DlssQuality.QUALITY)
+                                  .withLightSampling(RenderSettings.LightSampling.TREE);
+            assertEquals(renderer, changed.renderer());
+            for (boolean offline : new boolean[] {false, true}) {
+                defaults.write(before, offline, RenderSettings.View.OUTPUT);
+                chosen.write(after, offline, RenderSettings.View.OUTPUT);
+                assertEquals(renderer == RenderSettings.Renderer.RESTIR_PT ? 1 : 0,
+                             PrimeSettings.integrator(view(after)));
+                assertOnlyFieldChanged(before, after, 100);
+            }
+        }
+        var restir = defaults.withRenderer(RenderSettings.Renderer.RESTIR_PT);
+        assertSame(restir, restir.withPathTracing(true));
+        assertEquals(RenderSettings.Renderer.VANILLA, restir.withPathTracing(false).renderer());
+        assertEquals(RenderSettings.Renderer.PATH_TRACE,
+                     restir.withPathTracing(false).withPathTracing(true).renderer());
     }
     @Test
     void opacityMicromapIsEnabledByDefaultAndCanBePersistedAndToggled() {

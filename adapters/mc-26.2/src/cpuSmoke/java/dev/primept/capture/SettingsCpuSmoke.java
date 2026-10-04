@@ -150,6 +150,17 @@ public final class SettingsCpuSmoke {
                           offline.active(),
                   "Ctrl+right Alt+F2 requests realtime without changing ownership before the boundary");
             offline.reset();
+            var client = field(PrimeClient.class, "INSTANCE").get(null);
+            var requested = field(PrimeClient.class, "requested");
+            for (var kind : RenderSettings.Renderer.values()) {
+                PrimeClient.updateSettings(PrimeClient.settings().withRenderer(kind));
+                check(requested.get(client).equals(kind.key),
+                      "Renderer selection keeps its exact backend key " + kind.key);
+                PrimeClient.updateSettings(
+                        PrimeClient.settings().with(RenderSettings.Control.BOUNCES, 8));
+                check(requested.get(client).equals(kind.key),
+                      "Independent settings must not replace the selected renderer " + kind.key);
+            }
             PrimeClient.updateSettings(PrimeClient.settings().withPathTracing(false));
             check(!PrimeClient.offlineShortcut(f2, true), "Vanilla must keep its key handling");
             PrimeClient.restoreSettings();
@@ -283,6 +294,26 @@ public final class SettingsCpuSmoke {
                                                       net.minecraft.client.OptionInstance<Integer>>)
                                            field(PrimeVideoOptions.class, "controls")
                                                    .get(owner);
+                    var renderer = (OptionInstance<RenderSettings.Renderer>)field(
+                                           PrimeVideoOptions.class, "renderer")
+                                           .get(owner);
+                    var rendererButton =
+                            (CycleButton<RenderSettings.Renderer>)list.findOption(renderer);
+                    for (var kind : RenderSettings.Renderer.values()) {
+                        check(translations.containsKey("primept.settings.renderer." + kind.key),
+                              "Missing renderer translation " + locale + ": " + kind.key);
+                        rendererButton.onPress(new net.minecraft.client.input.KeyEvent(
+                                InputConstants.KEY_RETURN, 0, 0));
+                        check(PrimeClient.settings().renderer() == renderer.get(),
+                              "Renderer cycle dispatches the exact persisted choice");
+                        PrimeClient.updateSettings(PrimeClient.settings().with(
+                                RenderSettings.Control.BOUNCES,
+                                settings.value(RenderSettings.Control.BOUNCES)));
+                        check(PrimeClient.settings().renderer() == renderer.get(),
+                              "Other option callbacks preserve the renderer");
+                    }
+                    renderer.set(settings.renderer());
+                    rendererButton.setValue(renderer.get());
                     for (var control : RenderSettings.Control.values())
                         check(controls.get(control).get() == settings.value(control),
                               "Each translated control preserves the actual configured bound: " +

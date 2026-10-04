@@ -15,7 +15,7 @@
 | `VK_KHR_acceleration_structure` | `accelerationStructure` |
 | `VK_KHR_ray_query` | `rayQuery` |
 | `VK_KHR_deferred_host_operations` | 无独立特性位 |
-| Vulkan 1.2 核心 | `bufferDeviceAddress` |
+| Vulkan 1.2 核心 | `bufferDeviceAddress`、`scalarBlockLayout` |
 
 Vulkan 1.2 已包含所需的 SPIR-V 1.4、descriptor indexing 和 buffer device address 扩展依赖；特性位仍需显式启用。依据为 [ray query 扩展依赖](https://docs.vulkan.org/refpages/latest/refpages/source/VK_KHR_ray_query.html) 和 [acceleration structure 扩展依赖](https://docs.vulkan.org/refpages/latest/refpages/source/VK_KHR_acceleration_structure.html)。BDA 使用宿主已有的 Vulkan 1.2 feature struct，避免重复添加同类 pNext 结构。
 
@@ -29,7 +29,7 @@ Rust 通过 FFM 借用 instance、physical device、device、graphics queue 及 
 
 ## 渲染器所有权与切换
 
-世界渲染后端由渲染线程上的单个 `RendererSlot` 管理，按名称注册资源工厂。工厂只建立轻量 owner，实际资源创建在 `start()`；旧 owner 完成 `close()` 后才能启动新 owner。当前注册原版与路径追踪两个后端，协议不把选择逻辑固定成两个布尔分支。Prime 禁用时不接管原版生命周期，包括使用 OpenGL 的原版客户端。
+世界渲染后端由渲染线程上的单个 `RendererSlot` 管理，按名称注册资源工厂。工厂只建立轻量 owner，实际资源创建在 `start()`；旧 owner 完成 `close()` 后才能启动新 owner。当前注册原版、路径追踪和 ReSTIR PT Enhanced 三个后端。Prime 禁用时不接管原版生命周期，包括使用 OpenGL 的原版客户端。
 
 切换在 `GameRenderer.extract` 的外层帧入口执行，此时没有活动 render pass，并且新后端能参与当帧提取与准备；不能等到提取之后的 `render` 才更换所有者。原版转 PT 时，先证明已有宿主提交完成，再关闭原版专属地形调度、网格和覆盖状态，最后证明宿主延后销毁回调完成；随后创建 PT 的源调度和原生 renderer。宿主设备、主图像、资源管理器、实际模型/动画回调和手/HUD 仍共享。PT 加载期间不再调用已退休的原版世界渲染路径。
 

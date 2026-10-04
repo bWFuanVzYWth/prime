@@ -1,7 +1,7 @@
 #ifndef PRIME_PT_H
 #define PRIME_PT_H
 #include <stdint.h>
-#define PRIME_ABI_VERSION 11
+#define PRIME_ABI_VERSION 12
 #define PRIME_MAX_BATCH_BYTES 268435456
 #define PRIME_DIAGNOSTICS_ENABLED 1
 #define PRIME_DIAGNOSTICS_CAPTURE 2
@@ -84,6 +84,8 @@ typedef struct PrimeSettings {
     uint32_t frame_generation;
     /* Frame-boundary choice: 0 = grid, 1 = power tree, 2 = bounds-sphere tree. */
     uint32_t light_sampling;
+    /* Independent integrator: 0 = path trace, 1 = ReSTIR PT Enhanced. */
+    uint32_t integrator;
 } PrimeSettings;
 
 typedef struct PrimeVulkanHost {
@@ -239,6 +241,9 @@ int32_t prime_textures(uint64_t handle, const PrimeTextureBatch *batch);
 int32_t prime_retire_textures(uint64_t handle, const PrimeTextureRetire *batch);
 int32_t prime_dynamic(uint64_t handle, const PrimeDynamicBatch *batch);
 int32_t prime_instances(uint64_t handle, const PrimeInstanceBatch *batch);
+/* The host must prove accelerationStructure, rayQuery, bufferDeviceAddress,
+ * scalarBlockLayout and timelineSemaphore were enabled on this logical device.
+ * Physical-device support alone is insufficient; native cannot enable borrowed features. */
 int32_t prime_attach_vulkan(uint64_t handle, const PrimeVulkanHost *host);
 int32_t prime_configure(uint64_t handle, const PrimeSettings *settings);
 int32_t prime_prepare_resources(uint64_t handle, const PrimePrepareResources *prepare);

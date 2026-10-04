@@ -38,6 +38,8 @@ public final class VulkanBootstrap {
     private static final List<VulkanFeature> FEATURES = List.of(
             new VulkanFeature(VulkanFeatureSets.VK12_FEATURES_STRUCT, "bufferDeviceAddress",
                               VkPhysicalDeviceVulkan12Features.BUFFERDEVICEADDRESS),
+            new VulkanFeature(VulkanFeatureSets.VK12_FEATURES_STRUCT, "scalarBlockLayout",
+                              VkPhysicalDeviceVulkan12Features.SCALARBLOCKLAYOUT),
             new VulkanFeature(
                     new VulkanPNextStruct(VkPhysicalDeviceAccelerationStructureFeaturesKHR.class),
                     "accelerationStructure",
@@ -140,6 +142,8 @@ public final class VulkanBootstrap {
                 VK12.vkGetPhysicalDeviceFeatures2(physical.vkPhysicalDevice(), available);
                 if (!address.bufferDeviceAddress())
                     missing.add("bufferDeviceAddress");
+                if (!address.scalarBlockLayout())
+                    missing.add("scalarBlockLayout");
                 if (!acceleration.accelerationStructure())
                     missing.add("accelerationStructure");
                 if (!query.rayQuery())
@@ -205,7 +209,7 @@ public final class VulkanBootstrap {
         status = new Status(previous.physical, device.address(), true, opacityMicromap, streamline,
                             "");
         LOGGER.info(
-                "Prime PT enabled rayQuery, accelerationStructure and bufferDeviceAddress on Minecraft's Vulkan device");
+                "Prime PT enabled rayQuery, accelerationStructure, bufferDeviceAddress and scalarBlockLayout on Minecraft's Vulkan device");
         LOGGER.info("Prime PT opacity micromaps: {}",
                     opacityMicromap ? "enabled" : "unavailable; alpha test fallback");
         LOGGER.info("Prime PT Streamline device capabilities: {}",

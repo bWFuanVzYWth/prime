@@ -337,6 +337,7 @@ fn named_frame_and_settings_validate_semantics_without_a_wire_roundtrip() {
         hdr_reference_white: 0,
         frame_generation: 0,
         light_sampling: 0,
+        integrator: 0,
     };
     assert_eq!(
         RenderSettings::from_abi(&settings).unwrap(),
@@ -355,6 +356,16 @@ fn named_frame_and_settings_validate_semantics_without_a_wire_roundtrip() {
     settings.light_sampling = 3;
     assert!(RenderSettings::from_abi(&settings).is_err());
     settings.light_sampling = 0;
+    settings.integrator = 1;
+    assert_eq!(
+        RenderSettings::from_abi(&settings).unwrap().integrator,
+        prime_scene::settings::Integrator::RestirPt
+    );
+    for invalid in [2, u32::MAX] {
+        settings.integrator = invalid;
+        assert!(RenderSettings::from_abi(&settings).is_err());
+    }
+    settings.integrator = 0;
     settings.saturation = 0.08;
     assert_eq!(
         RenderSettings::from_abi(&settings).unwrap().saturation,

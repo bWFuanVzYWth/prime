@@ -87,7 +87,7 @@ CPU section 编译与后段静态构建分别每帧最多选择 N 个 4×4×4 se
 
 ## 互斥的世界渲染器
 
-原版与 Prime 各后端都是可选的世界渲染器。可选实现可以有多个，存活资源所有者最多一个。当前注册项为 `vanilla` 和 `path_trace`；新增后端注册惰性工厂，禁止为了切换速度预先创建第二套场景或 GPU 资源。公共 `RendererSlot` 管理 EMPTY、STARTING、ACTIVE、STOPPING、BLOCKED，工厂只构造轻量所有者，资源在 `start` 中创建。
+原版与 Prime 各后端都是可选的世界渲染器。可选实现可以有多个，存活资源所有者最多一个。当前注册项为 `vanilla`、`path_trace` 和 `restir_pt`；新增后端注册惰性工厂，禁止为了切换速度预先创建第二套场景或 GPU 资源。公共 `RendererSlot` 管理 EMPTY、STARTING、ACTIVE、STOPPING、BLOCKED，工厂只构造轻量所有者，资源在 `start` 中创建。
 
 切换在 `GameRenderer.extract` 开始、宿主提取本帧世界状态之前执行：停止旧后端接收工作，证明 CPU 消费者结束和 GPU 提交完成，关闭旧后端专属资源，再启动新后端。同一帧的提取与绘制必须属于同一后端；若等到 `render` 开始才切换，新原版后端将缺少当帧提取准备的 ViewArea 和可见状态。任何退休失败都会保留旧所有者并阻断后续创建；不能把捕获异常、Java 方法返回或经过几帧当成销毁证明。渲染中途出错只申请下一帧切换，不在活跃 render pass 内提交，也不重放该帧回调补画。
 

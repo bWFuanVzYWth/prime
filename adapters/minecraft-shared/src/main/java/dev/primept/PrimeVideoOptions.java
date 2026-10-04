@@ -6,6 +6,7 @@ import dev.primept.settings.RenderSettings.Control;
 import dev.primept.settings.RenderSettings.View;
 import dev.primept.settings.RenderSettings.DlssQuality;
 import dev.primept.settings.RenderSettings.LightSampling;
+import dev.primept.settings.RenderSettings.Renderer;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
@@ -22,8 +23,8 @@ public final class PrimeVideoOptions {
     private final OptionsList list;
     private final Runnable rebuildScreen;
     private final EnumMap<Control, OptionInstance<Integer>> controls = new EnumMap<>(Control.class);
-    private OptionInstance<Boolean> enabled, offline, opacityMicromap, rayReconstruction,
-            performanceCapture;
+    private OptionInstance<Boolean> offline, opacityMicromap, rayReconstruction, performanceCapture;
+    private OptionInstance<Renderer> renderer;
     private OptionInstance<View> view;
     private OptionInstance<DlssQuality> dlssQuality;
     private OptionInstance<LightSampling> lightSampling;
@@ -75,18 +76,24 @@ public final class PrimeVideoOptions {
                               rebuildScreen.run();
                           }).build());
         list.addHeader(Component.translatable("primept.settings.render"));
-        enabled = OptionInstance.createBoolean(
-                "primept.settings.enabled",
+        renderer = new OptionInstance<>(
+                "primept.settings.renderer",
                 OptionInstance.cachedConstantTooltip(
-                        Component.translatable("primept.settings.enabled.tooltip")),
-                PrimeClient.settings().pathTracing(),
-                value -> PrimeClient.updateSettings(PrimeClient.settings().withPathTracing(value)));
+                        Component.translatable("primept.settings.renderer.tooltip")),
+                (caption, value)
+                        -> Options.genericValueLabel(
+                                caption,
+                                Component.translatable("primept.settings.renderer." + value.key)),
+                new OptionInstance.Enum<>(List.of(Renderer.values()),
+                                          Codec.STRING.xmap(Renderer::fromKey, value -> value.key)),
+                PrimeClient.settings().renderer(),
+                value -> PrimeClient.updateSettings(PrimeClient.settings().withRenderer(value)));
         offline = OptionInstance.createBoolean(
                 "primept.settings.offline",
                 OptionInstance.cachedConstantTooltip(
                         Component.translatable("primept.settings.offline.tooltip")),
                 PrimeClient.offlineRequested(), PrimeClient::requestOffline);
-        list.addBig(enabled);
+        list.addBig(renderer);
         list.addBig(offline);
         opacityMicromap = OptionInstance.createBoolean(
                 "primept.settings.opacity_micromap",
@@ -170,6 +177,13 @@ public final class PrimeVideoOptions {
         refresh();
     }
     public void tick() {
+        if (renderer.get() != PrimeClient.settings().renderer()) {
+            renderer.set(PrimeClient.settings().renderer());
+            if (list.findOption(renderer) instanceof CycleButton<?> button) {
+                @SuppressWarnings("unchecked") var choice = (CycleButton<Renderer>)button;
+                choice.setValue(renderer.get());
+            }
+        }
         syncToggle(performanceCapture, Diagnostics.captureRequested());
         if (offline.get() != PrimeClient.offlineRequested()) {
             offline.set(PrimeClient.offlineRequested());
@@ -192,7 +206,7 @@ public final class PrimeVideoOptions {
     private void refresh() {
         boolean frozen = PrimeClient.offlineRequested() || PrimeClient.offlineActive();
         list.findOption(performanceCapture).active = Minecraft.getInstance().level != null;
-        list.findOption(enabled).active = PrimeClient.controlsAvailable();
+        list.findOption(renderer).active = PrimeClient.controlsAvailable();
         list.findOption(offline).active = PrimeClient.controlsAvailable() &&
                                           PrimeClient.settings().pathTracing() &&
                                           Minecraft.getInstance().level != null;

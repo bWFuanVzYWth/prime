@@ -1,5 +1,15 @@
 # Adapted code and references
 
+`crates/prime-vulkan/shaders/restir/`, the `restir_*.slang` entry points,
+and the paired-neighbor asset adapt NVIDIA Falcor 9.0's ReSTIR PT Enhanced
+at commit `759aad033ff610fb0d82c74f7e0a508d0096d5f2`.
+Copyright (c) 2015-26 NVIDIA CORPORATION. All rights reserved.
+BSD-3-Clause; the full notice is in
+[licenses/nvidia-falcor-BSD-3-Clause.txt](licenses/nvidia-falcor-BSD-3-Clause.txt).
+The point profile retains Hybrid shift, mixed-measure reservoirs, reciprocal
+paired neighbors and pairwise MIS. Scene, material, light and GPU ownership
+bindings adapt it to Prime; see [ReSTIR PT](docs/restir-pt.md).
+
 `crates/prime-vulkan/shaders/math/ray_offset.slang` adapts NVIDIA's
 `SelfIntersectionAvoidance.hlsl` from
 [self-intersection-avoidance](https://github.com/NVIDIA/self-intersection-avoidance).

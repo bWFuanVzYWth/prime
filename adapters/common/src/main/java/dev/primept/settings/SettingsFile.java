@@ -30,9 +30,7 @@ public final class SettingsFile {
             if (!Integer.toString(RenderSettings.VERSION).equals(properties.getProperty("version")))
                 return new Loaded(RenderSettings.defaults(),
                                   "Settings version mismatch; defaults restored");
-            String enabled = properties.getProperty("renderer.path_tracing");
-            if (!"true".equals(enabled) && !"false".equals(enabled))
-                throw new IllegalArgumentException("Invalid renderer.path_tracing");
+            var renderer = RenderSettings.Renderer.fromKey(properties.getProperty("renderer"));
             String opacityMicromap = properties.getProperty("render.opacity_micromap");
             if (!"true".equals(opacityMicromap) && !"false".equals(opacityMicromap))
                 throw new IllegalArgumentException("Invalid render.opacity_micromap");
@@ -40,7 +38,7 @@ public final class SettingsFile {
             if (!"true".equals(rayReconstruction) && !"false".equals(rayReconstruction))
                 throw new IllegalArgumentException("Invalid render.ray_reconstruction");
             var result = RenderSettings.defaults()
-                                 .withPathTracing(Boolean.parseBoolean(enabled))
+                                 .withRenderer(renderer)
                                  .withOpacityMicromap(Boolean.parseBoolean(opacityMicromap))
                                  .withRayReconstruction(Boolean.parseBoolean(rayReconstruction))
                                  .withDlssQuality(RenderSettings.DlssQuality.valueOf(
@@ -57,13 +55,12 @@ public final class SettingsFile {
         }
     }
     public static String encode(RenderSettings settings) {
-        var text = new StringBuilder("version=" + RenderSettings.VERSION +
-                                     "\nrenderer.path_tracing=" + settings.pathTracing() +
-                                     "\nrender.opacity_micromap=" + settings.opacityMicromap() +
-                                     "\nrender.ray_reconstruction=" + settings.rayReconstruction() +
-                                     "\nrender.dlss_quality=" + settings.dlssQuality().name() +
-                                     "\nrender.light_sampling=" + settings.lightSampling().name() +
-                                     "\n");
+        var text = new StringBuilder(
+                "version=" + RenderSettings.VERSION + "\nrenderer=" + settings.renderer().key +
+                "\nrender.opacity_micromap=" + settings.opacityMicromap() +
+                "\nrender.ray_reconstruction=" + settings.rayReconstruction() +
+                "\nrender.dlss_quality=" + settings.dlssQuality().name() +
+                "\nrender.light_sampling=" + settings.lightSampling().name() + "\n");
         for (var control : RenderSettings.Control.values())
             text.append(control.key).append('=').append(settings.value(control)).append('\n');
         return text.toString();

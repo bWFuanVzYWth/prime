@@ -83,30 +83,10 @@ impl TopLevel {
             .max(1)
             .checked_next_power_of_two()
             .ok_or("TLAS capacity overflow")?;
-        self.full[slot] |= self.inputs[slot]
-            .as_ref()
-            .is_none_or(|b| b.size < u64::from(capacity) * 64);
-        let input = slot_buffer(
-            context,
-            &mut self.inputs[slot],
-            u64::from(capacity) * 64,
-            vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR
-                | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
-        )?;
-        if self.full[slot] {
-            write_instances(input, 0, terrain)?;
-            write_instances(input, terrain.len(), objects)?;
-        } else {
-            write_dirty_instances(input, 0, terrain, &mut self.pending_terrain[slot])?;
-            write_dirty_instances(input, terrain.len(), objects, &mut self.pending[slot])?;
-        }
-        self.pending[slot].clear();
-        self.pending_terrain[slot].clear();
-        self.full[slot] = false;
-        self.applied[slot] = self.generation;
+        let address = self.shader_input(context, terrain, objects, slot)?;
         let data = vk::AccelerationStructureGeometryInstancesDataKHR::default().data(
             vk::DeviceOrHostAddressConstKHR {
-                device_address: input.address(),
+                device_address: address,
             },
         );
         let geometry = vk::AccelerationStructureGeometryKHR::default()
@@ -152,6 +132,45 @@ impl TopLevel {
         self.build.as_mut().unwrap().release_scratch(builds);
         self.last_count = count;
         Ok(replaced)
+    }
+
+    /// The caller has proved this frame slot complete before mapped writes. Reading an older
+    /// TLAS upload slot from later frames would extend its consumer past that proof.
+    pub fn shader_input(
+        &mut self,
+        context: &Arc<Context>,
+        terrain: &[vk::AccelerationStructureInstanceKHR],
+        objects: &[vk::AccelerationStructureInstanceKHR],
+        slot: usize,
+    ) -> Result<u64, String> {
+        let count =
+            u32::try_from(terrain.len() + objects.len()).map_err(|_| "TLAS instance overflow")?;
+        let capacity = count
+            .max(1)
+            .checked_next_power_of_two()
+            .ok_or("TLAS capacity overflow")?;
+        self.full[slot] |= self.inputs[slot]
+            .as_ref()
+            .is_none_or(|b| b.size < u64::from(capacity) * 64);
+        let input = slot_buffer(
+            context,
+            &mut self.inputs[slot],
+            u64::from(capacity) * 64,
+            vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR
+                | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+        )?;
+        if self.full[slot] {
+            write_instances(input, 0, terrain)?;
+            write_instances(input, terrain.len(), objects)?;
+        } else {
+            write_dirty_instances(input, 0, terrain, &mut self.pending_terrain[slot])?;
+            write_dirty_instances(input, terrain.len(), objects, &mut self.pending[slot])?;
+        }
+        self.pending[slot].clear();
+        self.pending_terrain[slot].clear();
+        self.full[slot] = false;
+        self.applied[slot] = self.generation;
+        Ok(input.address())
     }
 
     pub fn handle(&self) -> vk::AccelerationStructureKHR {

@@ -1,4 +1,4 @@
-# FFM ABI v11
+# FFM ABI v12
 
 Java 适配器与 Rust 核心作为同一构建产物配套使用。公共 ABI 为11，Minecraft 源 schema 为7，设置文件 schema 为7；版本用于边界拒绝，不承诺不同发布之间的二进制兼容。两版适配器共享同次构建的核心，JAR 和引擎不能混用。
 
@@ -36,7 +36,7 @@ Java 适配器与 Rust 核心作为同一构建产物配套使用。公共 ABI �
 | --- | --- | --- |
 | `PrimeReset` | 16 B | `prime_reset`；world epoch严格增加，清理世界几何/动态状态，保留当前常驻资源代和同一CPU池 |
 | `PrimeFrame` | 96 B | record/render；epoch、f64世界位置、forward/right/up、FOV、输出尺寸、sample index、实际太阳时角 |
-| `PrimeSettings` | 100 B | configure；具名渲染、调度、星图、自动曝光、HDR、帧生成与帧边界光源采样方式 |
+| `PrimeSettings` | 104 B | configure；具名渲染、调度、星图、自动曝光、HDR、帧生成与帧边界光源采样方式、积分器 |
 | `PrimeVulkanHost` | 56 B | attach；instance/physical device/device/queue/timeline/family/实际启用capabilities |
 | `PrimeRecordTarget` | 40 B | record；活动command、目标image/view、实际提交serial |
 | `PrimePrepareResources` | 24 B | prepare_resources；活动command与真实提交serial，仅准备设备/全局资源 |
@@ -131,7 +131,7 @@ Position 为 f32×3，UV 为 f32×2。局部原型和显式原始网格可输出
 
 先create，在设备私有资源创建前应用初始 `PrimeSettings`，再以 `PrimeVulkanHost` attach。源资源准备后 `prime_prepare_resources(handle,&prepare)` 在真实活动encoder录制固定LUT、大气、全局纹理和OMM资源，不构建地形/TLAS、不派发PT。提交顺序、serial与完成证明同record；不另开队列或以假serial预热。
 
-调用方须已在实际逻辑设备启用 buffer device address、acceleration structure、ray query 与所需扩展，并保证 queue family 支持 graphics+compute。仅查询物理设备支持不够。Rust 不销毁这些宿主对象，也不为 PT 调用 queue submit。
+调用方须已在实际逻辑设备启用 buffer device address、scalarBlockLayout、acceleration structure、ray query、timelineSemaphore 与所需扩展，并保证 queue family 支持 graphics+compute。仅查询物理设备支持不够。Rust 不销毁这些宿主对象，也不为 PT 调用 queue submit。
 
 flags 的 bit0 表示已在这台逻辑设备启用 `VK_EXT_opacity_micromap` 的 `micromap` 和 synchronization2；bit1 表示实际启用 Streamline 所需的 NVX binary import、NVX image view handle、KHR push descriptor、KHR buffer device address、KHR synchronization2 及 timelineSemaphore/descriptorIndexing/BDA、synchronization2、shaderStorageImageExtendedFormats、shaderStorageImageWriteWithoutFormat 能力，其他位必须为零。宿主只在 `vkCreateDevice` 成功且实际创建集合包含扩展与特性后发布；26.2/26.3 本身要求 `VK_KHR_synchronization2`。物理支持不等于已启用，flags=0 保留原始 PT 路径，Rust 不补开借用设备的能力。OMM 和 RR 用户设置与设备能力独立；具体兼容范围见 [OMM 契约](opacity-micromaps.md)与[重建契约](reconstruction.md)。
 
@@ -171,7 +171,7 @@ flags 的 bit0 表示已在这台逻辑设备启用 `VK_EXT_opacity_micromap` �
 
 ## 设置结构与文件 schema
 
-`prime_configure(handle,&settings)` 借用100 B `PrimeSettings`，header使用公共ABI v11。末字段 `light_sampling` 位于96字节偏移，0为Grid、1为Tree功率树、2为TreeSphere球界方向树，其他值拒绝；创建时采用当前值，之后允许在外层帧边界变更。宿主先提交并证明旧命令完成，native重建所选管线，并在下一次录制中完成灯表和目录更新后才dispatch。JAR与DLL仍须配套重建，旧DLL不接受新枚举值。磁盘 `primept.properties` 为schema v7，合法值为`GRID`、`TREE`、`TREE_SPHERE`；旧版本或字段不完整按既有严格规则整份回退默认，不以旧控制字节序列作为生产输入。
+`prime_configure(handle,&settings)` 借用104 B `PrimeSettings`，header使用公共ABI v12。`light_sampling` 位于96字节偏移，0为Grid、1为Tree功率树、2为TreeSphere球界方向树，其他值拒绝；创建时采用当前值，之后允许在外层帧边界变更。宿主先提交并证明旧命令完成，native重建所选管线，并在下一次录制中完成灯表和目录更新后才dispatch。JAR与DLL仍须配套重建，旧DLL不接受新枚举值。末字段 `integrator` 位于100字节偏移，0为PathTrace、1为RestirPt，其他值拒绝。磁盘 `primept.properties` 为schema v8，合法值为`GRID`、`TREE`、`TREE_SPHERE`；旧版本或字段不完整按既有严格规则整份回退默认，不以旧控制字节序列作为生产输入。
 
 | 字段 | 范围/语义 |
 | --- | --- |
@@ -190,6 +190,7 @@ flags 的 bit0 表示已在这台逻辑设备启用 `VK_EXT_opacity_micromap` �
 | hdr / hdr_reference_white | 0/1请求；0自动参考白，否则1–10000 nit；实际启用需surface及标定支持 |
 | frame_generation | 0/1请求，默认0；实时RR、早期interposer及实际SDK支持全部成立才准备 |
 | light_sampling | 0 Grid默认、1 Tree功率树、2 TreeSphere球界方向树；帧边界切换并重置采样历史 |
+| integrator | 0 PathTrace默认、1 RestirPt Enhanced；独立管线与历史，帧边界切换 |
 
 结构尺寸/版本、枚举、有限性及范围完整验证后应用。模式、采样方式或实时RR布局改变前宿主先提交encoder并证明旧提交完成，在外层帧边界切换；native依旧资源最后consumer退休。显示控制和格预算无需模式切换等待。冻结拒绝实时源变更入口，但允许替换采样proposal；仅更新快照设置的`light_sampling`，保留姿态和其他冻结输运参数。资源及显示边界见[渲染模式](renderers.md)。
 

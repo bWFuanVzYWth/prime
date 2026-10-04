@@ -260,6 +260,7 @@ fn run_impl(
         realtime_linear_post: None,
         reconstruction_display: None,
         reconstruction_linear: None,
+        restir: None,
     };
     unsafe {
         let types: Vec<_> = (0..if geometry.is_some() { 7 } else { 2 })

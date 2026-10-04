@@ -38,6 +38,38 @@ fn main() {
         })
         .unwrap_or_else(|| PathBuf::from("slangc"));
     compile(&compiler, "shaders/path_trace.slang", "path_trace.spv");
+    for name in ["generate", "retrace", "shift", "temporal"] {
+        let source = format!("shaders/restir_{name}.slang");
+        let binary = format!("restir_{name}");
+        compile(&compiler, &source, &format!("{binary}.spv"));
+        compile_defines(
+            &compiler,
+            &source,
+            &format!("{binary}_tree.spv"),
+            &["PRIME_LIGHT_TREE=1"],
+        );
+        compile_defines(
+            &compiler,
+            &source,
+            &format!("{binary}_tree_sphere.spv"),
+            &["PRIME_LIGHT_TREE=1", "PRIME_LIGHT_TREE_SPHERE=1"],
+        );
+    }
+    for name in ["workload", "resolve"] {
+        compile_defines(
+            &compiler,
+            &format!("shaders/restir_{name}.slang"),
+            &format!("restir_{name}.spv"),
+            &["PRIME_RESTIR_MATERIAL_ONLY=1"],
+        );
+    }
+    for name in ["indirect", "spatial"] {
+        compile(
+            &compiler,
+            &format!("shaders/restir_{name}.slang"),
+            &format!("restir_{name}.spv"),
+        );
+    }
     for name in ["path_trace", "realtime_transport", "realtime_transport_rr"] {
         compile_defines(
             &compiler,
@@ -146,6 +178,7 @@ fn main() {
             "pbr_texture",
             "primary",
             "primary_rr",
+            "restir_adapter",
         ] {
             compile(
                 &compiler,
@@ -157,6 +190,18 @@ fn main() {
             &compiler,
             "tests/shaders/atmosphere.slang",
             "atmosphere_test.spv",
+        );
+        compile_defines(
+            &compiler,
+            "tests/shaders/restir_adapter.slang",
+            "restir_adapter_tree.spv",
+            &["PRIME_LIGHT_TREE=1"],
+        );
+        compile_defines(
+            &compiler,
+            "tests/shaders/restir_adapter.slang",
+            "restir_adapter_tree_sphere.spv",
+            &["PRIME_LIGHT_TREE=1", "PRIME_LIGHT_TREE_SPHERE=1"],
         );
     }
 }

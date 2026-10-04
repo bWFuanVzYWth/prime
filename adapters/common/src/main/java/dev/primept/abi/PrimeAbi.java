@@ -7,7 +7,7 @@ import static java.lang.foreign.ValueLayout.*;
 
 public final class PrimeAbi {
     private PrimeAbi() {}
-    public static final int PRIME_ABI_VERSION = 11;
+    public static final int PRIME_ABI_VERSION = 12;
     public static final int PRIME_MAX_BATCH_BYTES = 268435456;
     public static final int PRIME_DIAGNOSTICS_ENABLED = 1;
     public static final int PRIME_DIAGNOSTICS_CAPTURE = 2;
@@ -271,7 +271,7 @@ public final class PrimeAbi {
     }
     public static final class PrimeSettings {
         private PrimeSettings() {}
-        public static final long SIZE = 100, ALIGN = 4;
+        public static final long SIZE = 104, ALIGN = 4;
         public static final MemoryLayout LAYOUT =
                 MemoryLayout
                         .structLayout(
@@ -291,7 +291,8 @@ public final class PrimeAbi {
                                 JAVA_FLOAT.withName("auto_exposure_compensation"),
                                 JAVA_INT.withName("hdr"), JAVA_INT.withName("hdr_reference_white"),
                                 JAVA_INT.withName("frame_generation"),
-                                JAVA_INT.withName("light_sampling"))
+                                JAVA_INT.withName("light_sampling"),
+                                JAVA_INT.withName("integrator"))
                         .withName("PrimeSettings");
         static {
             if (LAYOUT.byteSize() != SIZE || LAYOUT.byteAlignment() != ALIGN)
@@ -354,6 +355,8 @@ public final class PrimeAbi {
                 throw new ExceptionInInitializerError("PrimeSettings.frame_generation offset");
             if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("light_sampling")) != 96)
                 throw new ExceptionInInitializerError("PrimeSettings.light_sampling offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("integrator")) != 100)
+                throw new ExceptionInInitializerError("PrimeSettings.integrator offset");
         }
         public static MemorySegment header(MemorySegment value) {
             return value.asSlice(0L, 8);
@@ -495,6 +498,12 @@ public final class PrimeAbi {
         }
         public static void light_sampling(MemorySegment value, int field) {
             value.set(JAVA_INT, 96L, field);
+        }
+        public static int integrator(MemorySegment value) {
+            return value.get(JAVA_INT, 100L);
+        }
+        public static void integrator(MemorySegment value, int field) {
+            value.set(JAVA_INT, 100L, field);
         }
     }
     public static final class PrimeVulkanHost {

@@ -162,6 +162,7 @@ impl Engine {
 
     fn record_settings(&self, span: &mut prime_diagnostics::SpanGuard) {
         span.count("mode", self.settings.mode as u64);
+        span.count("integrator", self.settings.integrator as u64);
         span.count("view", self.settings.view as u64);
         span.count("bounces", u64::from(self.settings.bounces));
         span.count("samples", u64::from(self.settings.offline_samples));
@@ -258,6 +259,7 @@ impl Engine {
         if let Some((_, transport)) = &mut frozen {
             // A sampling proposal is a renderer setting, not frozen source/lighting state.
             transport.light_sampling = settings.light_sampling;
+            transport.integrator = settings.integrator;
         }
         #[cfg(feature = "vulkan")]
         if let Some(renderer) = &mut self.renderer {
@@ -753,6 +755,22 @@ mod tests {
             assert_eq!(transport.sky, RenderSettings::default().sky);
             assert_eq!(engine.effective_frame(&moved).camera, frame.camera);
             assert_eq!(engine.astronomy.direction(0.), frozen_sun);
+            assert!(engine.check_live_source().is_err());
+        }
+        for integrator in [
+            prime_scene::settings::Integrator::RestirPt,
+            prime_scene::settings::Integrator::PathTrace,
+        ] {
+            engine
+                .configure(RenderSettings {
+                    integrator,
+                    ..engine.settings
+                })
+                .unwrap();
+            let (pose, transport) = engine.frozen_frame.unwrap();
+            assert_eq!(pose.camera, frame.camera);
+            assert_eq!(transport.integrator, integrator);
+            assert_eq!(transport.bounces, RenderSettings::default().bounces);
             assert!(engine.check_live_source().is_err());
         }
         engine

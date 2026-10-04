@@ -57,6 +57,11 @@ mod realtime_tests;
 mod reconstruction;
 mod reconstruction_history;
 mod resources;
+mod restir;
+#[cfg(all(test, feature = "shader-tests"))]
+mod restir_adapter_tests;
+#[cfg(all(test, feature = "shader-tests"))]
+mod restir_tests;
 #[cfg(all(test, feature = "shader-tests"))]
 mod rr_display_tests;
 mod scene_resources;
@@ -75,7 +80,7 @@ pub use resources::GpuProfile;
 use ash::vk::{self, Handle};
 use prime_scene::instances::InstanceInput;
 use prime_scene::scene::{Camera, InstanceScene, Scene};
-use prime_scene::settings::{LightSampling, RenderMode, RenderSettings};
+use prime_scene::settings::{Integrator, LightSampling, RenderMode, RenderSettings};
 use resources::{Buffer, Context, error};
 use std::{io::Cursor, sync::Arc};
 use target::Image;
@@ -127,9 +132,11 @@ struct Pipeline {
     realtime_linear_post: Option<vk::Pipeline>,
     reconstruction_display: Option<vk::Pipeline>,
     reconstruction_linear: Option<vk::Pipeline>,
+    restir: Option<restir::Pipelines>,
 }
 impl Drop for Pipeline {
     fn drop(&mut self) {
+        drop(self.restir.take());
         if self.context.can_destroy() {
             unsafe {
                 for pipeline in self
@@ -170,6 +177,7 @@ impl Drop for ShaderModule<'_> {
 impl Pipeline {
     fn new(
         context: &Arc<Context>,
+        integrator: Integrator,
         mode: RenderMode,
         reconstruction: bool,
         frame_generation: bool,
@@ -185,21 +193,28 @@ impl Pipeline {
                 pool: vk::DescriptorPool::null(),
                 descriptors: [vk::DescriptorSet::null(); FRAME_SLOTS],
                 pipelines: [vk::Pipeline::null(); 6],
-                single_sample_pipelines: (mode == RenderMode::Offline)
+                single_sample_pipelines: (integrator == Integrator::PathTrace
+                    && mode == RenderMode::Offline)
                     .then_some([vk::Pipeline::null(); 6]),
-                primary_pipelines: (mode == RenderMode::Realtime)
+                primary_pipelines: (integrator == Integrator::PathTrace
+                    && mode == RenderMode::Realtime)
                     .then_some([vk::Pipeline::null(); 4]),
                 realtime_post: None,
                 realtime_linear_post: None,
                 reconstruction_display: None,
                 reconstruction_linear: None,
+                restir: None,
             };
-            let binding_ids: &[u32] = match mode {
-                RenderMode::Offline => &[0, 2, 3, 4, 5, 7, 8, 9],
-                RenderMode::Realtime if reconstruction => &[
-                    0, 2, 3, 4, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-                ],
-                RenderMode::Realtime => &[0, 2, 3, 4, 7, 8, 9],
+            let binding_ids: &[u32] = if integrator == Integrator::RestirPt {
+                &[0, 2, 3, 4, 7, 8, 9, 23, 24]
+            } else {
+                match mode {
+                    RenderMode::Offline => &[0, 2, 3, 4, 5, 7, 8, 9],
+                    RenderMode::Realtime if reconstruction => &[
+                        0, 2, 3, 4, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
+                    ],
+                    RenderMode::Realtime => &[0, 2, 3, 4, 7, 8, 9],
+                }
             };
             let bindings: Vec<_> = binding_ids
                 .iter()
@@ -213,7 +228,7 @@ impl Pipeline {
                             vk::DescriptorType::ACCELERATION_STRUCTURE_KHR
                         } else if binding == 9 {
                             vk::DescriptorType::COMBINED_IMAGE_SAMPLER
-                        } else if binding == 17 {
+                        } else if binding == 17 || binding == 23 {
                             vk::DescriptorType::UNIFORM_BUFFER
                         } else if binding == 4 || (10..=16).contains(&binding) || binding >= 18 {
                             vk::DescriptorType::STORAGE_IMAGE
@@ -234,7 +249,11 @@ impl Pipeline {
             let push = [vk::PushConstantRange::default()
                 .stage_flags(vk::ShaderStageFlags::COMPUTE)
                 .offset(0)
-                .size(128)];
+                .size(if integrator == Integrator::RestirPt {
+                    16
+                } else {
+                    128
+                })];
             result.layout = context
                 .device
                 .create_pipeline_layout(
@@ -255,12 +274,23 @@ impl Pipeline {
                 },
                 vk::DescriptorPoolSize {
                     ty: vk::DescriptorType::STORAGE_BUFFER,
-                    descriptor_count: (if mode == RenderMode::Offline { 5 } else { 4 })
-                        * FRAME_SLOTS as u32,
+                    descriptor_count: (if integrator == Integrator::PathTrace
+                        && mode == RenderMode::Offline
+                    {
+                        5
+                    } else {
+                        4
+                    }) * FRAME_SLOTS as u32,
                 },
                 vk::DescriptorPoolSize {
                     ty: vk::DescriptorType::STORAGE_IMAGE,
-                    descriptor_count: (if reconstruction { 13 } else { 1 }) * FRAME_SLOTS as u32,
+                    descriptor_count: (if integrator == Integrator::RestirPt {
+                        2
+                    } else if reconstruction {
+                        13
+                    } else {
+                        1
+                    }) * FRAME_SLOTS as u32,
                 },
                 vk::DescriptorPoolSize {
                     ty: vk::DescriptorType::UNIFORM_BUFFER,
@@ -299,6 +329,15 @@ impl Pipeline {
                 })
                 .collect();
             context.device.update_descriptor_sets(&energy_writes, &[]);
+            if integrator == Integrator::RestirPt {
+                result.restir = Some(restir::Pipelines::new(
+                    context,
+                    result.layout,
+                    light_sampling,
+                    mode,
+                )?);
+                return Ok(result);
+            }
             let mut modules = std::collections::BTreeMap::new();
             let mut create = |bytes: &[u8],
                               features: [u32; 3],
@@ -546,6 +585,7 @@ pub struct Renderer {
     atmosphere_scene_revision: u64,
     environment: prime_scene::environment::Environment,
     output: Option<Output>,
+    restir: Option<restir::State>,
     camera: Option<Camera>,
     samples: u32,
     frame_seed: u32,
