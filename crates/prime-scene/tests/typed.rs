@@ -339,6 +339,7 @@ fn named_frame_and_settings_validate_semantics_without_a_wire_roundtrip() {
         light_sampling: 0,
         integrator: 0,
         ignore_global_history_resets: 0,
+        restir_spatial_only: 0,
     };
     assert_eq!(
         RenderSettings::from_abi(&settings).unwrap(),
@@ -374,6 +375,17 @@ fn named_frame_and_settings_validate_semantics_without_a_wire_roundtrip() {
     settings.ignore_global_history_resets = 2;
     assert!(RenderSettings::from_abi(&settings).is_err());
     settings.ignore_global_history_resets = 0;
+    for value in [0, 1] {
+        settings.restir_spatial_only = value;
+        let diagnostic = RenderSettings::from_abi(&settings).unwrap();
+        assert_eq!(diagnostic.restir_spatial_only, value == 1);
+        assert!(diagnostic.transport_matches(RenderSettings::default()));
+    }
+    for invalid in [2, u32::MAX] {
+        settings.restir_spatial_only = invalid;
+        assert!(RenderSettings::from_abi(&settings).is_err());
+    }
+    settings.restir_spatial_only = 0;
     settings.saturation = 0.08;
     assert_eq!(
         RenderSettings::from_abi(&settings).unwrap().saturation,

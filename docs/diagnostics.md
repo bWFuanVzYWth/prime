@@ -63,7 +63,7 @@ native 块的 `r` 为 recorder 身份，`dict` 使用本会话稳定 ID；`nb` /
 | 采集传输 | `diag.flush/read/drain/alloc/copy/array/utf8/queue/stop` 分开逐帧排空、native 读取总范围、原生排空/序列化、FFM 分配、缓存块复制、byte[] 复制、UTF8 解码、后台队列写入及最终收尾 |
 | 全局时间历史失效 | `restir.history.reset` / `rr.history.reset` 记录预定义事件的 `reason/ignored/valid`；每次请求同时直接写日志的 event/action/valid，未开启性能录制也可查原因 |
 | 历史存储重建 | `restir.history.storage` / `rr.history.storage` 记录实际 scratch/SDK feature 释放或替换的原因与原有效性；新存储必须冷启动，诊断开关不能伪造旧历史 |
-| 历史使用与局部支持 | `restir.history.frame` 记录 temporal/update/revision/accepted；`restir.identity.frame` 记录修订和三表脏范围数量，支持变化不等于全局重置 |
+| 历史使用与局部支持 | `restir.history.frame` 记录 temporal/spatial_only/update/revision/accepted；`restir.identity.frame` 记录修订和三表脏范围数量，支持变化不等于全局重置 |
 
 新摘要取已有长度或仅在启用时于原有循环中累计：例如 `emit/pg/dc/ent` 表示发光面、光页、dirty cell、alias 项数，`bytes/ranges/rows/copies` 表示字节、范围、目录行和复制项。不为摘要新增全场景扫描，也不对每个光源或 cell 生成独立事件。
 
@@ -83,4 +83,4 @@ native 逐帧排空已完成事件，Java 通过有界队列交给本次采集�
 
 诊断 configure/frame/clock/read 控制失败会清除采集请求、尽力排空并标记 `partial`，独立通知失败，不单因诊断错误退役正常 renderer。真实渲染的设备丢失仍按渲染错误处理。默认恢复按钮结束本次会话的采集。
 
-FFI 使用 ABI v14，owner-thread 控制和排空缓冲协议见 [ABI](abi.md)。固定场景、原生1920×1080、种子、画质、预算、硬件和工具链；分开 CPU/GPU、实时/离线、稳态/更新以及采集开销。游戏开关、world exit、后端切换、重新采集和实际 GPU 查询由用户手动验收，命令见 [CONTRIBUTING](../CONTRIBUTING.md)。
+FFI 使用 ABI v15，owner-thread 控制和排空缓冲协议见 [ABI](abi.md)。固定场景、原生1920×1080、种子、画质、预算、硬件和工具链；分开 CPU/GPU、实时/离线、稳态/更新以及采集开销。游戏开关、world exit、后端切换、重新采集和实际 GPU 查询由用户手动验收，命令见 [CONTRIBUTING](../CONTRIBUTING.md)。

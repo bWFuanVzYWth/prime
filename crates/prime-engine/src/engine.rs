@@ -181,6 +181,10 @@ impl Engine {
             u64::from(self.settings.ignore_global_history_resets),
         );
         span.count(
+            "restir_spatial_only",
+            u64::from(self.settings.restir_spatial_only),
+        );
+        span.count(
             "terrain_budget",
             u64::from(self.settings.terrain_batches_per_frame),
         );

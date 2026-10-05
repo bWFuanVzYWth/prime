@@ -24,6 +24,7 @@ public final class PrimeVideoOptions {
     private final EnumMap<Control, OptionInstance<Integer>> controls = new EnumMap<>(Control.class);
     private OptionInstance<Boolean> offline, opacityMicromap, nativeNoisyOutput, performanceCapture;
     private OptionInstance<Boolean> ignoreGlobalHistoryResets;
+    private OptionInstance<Boolean> restirSpatialOnly;
     private OptionInstance<Renderer> renderer;
     private OptionInstance<View> view;
     private OptionInstance<DlssQuality> dlssQuality;
@@ -154,6 +155,14 @@ public final class PrimeVideoOptions {
                 -> PrimeClient.updateSettings(
                         PrimeClient.settings().withIgnoreGlobalHistoryResets(value)));
         list.addBig(ignoreGlobalHistoryResets);
+        restirSpatialOnly = OptionInstance.createBoolean(
+                "primept.settings.restir_spatial_only",
+                OptionInstance.cachedConstantTooltip(
+                        Component.translatable("primept.settings.restir_spatial_only.tooltip")),
+                PrimeClient.settings().restirSpatialOnly(),
+                value
+                -> PrimeClient.updateSettings(PrimeClient.settings().withRestirSpatialOnly(value)));
+        list.addBig(restirSpatialOnly);
         list.addBig(opacityMicromap);
         list.addBig(nativeNoisyOutput);
         view = new OptionInstance<>(
@@ -180,6 +189,7 @@ public final class PrimeVideoOptions {
         }
         syncToggle(performanceCapture, Diagnostics.captureRequested());
         syncToggle(ignoreGlobalHistoryResets, PrimeClient.settings().ignoreGlobalHistoryResets());
+        syncToggle(restirSpatialOnly, PrimeClient.settings().restirSpatialOnly());
         syncToggle(nativeNoisyOutput, PrimeClient.settings().nativeNoisyOutput());
         if (offline.get() != PrimeClient.offlineRequested()) {
             offline.set(PrimeClient.offlineRequested());
@@ -208,6 +218,9 @@ public final class PrimeVideoOptions {
                                           Minecraft.getInstance().level != null;
         list.findOption(opacityMicromap).active = PrimeClient.controlsAvailable();
         list.findOption(ignoreGlobalHistoryResets).active = PrimeClient.controlsAvailable();
+        list.findOption(restirSpatialOnly).active =
+                PrimeClient.controlsAvailable() && !frozen &&
+                PrimeClient.settings().renderer() == Renderer.RESTIR_PT;
         list.findOption(nativeNoisyOutput).active = PrimeClient.controlsAvailable() && !frozen;
         list.findOption(controls.get(Control.FRAME_GENERATION)).active =
                 PrimeClient.controlsAvailable() && !frozen &&

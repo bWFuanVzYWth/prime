@@ -1135,6 +1135,7 @@ mod abi_tests {
             light_sampling: 0,
             integrator: 0,
             ignore_global_history_resets: 0,
+            restir_spatial_only: 0,
         };
         assert_eq!(unsafe { prime_configure(handle, &valid) }, 0);
         assert_eq!(unsafe { prime_configure(handle, std::ptr::null()) }, -1);
@@ -1146,6 +1147,9 @@ mod abi_tests {
         assert_eq!(unsafe { prime_configure(handle, &invalid) }, -1);
         invalid = valid;
         invalid.ignore_global_history_resets = 2;
+        assert_eq!(unsafe { prime_configure(handle, &invalid) }, -1);
+        invalid = valid;
+        invalid.restir_spatial_only = 2;
         assert_eq!(unsafe { prime_configure(handle, &invalid) }, -1);
         assert_eq!(
             std::thread::spawn(move || unsafe { prime_configure(handle, &valid) })
@@ -1171,6 +1175,25 @@ mod abi_tests {
                 }
             );
             assert!(!engine.failed);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(unsafe { prime_configure(handle, &valid) }, 0);
+        let spatial = PrimeSettings {
+            restir_spatial_only: 1,
+            ..valid
+        };
+        assert_eq!(unsafe { prime_configure(handle, &spatial) }, 0);
+        session_named(handle, "prime_last_error", |engine| {
+            assert!(engine.settings.restir_spatial_only);
+            assert!(
+                engine
+                    .settings
+                    .transport_matches(prime_scene::settings::RenderSettings {
+                        restir_spatial_only: false,
+                        ..engine.settings
+                    })
+            );
             Ok(())
         })
         .unwrap();

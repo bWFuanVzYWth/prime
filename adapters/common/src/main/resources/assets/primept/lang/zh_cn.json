@@ -46,6 +46,8 @@
   "primept.settings.native_noisy_output": "原生分辨率含噪输出",
   "primept.settings.ignore_global_history_resets": "忽略所有全局重置",
   "primept.settings.ignore_global_history_resets.tooltip": "诊断开关，默认关闭。遇到显式全局重置请求时保留可兼容的 ReSTIR 与光线重建历史；仍由局部拒绝与不可用或不兼容的历史资源决定是否可复用。",
+  "primept.settings.restir_spatial_only": "ReSTIR 仅空间复用",
+  "primept.settings.restir_spatial_only.tooltip": "诊断开关，默认关闭。仅禁用实时 ReSTIR 的时间复用，用于对照，空间复用保留。不影响 DLSS 光线重建历史或离线累积。",
   "primept.settings.native_noisy_output.tooltip": "开启此项禁用降噪并输出原生分辨率含噪画面；关闭此项启用 NVIDIA Streamline 光线重建，固定使用预设 F。需要兼容的 NVIDIA RTX 显卡和驱动；不可用时回退原始噪声输出。离线累积保持原生分辨率；独立的含噪颜色诊断视图显示光线重建的实际内部输入。",
   "primept.settings.dlss_quality": "DLSS 质量",
   "primept.settings.dlss_quality.tooltip": "默认性能档以输出宽高的一半渲染（2 倍超分）。质量和平衡档使用更多输入像素，超级性能档使用更少输入像素；DLAA 保持原生分辨率。仅影响实时光线重建。",

@@ -22,6 +22,8 @@ BSDF 续接与直接光照具有不同支持域。非光学 authored 薄 SSS 可
 
 每个实时帧依次执行生成、时间 workload/retrace/merge、空间 workload/retrace/shift/merge、resolve。无有效历史时跳过时间阶段。时间 merge 与原版一样内联顺序计算双向 shift，不增加全屏 shift 中间写读。workload 通过 wave prefix sum 在 GPU 上生成紧凑队列，GPU 写入 `DispatchIndirect` 参数；CPU 不读回队列长度。只有需要 replay prefix 的候选进入队列。空间反向 shift 使用配对邻居已生成的相反方向记录，不重复追踪；无效配对没有消费者，不清零其 shift 槽。
 
+诊断设置“ReSTIR 仅空间复用”默认关闭。开启时宿主直接跳过整组时间阶段及其队列清零、indirect 调度和同步，仅保留初始生成、空间阶段与 resolve；空间输出使用现有独立 reservoir bank，不增加历史复制或 shader 变体。既有 scratch 和管线保持复用，身份表及接受提交的相机、jitter、primary bank、水位继续推进，关闭开关后可立即使用最近的真实空间结果恢复时间复用。不受“忽略所有全局重置”开关覆盖，不重置 DLSS RR 历史，也不改变原本仅空间复用的离线累积。内部适配见 [RA-014](restir-adaptations.md)。
+
 现有 GPU 诊断的 primary、transport、post 区间分别覆盖完整初始生成、重采样和 resolve；不能把这些同名区间当作普通 PT 的 K1/K2 阶段直接比较。性能比较使用完整 GPU 帧区间，并按实际后端解释子阶段。
 
 初始 RIS 的 reservoir 权重除以 `M * pHat` 并将 M 设为 1；之后合并使用 `pHat(dst) * Jacobian * source.weight * pairwiseMIS`，最终仅除以所选样本的 pHat。连接 Jacobian 仅为两端几何项之比；不得再乘 BSDF PDF 比。连接点相邻的真实 BSDF 响应在目的路径重新求值。生成、重放与 shift 的面积 footprint 使用几何法线，BSDF 响应继续使用着色法线，避免强法线贴图改变逆向面积判定的支持域。

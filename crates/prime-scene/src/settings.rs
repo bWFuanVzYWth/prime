@@ -73,6 +73,8 @@ pub struct RenderSettings {
     pub frame_generation: bool,
     pub light_sampling: LightSampling,
     pub ignore_global_history_resets: bool,
+    /// Diagnostic: disable only realtime ReSTIR temporal reuse, preserving spatial reuse.
+    pub restir_spatial_only: bool,
 }
 impl Default for RenderSettings {
     fn default() -> Self {
@@ -101,15 +103,16 @@ impl Default for RenderSettings {
             frame_generation: false,
             light_sampling: LightSampling::Tree,
             ignore_global_history_resets: false,
+            restir_spatial_only: false,
         }
     }
 }
 impl RenderSettings {
-    pub const VERSION: u32 = 10;
-    pub const BYTES: usize = 104;
+    pub const VERSION: u32 = 11;
+    pub const BYTES: usize = 108;
     pub fn parse(bytes: &[u8]) -> Result<Self, String> {
         if bytes.len() != Self::BYTES {
-            return Err("Settings require exactly 104 bytes".into());
+            return Err("Settings require exactly 108 bytes".into());
         }
         let word = |offset| u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
         if word(0) != Self::VERSION {
@@ -186,6 +189,11 @@ impl RenderSettings {
                 0 => false,
                 1 => true,
                 _ => return Err("Unknown global history reset diagnostic setting".into()),
+            },
+            restir_spatial_only: match word(104) {
+                0 => false,
+                1 => true,
+                _ => return Err("Unknown ReSTIR spatial-only diagnostic setting".into()),
             },
         };
         result.validate()?;
@@ -264,6 +272,11 @@ impl RenderSettings {
                 1 => true,
                 _ => return Err("Unknown global history reset diagnostic setting".into()),
             },
+            restir_spatial_only: match s.restir_spatial_only {
+                0 => false,
+                1 => true,
+                _ => return Err("Unknown ReSTIR spatial-only diagnostic setting".into()),
+            },
         };
         result.validate()?;
         Ok(result)
@@ -288,6 +301,7 @@ impl RenderSettings {
         Ok(())
     }
     pub fn transport_matches(self, other: Self) -> bool {
+        // Diagnostic reuse selection does not alter RR history or offline accumulation.
         self.integrator == other.integrator
             && self.bounces == other.bounces
             && self.astronomy == other.astronomy
@@ -304,7 +318,7 @@ mod tests {
     use super::*;
     fn golden() -> Vec<u8> {
         [
-            10_u32,
+            11_u32,
             1,
             12,
             1,
@@ -324,6 +338,7 @@ mod tests {
             8,
             1_f32.to_bits(),
             0.6_f32.to_bits(),
+            0,
             0,
             0,
             0,
@@ -360,7 +375,8 @@ mod tests {
             (0, 7),
             (0, 8),
             (0, 9),
-            (0, 11),
+            (0, 10),
+            (0, 12),
             (48, 91),
             (48, (-91i32) as u32),
             (52, 360),
@@ -384,6 +400,8 @@ mod tests {
             (96, u32::MAX),
             (100, 2),
             (100, u32::MAX),
+            (104, 2),
+            (104, u32::MAX),
         ] {
             let mut invalid = bytes.clone();
             invalid[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
@@ -486,6 +504,7 @@ mod tests {
             light_sampling: 1,
             integrator: 0,
             ignore_global_history_resets: 0,
+            restir_spatial_only: 0,
         };
         for (word, method) in [
             (0, LightSampling::Tree),
@@ -536,8 +555,8 @@ mod tests {
     fn global_reset_diagnostic_defaults_off_and_does_not_change_transport() {
         let defaults = RenderSettings::default();
         assert!(!defaults.ignore_global_history_resets);
-        assert_eq!(RenderSettings::VERSION, 10);
-        assert_eq!(RenderSettings::BYTES, 104);
+        assert_eq!(RenderSettings::VERSION, 11);
+        assert_eq!(RenderSettings::BYTES, 108);
         for value in [0_u32, 1] {
             let mut bytes = golden();
             bytes[100..104].copy_from_slice(&value.to_le_bytes());
@@ -549,6 +568,35 @@ mod tests {
             }));
         }
         assert!(RenderSettings::parse(&golden()[..100]).is_err());
+    }
+    #[test]
+    fn spatial_only_diagnostic_defaults_off_has_exact_wire_and_preserves_transport() {
+        let defaults = RenderSettings::default();
+        assert!(!defaults.restir_spatial_only);
+        for value in [0_u32, 1] {
+            let mut bytes = golden();
+            bytes[104..108].copy_from_slice(&value.to_le_bytes());
+            let parsed = RenderSettings::parse(&bytes).unwrap();
+            assert_eq!(parsed.restir_spatial_only, value == 1);
+            for integrator in [Integrator::PathTrace, Integrator::RestirPt] {
+                for mode in [RenderMode::Realtime, RenderMode::Offline] {
+                    let before = RenderSettings {
+                        mode,
+                        integrator,
+                        ..defaults
+                    };
+                    let after = RenderSettings {
+                        restir_spatial_only: value == 1,
+                        ..before
+                    };
+                    assert!(before.transport_matches(after));
+                    assert!(after.transport_matches(before));
+                    assert_eq!(before.native_noisy_output, after.native_noisy_output);
+                    assert_eq!(before.offline_samples, after.offline_samples);
+                }
+            }
+        }
+        assert!(RenderSettings::parse(&golden()[..104]).is_err());
     }
     #[test]
     fn saturation_defaults_and_explicit_legacy_wire_values() {

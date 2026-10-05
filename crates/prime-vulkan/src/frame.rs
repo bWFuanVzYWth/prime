@@ -1419,6 +1419,7 @@ impl Renderer {
             instances,
             accumulation,
             self.settings.mode == RenderMode::Realtime,
+            self.settings.restir_spatial_only,
             linear,
             jitter,
             anchor,

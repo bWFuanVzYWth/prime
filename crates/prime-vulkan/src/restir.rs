@@ -437,6 +437,7 @@ impl State {
         instances: u64,
         accumulation: u64,
         realtime: bool,
+        spatial_only: bool,
         linear: bool,
         jitter: [f32; 2],
         anchor: [f64; 3],
@@ -456,31 +457,36 @@ impl State {
             self.storage_cold(StorageCold::InputExtentChanged);
             self.scratch = Some(scratch);
         }
-        let mut previous = self.history.previous;
-        for i in 0..3 {
-            let start = 4 * i;
-            let position = f32::from_le_bytes(previous[start..start + 4].try_into().unwrap());
-            previous[start..start + 4].copy_from_slice(
-                &((f64::from(position) + self.history.anchor[i] - anchor[i]) as f32).to_le_bytes(),
-            );
-        }
         let scratch = self.scratch.as_ref().unwrap();
-        self.temporal_this_frame = realtime && self.history.valid;
+        // RA-014, docs/restir-adaptations.md: disable the whole temporal pass group on the
+        // host. Spatial still writes a complete result, so accepted bank/camera commits
+        // remain valid for immediate reuse when this diagnostic is switched off.
+        self.temporal_this_frame = realtime && !spatial_only && self.history.valid;
         self.dynamic_update_this_frame = self.temporal_this_frame
             && (self.lighting_changed || identity.revision != self.history.revision);
         let mut event = prime_diagnostics::scope("restir.history.frame");
         event.count("temporal", u64::from(self.temporal_this_frame));
+        event.count("spatial_only", u64::from(spatial_only));
         event.count("update", u64::from(self.dynamic_update_this_frame));
         event.count("revision", u64::from(identity.revision));
         event.count("accepted", u64::from(self.history.revision));
         let mut bytes = [0_u8; UNIFORM_BYTES as usize];
         bytes[440..448].copy_from_slice(&identity.quad_address.to_le_bytes());
         bytes[..128].copy_from_slice(&frame);
-        bytes[128..256].copy_from_slice(if self.temporal_this_frame {
-            &previous
+        if self.temporal_this_frame {
+            let mut previous = self.history.previous;
+            for i in 0..3 {
+                let start = 4 * i;
+                let position = f32::from_le_bytes(previous[start..start + 4].try_into().unwrap());
+                previous[start..start + 4].copy_from_slice(
+                    &((f64::from(position) + self.history.anchor[i] - anchor[i]) as f32)
+                        .to_le_bytes(),
+                );
+            }
+            bytes[128..256].copy_from_slice(&previous);
         } else {
-            &frame
-        });
+            bytes[128..256].copy_from_slice(&frame);
+        }
         for (target, value) in bytes[256..272].as_chunks_mut::<4>().0.iter_mut().zip([
             terrain_count,
             u32::from(self.temporal_this_frame),

@@ -7,7 +7,7 @@ import static java.lang.foreign.ValueLayout.*;
 
 public final class PrimeAbi {
     private PrimeAbi() {}
-    public static final int PRIME_ABI_VERSION = 14;
+    public static final int PRIME_ABI_VERSION = 15;
     public static final int PRIME_MAX_BATCH_BYTES = 268435456;
     public static final int PRIME_DIAGNOSTICS_ENABLED = 1;
     public static final int PRIME_DIAGNOSTICS_CAPTURE = 2;
@@ -271,7 +271,7 @@ public final class PrimeAbi {
     }
     public static final class PrimeSettings {
         private PrimeSettings() {}
-        public static final long SIZE = 108, ALIGN = 4;
+        public static final long SIZE = 112, ALIGN = 4;
         public static final MemoryLayout LAYOUT =
                 MemoryLayout
                         .structLayout(
@@ -293,7 +293,8 @@ public final class PrimeAbi {
                                 JAVA_INT.withName("frame_generation"),
                                 JAVA_INT.withName("light_sampling"),
                                 JAVA_INT.withName("integrator"),
-                                JAVA_INT.withName("ignore_global_history_resets"))
+                                JAVA_INT.withName("ignore_global_history_resets"),
+                                JAVA_INT.withName("restir_spatial_only"))
                         .withName("PrimeSettings");
         static {
             if (LAYOUT.byteSize() != SIZE || LAYOUT.byteAlignment() != ALIGN)
@@ -362,6 +363,9 @@ public final class PrimeAbi {
                         "ignore_global_history_resets")) != 104)
                 throw new ExceptionInInitializerError(
                         "PrimeSettings.ignore_global_history_resets offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("restir_spatial_only")) !=
+                108)
+                throw new ExceptionInInitializerError("PrimeSettings.restir_spatial_only offset");
         }
         public static MemorySegment header(MemorySegment value) {
             return value.asSlice(0L, 8);
@@ -515,6 +519,12 @@ public final class PrimeAbi {
         }
         public static void ignore_global_history_resets(MemorySegment value, int field) {
             value.set(JAVA_INT, 104L, field);
+        }
+        public static int restir_spatial_only(MemorySegment value) {
+            return value.get(JAVA_INT, 108L);
+        }
+        public static void restir_spatial_only(MemorySegment value, int field) {
+            value.set(JAVA_INT, 108L, field);
         }
     }
     public static final class PrimeVulkanHost {

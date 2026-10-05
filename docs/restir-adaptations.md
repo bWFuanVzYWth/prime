@@ -21,6 +21,7 @@
 | RA-011 | 保留且有近似边界：动态更新与介质 | 当前场景 temporal suffix update 重放缓存后缀，source integrand/weight 与源 MIS 顺序保留；不保存旧场景副本。prefix 显式携带入射介质，thick optical 由物理边界侧选 medium，opaque/physical-thin 沿源模型保留 incoming。连接使用 Prime 直线透射查询及两端安全偏移。任意动态 scene/proposal 更新、偏移裁短的吸收距离和物理 light PDF/query BSDF PDF 竞争不声明严格无偏。 | `bindings.slang`、`path.slang:restirUpdateSuffix`、`shift.slang`；mixed 自映射、cached-suffix 动态测试；开放边界见下文 |
 | RA-012 | 已退役：Sphere 专属适配与实验 | Sphere 未达到其声明的性能目标，生产采样器、法线状态、变体与专属测试退役。其 view-dependent NEE forced-emitter 分类和 mapped-RC 最后一跳竞争 PDF 强制刷新随之删除；TREE 没有这个 PMF 依赖，不保留额外后缀 Ray Query。Sphere C4 的 1-ULP 非等价候选及其他未验收实验撤回，不作为当前实现。 | 当前生产仅 TREE；历史性能、失败/通过 banks 与候选复盘保留在 ignored `artifacts`，不计为退役后验证 |
 | RA-013 | 保留：Prime 颜色顺序 | 真实源色与发光遵循 Prime working RGB/linear BT.709 合同。有限 NEE 的源顺序先在发光域乘 RGB 可见性再转换；BSDF emitter hit 延续原输运顺序。非对角颜色转换与彩色 Beer 不能随意交换。显示/曝光只在既定输出阶段执行。 | `scene.slang`、`shift.slang`、`restir_resolve.slang`；彩色介质、emitter/NEE、自映射与 RR guide 图像测试 |
+| RA-014 | 保留：仅空间复用诊断 | 默认关闭；开启时宿主跳过全部时间 workload/indirect/retrace/merge 及其队列清零和依赖，初始生成与空间重采样数学不变。空间输出、primary bank、相机、jitter 和身份水位仍按接受提交推进，关闭后可以直接复用最近的实际空间结果。复用原 scratch 和管线，无新增 shader 分支、变体、拷贝或完成等待；身份表继续维护，以保证退出诊断后的局部支持校验。此开关不改变 RR 历史和离线累积。 | `src/restir.rs`、`src/frame.rs`；`restir_tests::gpu_restir_spatial_only_ignores_past_and_resumes_accepted_spatial_history`、离线逐样本/批次对照 |
 
 ## 保留的上游结构
 

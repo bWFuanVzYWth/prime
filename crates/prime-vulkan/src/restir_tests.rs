@@ -310,6 +310,7 @@ fn gpu_restir_offline_batch_matches_sequential_fp32_for_each_light_sampler() {
     let mut sequential = renderer(config);
     let mut batched = renderer(RenderSettings {
         offline_samples: 3,
+        restir_spatial_only: true,
         ..config
     });
     {
@@ -322,6 +323,7 @@ fn gpu_restir_offline_batch_matches_sequential_fp32_for_each_light_sampler() {
         batched
             .configure(RenderSettings {
                 offline_samples: 3,
+                restir_spatial_only: true,
                 ..config
             })
             .unwrap();
@@ -620,6 +622,109 @@ fn temporal_snapshot_words(
         .map(|word| f32::from_le_bytes(*word))
         .collect();
     (reservoirs, linear)
+}
+
+#[test]
+#[ignore = "requires windowless Vulkan; spatial-only output independence and allocation-free toggle"]
+fn gpu_restir_spatial_only_ignores_past_and_resumes_accepted_spatial_history() {
+    let config = RenderSettings {
+        bounces: 3,
+        auto_exposure_compensation: 0.1,
+        ..settings(RenderMode::Realtime)
+    };
+    let fixture = illuminated_scene(1);
+    let camera = camera();
+    let mut warmed = renderer(config);
+    for sequence in 0..3 {
+        warmed.render(&fixture, &camera, 31, 17, sequence).unwrap();
+    }
+    assert!(warmed.restir.as_ref().unwrap().temporal_this_frame);
+    assert!(
+        temporal_snapshot(&warmed, 31, 17)
+            .0
+            .iter()
+            .any(|record| record[0] > 4.)
+    );
+    let generate = warmed
+        .pipeline
+        .as_ref()
+        .unwrap()
+        .restir
+        .as_ref()
+        .unwrap()
+        .generate;
+    let storage = warmed.restir.as_ref().unwrap().history_for_test().0.buffer;
+    let queue = warmed.restir.as_ref().unwrap().queue_buffer();
+    let spatial = RenderSettings {
+        restir_spatial_only: true,
+        ignore_global_history_resets: true,
+        ..config
+    };
+    warmed.configure(spatial).unwrap();
+    let mut fresh = renderer(spatial);
+    for sequence in [10, 11] {
+        let before_bank = warmed.restir.as_ref().unwrap().accepted_history().1;
+        let actual = warmed.render(&fixture, &camera, 31, 17, sequence).unwrap();
+        let expected = fresh.render(&fixture, &camera, 31, 17, sequence).unwrap();
+        complete_rgba(&actual, 31, 17);
+        complete_rgba(&expected, 31, 17);
+        // Compare the estimator before the independent wall-clock exposure history.
+        let (actual_reservoirs, actual_linear) = temporal_snapshot_words(&warmed, 31, 17);
+        let (expected_reservoirs, expected_linear) = temporal_snapshot_words(&fresh, 31, 17);
+        assert_eq!(actual_reservoirs, expected_reservoirs);
+        assert_eq!(actual_linear, expected_linear);
+        assert!(
+            actual_reservoirs
+                .iter()
+                .all(|record| f32::from_bits(record[0]) <= 4.)
+        );
+        assert!(
+            actual_reservoirs
+                .iter()
+                .any(|record| f32::from_bits(record[0]) > 1.)
+        );
+        let state = warmed.restir.as_ref().unwrap();
+        assert!(!state.temporal_this_frame && !state.dynamic_update_this_frame);
+        assert_eq!(state.accepted_history(), (true, before_bank ^ 1));
+        assert_eq!(state.history_for_test().0.buffer, storage);
+        assert_eq!(state.queue_buffer(), queue);
+        assert_eq!(
+            warmed
+                .pipeline
+                .as_ref()
+                .unwrap()
+                .restir
+                .as_ref()
+                .unwrap()
+                .generate,
+            generate
+        );
+    }
+    warmed.configure(config).unwrap();
+    warmed.render(&fixture, &camera, 31, 17, 12).unwrap();
+    assert!(warmed.restir.as_ref().unwrap().temporal_this_frame);
+    assert!(
+        temporal_snapshot(&warmed, 31, 17)
+            .0
+            .iter()
+            .any(|record| record[0] > 4.)
+    );
+    assert_eq!(
+        warmed.restir.as_ref().unwrap().history_for_test().0.buffer,
+        storage
+    );
+    assert_eq!(warmed.restir.as_ref().unwrap().queue_buffer(), queue);
+    assert_eq!(
+        warmed
+            .pipeline
+            .as_ref()
+            .unwrap()
+            .restir
+            .as_ref()
+            .unwrap()
+            .generate,
+        generate
+    );
 }
 
 #[test]

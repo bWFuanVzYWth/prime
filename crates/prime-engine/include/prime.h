@@ -1,7 +1,7 @@
 #ifndef PRIME_PT_H
 #define PRIME_PT_H
 #include <stdint.h>
-#define PRIME_ABI_VERSION 14
+#define PRIME_ABI_VERSION 15
 #define PRIME_MAX_BATCH_BYTES 268435456
 #define PRIME_DIAGNOSTICS_ENABLED 1
 #define PRIME_DIAGNOSTICS_CAPTURE 2
@@ -92,6 +92,9 @@ typedef struct PrimeSettings {
     /* Diagnostic only, default 0: suppress explicit global ReSTIR/RR history resets.
        Does not bypass incompatible or newly allocated history resources. */
     uint32_t ignore_global_history_resets;
+    /* Diagnostic only, default 0: disable realtime ReSTIR temporal reuse.
+       Spatial reuse remains enabled; RR history and offline accumulation are independent. */
+    uint32_t restir_spatial_only;
 } PrimeSettings;
 
 typedef struct PrimeVulkanHost {

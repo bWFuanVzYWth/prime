@@ -69,7 +69,7 @@ Windows 构建的 Streamline C++ 静态桥接需要 MSVC C++ 工具链；Streaml
 
 ## ABI 生成与验证
 
-公共 C ABI 为 v14，Minecraft 源 schema 为 v7，配置文件 schema 为 v10。JAR 与 DLL 必须配套重建；旧字节入口不再导出。只修改 `crates/prime-engine/include/prime.h` / `prime_mc.h`，由头文件生成 `prime_abi/src/generated.rs` 和 Java `PrimeAbi`，不要手工维护三套布局。
+公共 C ABI 为 v15，Minecraft 源 schema 为 v7，配置文件 schema 为 v11。JAR 与 DLL 必须配套重建；旧字节入口不再导出。只修改 `crates/prime-engine/include/prime.h` / `prime_mc.h`，由头文件生成 `prime_abi/src/generated.rs` 和 Java `PrimeAbi`，不要手工维护三套布局。
 
 ```powershell
 python scripts/generate-abi.py --probe clang
@@ -126,7 +126,7 @@ cargo test -p prime_engine --no-default-features --lib --locked
 
 对比时固定同一世界副本、相机/移动路线、种子、预算、原生1920×1080、RR/OMM与硬件，分别录制加载/更新及停止更新后的稳态窗口，保留离群帧。当前JSON `cap.start`/`cfg` 的 `ls=1` 表示功率距离Tree；旧记录的0/2分别表示退役Grid/TreeSphere，不能直接混作相同proposal。按实际积分器、配置与冻结产物划分窗口，分别解释 `lt.*`、总static/提取、GPU阶段与整帧时间；选光微基准或单场景收益不能外推生产质量与帧率。
 
-诊断组的“忽略所有全局重置”默认关闭，用于对照活动游戏/暂停界面历史；日志明确 event/action/valid，性能 JSON 可进一步区分 temporal、suffix update 和身份表局部支持变化。实际存储重建仍冷启动。“原生分辨率含噪输出”使用正向字段 `native_noisy_output`：开启时禁用降噪并按原生分辨率输出，关闭时允许 RR 和所选 DLSS 档位，默认关闭。它与“实时输出视图”的内部含噪颜色诊断独立，后者保持实际内部输入尺寸后预览；RR Performance 下是半宽半高输入。旧 v8/v9 的 `render.ray_reconstruction` 在迁移时取反，保持原有输出行为。
+诊断组的“忽略所有全局重置”默认关闭，用于对照活动游戏/暂停界面历史；日志明确 event/action/valid，性能 JSON 可进一步区分 temporal、suffix update 和身份表局部支持变化。实际存储重建仍冷启动。“原生分辨率含噪输出”使用正向字段 `native_noisy_output`：开启时禁用降噪并按原生分辨率输出，关闭时允许 RR 和所选 DLSS 档位，默认关闭。它与“实时输出视图”的内部含噪颜色诊断独立，后者保持实际内部输入尺寸后预览；RR Performance 下是半宽半高输入。旧 v8/v9 的 `render.ray_reconstruction` 在迁移时取反，保持原有输出行为。“ReSTIR 仅空间复用”默认关闭，开启时跳过全部时间重采样阶段，保留每帧初始采样和空间复用；不禁用 DLSS RR 历史，也不改变离线累积。关闭后可立即使用上一帧实际空间结果恢复时间复用，切换不重建管线或 scratch。配置字段为 `diagnostics.restir_spatial_only`，受支持旧配置迁移为 false。
 
 ### 用户手动检查重点
 
@@ -317,7 +317,7 @@ cargo test -p prime_vulkan --features shader-tests --lib --locked pbr_texture_te
 
 实例相关 GPU 测试覆盖局部原型、仿射/颜色/UV、增删及在途资源退休。Java 的 `cpuSmoke` 在真实 Fabric/Mixin 类上验证源路由、标准模型、下游截断与 target 创建/缩放。测试启动器在 preLaunch 退出，不调用游戏 main、不创建窗口或设备。地形原型通过真实 MC palette/模型字段、FFM 和独立 CPU native 库验证64段完整性、重复 dirty 合并、相同输入不重编译、空段清除与未知模型默认值；opaque 模型回调会主动抛错以证明未被调用。该入口需要 Rust，构建库放在 `build/source-cpu-native`，不会覆盖游戏使用的 release DLL。人工窗口不能代替实际视距或游戏验证。
 
-地形分帧改动需同时验证 CPU 编译和后段 planner 的每阶段 N 格上限，覆盖 1/8/128、无新源时继续清空积压、重复编辑读取最新源、公平轮转、卸载/epoch 取消、负坐标、重定位和失败不确认；最终几何需与无上限参考一致。资源目录同 epoch 整代换新和普通纹理身份撤销须立即撤旧，后续按预算恢复且不混用旧 UV/材质。后段 GPU 验证另覆盖真实几何内容变化重置离线累积、等价 OMM 重建保留累积、OMM 旧覆盖的实例禁用与在途资源寿命。设置文件使用独立 schema v10，v8/v9 按显式规则迁移，其他不支持的版本回退默认；FFM 使用108字节 `PrimeSettings`，公共 ABI 为 v14，JAR 与 DLL 必须同次构建。
+地形分帧改动需同时验证 CPU 编译和后段 planner 的每阶段 N 格上限，覆盖 1/8/128、无新源时继续清空积压、重复编辑读取最新源、公平轮转、卸载/epoch 取消、负坐标、重定位和失败不确认；最终几何需与无上限参考一致。资源目录同 epoch 整代换新和普通纹理身份撤销须立即撤旧，后续按预算恢复且不混用旧 UV/材质。后段 GPU 验证另覆盖真实几何内容变化重置离线累积、等价 OMM 重建保留累积、OMM 旧覆盖的实例禁用与在途资源寿命。设置文件使用独立 schema v11，v8/v9/v10 按显式规则迁移，其他不支持的版本回退默认；FFM 使用112字节 `PrimeSettings`，公共 ABI 为 v15，JAR 与 DLL 必须同次构建。
 
 纹理撤销用例分别验证动态owner退休和全局资源常驻：普通区块卸载不能退休terrain sprite，world reset保留资源像素及canonical目录；真实资源重载原子替换整代，旧CPU/GPU读者持有必要引用直到各自消费结束。相位未变动画复用已发布纹理；变化相位仍需验证通道插值结果。全局资源准备不等于所有初始化工作均已移出帧内，须单独测加载和重载成本。
 

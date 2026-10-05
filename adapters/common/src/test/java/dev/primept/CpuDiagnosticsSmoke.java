@@ -15,13 +15,15 @@ public final class CpuDiagnosticsSmoke {
                                    .withNativeNoisyOutput(true)
                                    .withLightSampling(
                                            dev.primept.settings.RenderSettings.LightSampling.TREE)
-                                   .withIgnoreGlobalHistoryResets(true);
+                                   .withIgnoreGlobalHistoryResets(true)
+                                   .withRestirSpatialOnly(true);
             bridge.configure(settings, false, dev.primept.settings.RenderSettings.View.OUTPUT);
             bridge.diagnosticsConfigure(3);
             bridge.diagnosticsFrame(91);
-            bridge.configure(
-                    settings.withIgnoreGlobalHistoryResets(false).withNativeNoisyOutput(false),
-                    false, dev.primept.settings.RenderSettings.View.NOISY_COLOR);
+            bridge.configure(settings.withIgnoreGlobalHistoryResets(false)
+                                     .withNativeNoisyOutput(false)
+                                     .withRestirSpatialOnly(false),
+                             false, dev.primept.settings.RenderSettings.View.NOISY_COLOR);
             long before = bridge.diagnosticsClock();
             bridge.reset(2);
             String captured = bridge.diagnosticsRead();
@@ -32,6 +34,8 @@ public final class CpuDiagnosticsSmoke {
             verifyNativeAttribute(captured, "ls", 1);
             verifyNativeAttribute(captured, "ignore_global_resets", 1);
             verifyNativeAttribute(captured, "ignore_global_resets", 0);
+            verifyNativeAttribute(captured, "restir_spatial_only", 1);
+            verifyNativeAttribute(captured, "restir_spatial_only", 0);
             verifyNativeSettings(captured, 1, 0);
             verifyNativeSettings(captured, 0, 1);
             bridge.diagnosticsConfigure(0);
@@ -102,7 +106,7 @@ public final class CpuDiagnosticsSmoke {
                 throw new AssertionError("First native owner must inherit the current Java frame");
         }
         System.out.println(
-                "PRIME_CPU_DIAGNOSTICS_FFM_OK: ABI14 108B settings, native-noisy true/false with inverse RR and independent view consumed by native, power-distance Tree ID1, global-reset bool true/false captured, real reset and transport spans/frame, final tail, UTF-8, retained clock and owner thread; no GPU");
+                "PRIME_CPU_DIAGNOSTICS_FFM_OK: ABI15 112B settings, native-noisy true/false with inverse RR and independent view consumed by native, power-distance Tree ID1, global-reset and spatial-only bools true/false captured, real reset and transport spans/frame, final tail, UTF-8, retained clock and owner thread; no GPU");
     }
 
     private record Event(long id, long parent, long frame, int name, long start, long duration,

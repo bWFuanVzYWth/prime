@@ -340,6 +340,18 @@ public final class SettingsCpuSmoke {
                                                            "ignoreGlobalHistoryResets")
                                     .get(owner);
                     var resetButton = (CycleButton<Boolean>)list.findOption(ignoreGlobalResets);
+                    var spatialOnly = (OptionInstance<Boolean>)field(PrimeVideoOptions.class,
+                                                                     "restirSpatialOnly")
+                                              .get(owner);
+                    var spatialButton = (CycleButton<Boolean>)list.findOption(spatialOnly);
+                    check(!spatialOnly.get() && !PrimeClient.settings().restirSpatialOnly(),
+                          "Spatial-only ReSTIR diagnostic defaults off");
+                    check(translations.containsKey("primept.settings.restir_spatial_only") &&
+                                  translations.containsKey(
+                                          "primept.settings.restir_spatial_only.tooltip"),
+                          "Spatial-only ReSTIR diagnostic is translated");
+                    check(!spatialButton.active,
+                          "Spatial-only control is inactive for the path-trace integrator");
                     check(!ignoreGlobalResets.get(),
                           "Global history reset diagnostic is off by default");
                     check(translations.containsKey(
@@ -390,6 +402,8 @@ public final class SettingsCpuSmoke {
                           "Frozen OMM control stays available");
                     check(list.findOption(ignoreGlobalResets).active,
                           "The reset diagnostic remains available while frozen");
+                    check(!spatialButton.active,
+                          "Spatial-only ReSTIR diagnostic does not control offline accumulation");
                     check(list.findOption(terrainBatches).active,
                           "Frozen terrain scheduling control stays available");
                     check(!list.findOption(controls.get(RenderSettings.Control.STARS)).active,
@@ -455,6 +469,32 @@ public final class SettingsCpuSmoke {
                         check(list.findOption(nativeNoisyOutput).active &&
                                       list.findOption(dlssQuality).active,
                               "Realtime reconstruction controls become available");
+                        var originalSettings = PrimeClient.settings();
+                        PrimeClient.updateSettings(
+                                originalSettings.withRenderer(RenderSettings.Renderer.RESTIR_PT));
+                        screen.tick();
+                        check(spatialButton.active,
+                              "Spatial-only control is active for realtime ReSTIR");
+                        for (boolean enabled : new boolean[] {true, false}) {
+                            spatialButton.onPress(new net.minecraft.client.input.KeyEvent(
+                                    InputConstants.KEY_RETURN, 0, 0));
+                            check(spatialOnly.get() == enabled &&
+                                          PrimeClient.settings().restirSpatialOnly() == enabled &&
+                                          PrimeClient.settings().nativeNoisyOutput() ==
+                                                  originalSettings.nativeNoisyOutput() &&
+                                          PrimeClient.settings().dlssQuality() ==
+                                                  originalSettings.dlssQuality() &&
+                                          !offline.active() && !offline.requested(),
+                                  "Actual spatial-only button preserves reconstruction and offline controls");
+                            check(SettingsFile.decode(SettingsFile.encode(PrimeClient.settings()))
+                                          .settings()
+                                          .equals(PrimeClient.settings()),
+                                  "Spatial-only callback persists the exact setting");
+                        }
+                        PrimeClient.updateSettings(originalSettings);
+                        screen.tick();
+                        check(!spatialButton.active,
+                              "Path tracing leaves the spatial-only diagnostic inactive");
                         for (var control : List.of(RenderSettings.Control.STARS,
                                                    RenderSettings.Control.FRAME_GENERATION)) {
                             for (int value :
@@ -646,6 +686,8 @@ public final class SettingsCpuSmoke {
         var globalResets =
                 (OptionInstance<?>)field(PrimeVideoOptions.class, "ignoreGlobalHistoryResets")
                         .get(owner);
+        var spatialOnly =
+                (OptionInstance<?>)field(PrimeVideoOptions.class, "restirSpatialOnly").get(owner);
         boolean diagnostics = false;
         for (int i = 0; i < vanilla; ++i) {
             Object row = list.children().get(i);
@@ -657,7 +699,8 @@ public final class SettingsCpuSmoke {
                                                       .getString());
             if (((ContainerEventHandler)row).children().contains(list.findOption(omm)) ||
                 ((ContainerEventHandler)row).children().contains(list.findOption(rr)) ||
-                ((ContainerEventHandler)row).children().contains(list.findOption(globalResets)))
+                ((ContainerEventHandler)row).children().contains(list.findOption(globalResets)) ||
+                ((ContainerEventHandler)row).children().contains(list.findOption(spatialOnly)))
                 check(diagnostics, "RR and OMM belong only to the diagnostics group");
         }
         check(list.findOption(Minecraft.getInstance().options.renderDistance()) != null,

@@ -46,6 +46,8 @@
   "primept.settings.native_noisy_output": "Native-resolution Noisy Output",
   "primept.settings.ignore_global_history_resets": "Ignore All Global Resets",
   "primept.settings.ignore_global_history_resets.tooltip": "Diagnostic, off by default. Retain compatible ReSTIR and ray reconstruction history across explicit global reset requests. Local rejection and unavailable or incompatible history resources still apply.",
+  "primept.settings.restir_spatial_only": "ReSTIR Spatial Reuse Only",
+  "primept.settings.restir_spatial_only.tooltip": "Diagnostic, off by default. Disable realtime ReSTIR temporal reuse for comparison while keeping spatial reuse. Does not affect DLSS ray reconstruction history or offline accumulation.",
   "primept.settings.native_noisy_output.tooltip": "On disables denoising and outputs native-resolution noisy color; off enables NVIDIA Streamline ray reconstruction with preset F. Requires a compatible NVIDIA RTX GPU and driver; unavailable devices use noisy output. Offline accumulation remains native resolution. The separate noisy-color diagnostic view shows the actual internal reconstruction input.",
   "primept.settings.dlss_quality": "DLSS Quality",
   "primept.settings.dlss_quality.tooltip": "Default Performance renders half the output width and height (2× upscaling). Quality and Balanced use more input pixels; Ultra Performance uses fewer. DLAA keeps native resolution. Realtime reconstruction only.",

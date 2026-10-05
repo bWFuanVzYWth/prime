@@ -1,4 +1,4 @@
-# FFM ABI v14
+# FFM ABI v15
 
 Java 适配器与 Rust 核心作为同一构建产物配套使用。公共 ABI 为14，Minecraft 源 schema 为7，设置文件 schema 为10；版本用于边界拒绝，不承诺不同发布之间的二进制兼容。两版适配器共享同次构建的核心，JAR 和引擎不能混用。
 
@@ -171,7 +171,7 @@ flags 的 bit0 表示已在这台逻辑设备启用 `VK_EXT_opacity_micromap` �
 
 ## 设置结构与文件 schema
 
-`prime_configure(handle,&settings)` 借用108 B `PrimeSettings`，header使用公共ABI v14。`native_noisy_output` 位于64字节偏移，1为禁用降噪并使用原生分辨率含噪输出，0为默认允许RR；此字段与旧v13的RR布尔语义相反，因此拒绝旧ABI。`light_sampling` 位于96字节偏移，1为功率距离Tree，旧0/2均规范化到Tree，其他值拒绝；生产仅保留Tree，字段迁移不重建管线或重置历史。`integrator` 位于100字节偏移，0为PathTrace、1为RestirPt，其他值拒绝。末字段`ignore_global_history_resets`位于104字节偏移，0为默认关闭、1为忽略显式全局历史重置的诊断，其他值拒绝。JAR与DLL须配套重建。磁盘`primept.properties`为schema v10，当前采样值为`TREE`，旧`GRID`/`TREE_SPHERE`在受支持版本中迁移到Tree；v8/v9定向迁移旧`render.ray_reconstruction`，取反写入`diagnostics.native_noisy_output`，v8缺少的忽略重置字段补false，其余合法字段保留。更旧版本或不完整字段仍按严格规则整份回退默认；内部配置包为v10/104B，不作为公共C ABI的替代。
+`prime_configure(handle,&settings)` 借用112 B `PrimeSettings`，header使用公共ABI v15。`native_noisy_output` 位于64字节偏移，1为禁用降噪并使用原生分辨率含噪输出，0为默认允许RR；此字段与旧v13的RR布尔语义相反，因此拒绝旧ABI。`light_sampling` 位于96字节偏移，1为功率距离Tree，旧0/2均规范化到Tree，其他值拒绝；生产仅保留Tree，字段迁移不重建管线或重置历史。`integrator` 位于100字节偏移，0为PathTrace、1为RestirPt，其他值拒绝。`ignore_global_history_resets`位于104字节偏移，0为默认关闭、1为忽略显式全局历史重置的诊断，其他值拒绝。末字段`restir_spatial_only`位于108字节偏移，0为默认关闭、1为仅执行ReSTIR初始生成和空间重采样，其他值拒绝；不改变RR历史或离线累积。JAR与DLL须配套重建。磁盘`primept.properties`为schema v11，当前采样值为`TREE`，旧`GRID`/`TREE_SPHERE`在受支持版本中迁移到Tree；v8/v9定向迁移旧`render.ray_reconstruction`，取反写入`diagnostics.native_noisy_output`，v8缺少的忽略重置字段补false，其余合法字段保留。更旧版本或不完整字段仍按严格规则整份回退默认；受支持的v8/v9/v10迁移时新增的`diagnostics.restir_spatial_only`补false。内部配置包为v11/108B，不作为公共C ABI的替代。
 
 | 字段 | 范围/语义 |
 | --- | --- |

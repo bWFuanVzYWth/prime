@@ -9,7 +9,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Properties;
 
-/** Current schema; v8/v9 retain settings while migrating the inverse noisy-output control. */
+/** Current schema; v8/v9 retain inverse noisy-output migration, v8-v10 default spatial-only off. */
 public final class SettingsFile {
     public record Loaded(RenderSettings settings, String resetReason) {}
     private SettingsFile() {}
@@ -30,7 +30,9 @@ public final class SettingsFile {
             String version = properties.getProperty("version");
             boolean beforeResetDiagnostic = "8".equals(version);
             boolean legacyReconstruction = beforeResetDiagnostic || "9".equals(version);
-            if (!legacyReconstruction && !Integer.toString(RenderSettings.VERSION).equals(version))
+            boolean beforeSpatialDiagnostic = legacyReconstruction || "10".equals(version);
+            if (!beforeSpatialDiagnostic &&
+                !Integer.toString(RenderSettings.VERSION).equals(version))
                 return new Loaded(RenderSettings.defaults(),
                                   "Settings version mismatch; defaults restored");
             var renderer = RenderSettings.Renderer.fromKey(properties.getProperty("renderer"));
@@ -49,12 +51,17 @@ public final class SettingsFile {
             if (!"true".equals(ignoreGlobalResets) && !"false".equals(ignoreGlobalResets))
                 throw new IllegalArgumentException(
                         "Invalid diagnostics.ignore_global_history_resets");
+            String spatialOnly = properties.getProperty("diagnostics.restir_spatial_only",
+                                                        beforeSpatialDiagnostic ? "false" : null);
+            if (!"true".equals(spatialOnly) && !"false".equals(spatialOnly))
+                throw new IllegalArgumentException("Invalid diagnostics.restir_spatial_only");
             var result =
                     RenderSettings.defaults()
                             .withRenderer(renderer)
                             .withOpacityMicromap(Boolean.parseBoolean(opacityMicromap))
                             .withNativeNoisyOutput(nativeNoisyOutput)
                             .withIgnoreGlobalHistoryResets(Boolean.parseBoolean(ignoreGlobalResets))
+                            .withRestirSpatialOnly(Boolean.parseBoolean(spatialOnly))
                             .withDlssQuality(RenderSettings.DlssQuality.valueOf(
                                     properties.getProperty("render.dlss_quality", "")))
                             .withLightSampling(RenderSettings.LightSampling.fromKey(
@@ -76,7 +83,8 @@ public final class SettingsFile {
                 "\nrender.dlss_quality=" + settings.dlssQuality().name() +
                 "\nrender.light_sampling=" + settings.lightSampling().name() +
                 "\ndiagnostics.ignore_global_history_resets=" +
-                settings.ignoreGlobalHistoryResets() + "\n");
+                settings.ignoreGlobalHistoryResets() +
+                "\ndiagnostics.restir_spatial_only=" + settings.restirSpatialOnly() + "\n");
         for (var control : RenderSettings.Control.values())
             text.append(control.key).append('=').append(settings.value(control)).append('\n');
         return text.toString();
