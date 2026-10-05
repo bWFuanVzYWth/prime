@@ -1,5 +1,6 @@
 //! CPU source support for cached coverage/coating leaves. OMM union proofs are not
 //! proofs that the currently sampled base texel still selects the same leaf.
+//! Prime identity/support adaptation: RA-009 in docs/restir-adaptations.md.
 use prime_scene::Texture;
 use std::{collections::BTreeSet, sync::Arc};
 
@@ -25,26 +26,69 @@ pub(crate) fn base_sample_same(a: &Texture, b: &Texture) -> bool {
 
 // The caller validates complete current/next membership before publishing a Texture.
 // Scan only immutable sprite windows, once per changed family, never animation ticks.
-pub(crate) fn constant_family_alpha(texture: &Texture) -> Option<u8> {
-    let region = texture.region?;
-    let sampling = texture.sampling.as_ref()?;
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+pub(crate) enum FamilyAlpha {
+    #[default]
+    Unknown,
+    Constant(u8),
+    // The mask may vary spatially, but every complete family frame has the same
+    // alpha at each local texel. This does not equate unrelated pixel families.
+    Invariant,
+}
+
+pub(crate) fn family_alpha(texture: &Texture) -> FamilyAlpha {
+    let (Some(region), Some(sampling)) = (texture.region, texture.sampling.as_ref()) else {
+        return FamilyAlpha::Unknown;
+    };
     if sampling.coverage_frames.is_empty() {
-        return None;
+        return FamilyAlpha::Unknown;
     }
     let first = sampling.coverage_frames[0];
-    let alpha =
+    let constant =
         texture.pixels[(first[1] as usize * texture.width as usize + first[0] as usize) * 4 + 3];
+    let mut uniform = true;
     for &[x, y] in sampling.coverage_frames.iter() {
-        for row in y as usize..y as usize + region[3] as usize {
-            let start = (row * texture.width as usize + x as usize) * 4 + 3;
+        for row in 0..region[3] as usize {
+            let start = ((y as usize + row) * texture.width as usize + x as usize) * 4 + 3;
+            let reference =
+                ((first[1] as usize + row) * texture.width as usize + first[0] as usize) * 4 + 3;
             for column in 0..region[2] as usize {
-                if texture.pixels[start + column * 4] != alpha {
-                    return None;
+                let alpha = texture.pixels[start + column * 4];
+                if alpha != texture.pixels[reference + column * 4] {
+                    return FamilyAlpha::Unknown;
                 }
+                uniform &= alpha == constant;
             }
         }
     }
-    Some(alpha)
+    if uniform {
+        FamilyAlpha::Constant(constant)
+    } else {
+        FamilyAlpha::Invariant
+    }
+}
+
+#[cfg(test)]
+fn constant_family_alpha(texture: &Texture) -> Option<u8> {
+    match family_alpha(texture) {
+        FamilyAlpha::Constant(alpha) => Some(alpha),
+        _ => None,
+    }
+}
+
+pub(crate) fn family_support_same(
+    a: &Texture,
+    b: &Texture,
+    a_alpha: FamilyAlpha,
+    b_alpha: FamilyAlpha,
+    same_family: bool,
+) -> bool {
+    let constant = |proof| match proof {
+        FamilyAlpha::Constant(alpha) => Some(alpha),
+        _ => None,
+    };
+    base_support_same(a, b, constant(a_alpha), constant(b_alpha))
+        || same_family && a_alpha != FamilyAlpha::Unknown && a_alpha == b_alpha
 }
 
 pub(crate) fn base_support_same(
@@ -178,6 +222,54 @@ mod tests {
         current = source.clone();
         current.pixels = vec![1, 2, 3, 0, 10, 20, 30, 255, 90, 80, 70, 128, 4, 5, 6, 0].into();
         assert_eq!(constant_family_alpha(&current), None);
+    }
+
+    #[test]
+    fn invariant_nonuniform_mask_accepts_phase_blend_but_not_replacement_or_alpha_change() {
+        let mut source = animated();
+        source.width = 6;
+        source.height = 2;
+        source.region = Some([1, 0, 2, 2]);
+        let sampling = Arc::make_mut(source.sampling.as_mut().unwrap());
+        sampling.coverage_frames = vec![[1, 0], [4, 0]].into();
+        sampling.next = [4, 0];
+        let mut pixels = vec![0; 6 * 2 * 4];
+        for (frame, x) in [1_usize, 4].into_iter().enumerate() {
+            for (texel, alpha) in [0, 255, 128, 64].into_iter().enumerate() {
+                let index = ((texel / 2) * 6 + x + texel % 2) * 4;
+                pixels[index..index + 4].copy_from_slice(&[10 + frame as u8 * 90, 20, 30, alpha]);
+            }
+        }
+        source.pixels = pixels.into();
+        source.validate().unwrap();
+        assert_eq!(family_alpha(&source), FamilyAlpha::Invariant);
+        let mut current = source.clone();
+        current.region = Some([4, 0, 2, 2]);
+        let sampling = Arc::make_mut(current.sampling.as_mut().unwrap());
+        sampling.next = [1, 0];
+        sampling.blend = 0.625;
+        current.validate().unwrap();
+        assert!(!base_sample_same(&source, &current));
+        let proof = family_alpha(&source);
+        assert!(family_support_same(&source, &current, proof, proof, true));
+        // Each family being invariant is not proof that unrelated families
+        // select the same leaf. Replacement must take the unknown fallback.
+        current.pixels = current.pixels.to_vec().into();
+        assert_eq!(family_alpha(&current), proof);
+        assert!(!family_support_same(&source, &current, proof, proof, false));
+        let mut changed = current.pixels.to_vec();
+        changed[(6 + 4) * 4 + 3] = 129;
+        current.pixels = changed.into();
+        assert_eq!(family_alpha(&current), FamilyAlpha::Unknown);
+        assert!(!family_support_same(
+            &source,
+            &current,
+            proof,
+            family_alpha(&current),
+            false,
+        ));
+        Arc::make_mut(current.sampling.as_mut().unwrap()).coverage_frames = Arc::from([]);
+        assert_eq!(family_alpha(&current), FamilyAlpha::Unknown);
     }
 
     #[test]

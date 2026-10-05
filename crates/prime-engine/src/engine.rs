@@ -167,7 +167,11 @@ impl Engine {
         span.count("bounces", u64::from(self.settings.bounces));
         span.count("samples", u64::from(self.settings.offline_samples));
         span.count("seed", u64::from(self.settings.seed));
-        span.count("rr", u64::from(self.settings.ray_reconstruction));
+        span.count("rr", u64::from(!self.settings.native_noisy_output));
+        span.count(
+            "native_noisy_output",
+            u64::from(self.settings.native_noisy_output),
+        );
         span.count("rr_q", self.settings.reconstruction_quality as u64);
         span.count("fg", u64::from(self.settings.frame_generation));
         span.count("omm", u64::from(self.settings.opacity_micromap));
@@ -261,8 +265,7 @@ impl Engine {
             None
         };
         if let Some((_, transport)) = &mut frozen {
-            // A sampling proposal is a renderer setting, not frozen source/lighting state.
-            transport.light_sampling = settings.light_sampling;
+            // The renderer can change while source/lighting state remains frozen.
             transport.integrator = settings.integrator;
         }
         #[cfg(feature = "vulkan")]
@@ -734,32 +737,6 @@ mod tests {
         assert_eq!(engine.settings.exposure, 2.0);
         assert_eq!(engine.astronomy.direction(0.), frozen_sun);
         assert_eq!(engine.frozen_frame.unwrap().1, RenderSettings::default());
-        for method in [
-            prime_scene::settings::LightSampling::TreeSphere,
-            prime_scene::settings::LightSampling::Tree,
-        ] {
-            engine
-                .configure(RenderSettings {
-                    light_sampling: method,
-                    ..engine.settings
-                })
-                .unwrap();
-            let (pose, transport) = engine.frozen_frame.unwrap();
-            assert_eq!(pose.epoch, frame.epoch);
-            assert_eq!(pose.world_position, frame.world_position);
-            assert_eq!(pose.solar_hour_angle, frame.solar_hour_angle);
-            assert_eq!(pose.camera, frame.camera);
-            assert_eq!(
-                (pose.width, pose.height, pose.sample_index),
-                (frame.width, frame.height, frame.sample_index)
-            );
-            assert_eq!(transport.light_sampling, method);
-            assert_eq!(transport.bounces, RenderSettings::default().bounces);
-            assert_eq!(transport.sky, RenderSettings::default().sky);
-            assert_eq!(engine.effective_frame(&moved).camera, frame.camera);
-            assert_eq!(engine.astronomy.direction(0.), frozen_sun);
-            assert!(engine.check_live_source().is_err());
-        }
         for integrator in [
             prime_scene::settings::Integrator::RestirPt,
             prime_scene::settings::Integrator::PathTrace,

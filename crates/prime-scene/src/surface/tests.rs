@@ -1,5 +1,175 @@
 use super::*;
 
+fn disconnected_range_quads(
+    origin: f32,
+    rotation: usize,
+    reverse: bool,
+    rotated_uv: bool,
+    flags: u32,
+) -> Vec<SurfaceQuad> {
+    (0..2)
+        .flat_map(|y| {
+            (0..2).map(move |x| {
+                let [x, y] = [origin + x as f32, origin + y as f32];
+                let mut q = quad(x, y);
+                q.geometry.uvs = [[0., 0.], [1., 0.], [1., 1.], [0., 1.]];
+                if rotated_uv {
+                    q.geometry.uvs = q.geometry.uvs.map(|[u, v]| [v, 1. - u]);
+                }
+                q.geometry.flags = flags;
+                q.geometry.positions.rotate_left(rotation);
+                q.geometry.uvs.rotate_left(rotation);
+                if reverse {
+                    q.geometry.positions.reverse();
+                    q.geometry.uvs.reverse();
+                }
+                q
+            })
+        })
+        .collect()
+}
+
+fn assert_range_winding(face: &SurfaceFace, reverse: bool) {
+    for half in 0..2 {
+        let p = face.geometry.triangle(half).positions;
+        let area =
+            (p[1][0] - p[0][0]) * (p[2][1] - p[0][1]) - (p[1][1] - p[0][1]) * (p[2][0] - p[0][0]);
+        assert_eq!(area, if reverse { -4. } else { 4. });
+    }
+}
+
+#[test]
+fn disconnected_rectangle_edits_preserve_winding_uv_and_material() {
+    for (cutout, flags) in [(false, 0), (false, 1), (true, 1)] {
+        for reverse in [false, true] {
+            for rotated_uv in [false, true] {
+                let mut original = disconnected_range_quads(10., 0, reverse, rotated_uv, flags);
+                for q in &mut original {
+                    q.rule = SurfaceRule::Interface {
+                        negative: 7,
+                        positive: 11,
+                    };
+                }
+                let mut compiler = SurfaceCompiler::new();
+                compiler.set_cutout_squares(cutout);
+                let before = compiler.compile(1, &original).unwrap();
+                assert_eq!(before.quads.len(), 1, "the 2x2 input must really merge");
+                let mut incoming = disconnected_range_quads(0., 1, reverse, rotated_uv, flags);
+                for q in &mut incoming {
+                    q.rule = original[0].rule;
+                }
+                incoming.extend(original);
+                let after = compiler.compile(2, &incoming).unwrap();
+                assert_eq!(after.quads.len(), 2);
+                let old = &before.quads[0];
+                let current = after
+                    .quads
+                    .iter()
+                    .find(|face| face.geometry.positions.iter().all(|p| p[0] >= 10.))
+                    .unwrap();
+                assert_eq!(
+                    old, current,
+                    "disconnected edit changed source winding, UVs, material or numeric corners"
+                );
+                assert_eq!(current.media, [7, 11]);
+                assert_eq!(current.geometry.flags, flags);
+                assert_range_winding(current, reverse);
+                for (point, local) in [
+                    ([10.25, 10.375], [0.25, 0.375]),
+                    ([11.375, 11.625], [0.375, 0.625]),
+                ] {
+                    let expected = if rotated_uv {
+                        [local[1], 1. - local[0]]
+                    } else {
+                        local
+                    };
+                    assert_eq!(point_uv(current, point).unwrap(), expected);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn disconnected_resolved_rectangle_edits_preserve_optics_and_all_layer_maps() {
+    for mode in [
+        LayerMode::Bilateral,
+        LayerMode::OverlayFront,
+        LayerMode::OverlayBoth,
+    ] {
+        for reverse in [false, true] {
+            let faces = |origin, rotation| {
+                disconnected_range_quads(origin, rotation, reverse, false, 0)
+                    .into_iter()
+                    .map(|q| {
+                        let mut face = SurfaceFace::from_quad(q.geometry);
+                        face.media = [7, 11];
+                        face.optics = Some(Optics {
+                            negative: Medium::default(),
+                            positive: Medium {
+                                ior: 1.5,
+                                extinction: [0.125, 0.25, 0.5],
+                            },
+                            ior_textures: [Some(23), Some(31)],
+                            transmit: true,
+                            thin: false,
+                        });
+                        face.emission = Emission {
+                            radiance: [2., 1., 0.5],
+                            two_sided: true,
+                            textured: true,
+                        };
+                        face.detail = Some(Arc::new(SurfaceDetail {
+                            mode,
+                            layer: SurfaceLayer {
+                                colors: [[0.5, 0.25, 0.125, 0.75]; 4],
+                                uvs: face.geometry.uvs.map(|[u, v]| [v, 1. - u]),
+                                texture_id: 19,
+                                flags: 1,
+                                repeat: None,
+                                emission: Emission {
+                                    radiance: [0.125, 0.25, 0.5],
+                                    two_sided: false,
+                                    textured: true,
+                                },
+                            },
+                        }));
+                        face
+                    })
+                    .collect::<Vec<_>>()
+            };
+            let original = faces(10., 0);
+            let mut compiler = SurfaceCompiler::new();
+            let before = compiler.merge_resolved(original.clone()).unwrap();
+            assert_eq!(before.len(), 1, "the resolved 2x2 input must really merge");
+            let mut incoming = faces(0., 1);
+            incoming.extend(original);
+            let after = compiler.merge_resolved(incoming).unwrap();
+            assert_eq!(after.len(), 2);
+            let current = after
+                .iter()
+                .find(|face| face.geometry.positions.iter().all(|p| p[0] >= 10.))
+                .unwrap();
+            assert_eq!(&before[0], current, "resolved {mode:?} fields changed");
+            assert_range_winding(current, reverse);
+            let detail = current.detail.as_ref().unwrap();
+            let mut secondary = current.clone();
+            secondary.geometry.uvs = detail.layer.uvs;
+            secondary.repeat = detail.layer.repeat;
+            for (point, local) in [
+                ([10.25, 10.375], [0.25, 0.375]),
+                ([11.375, 11.625], [0.375, 0.625]),
+            ] {
+                assert_eq!(point_uv(current, point).unwrap(), local);
+                assert_eq!(
+                    point_uv(&secondary, point).unwrap(),
+                    [local[1], 1. - local[0]]
+                );
+            }
+        }
+    }
+}
+
 fn quad(x: f32, y: f32) -> SurfaceQuad {
     SurfaceQuad::from_closed(
         CompiledQuad {

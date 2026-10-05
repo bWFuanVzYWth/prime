@@ -11,16 +11,17 @@ public final class CpuDiagnosticsSmoke {
             bridge.reset(1);
             if (!bridge.cpuDiagnostics().contains("available=false"))
                 throw new AssertionError("Source submission cannot fabricate renderer timings");
-            var settings =
-                    dev.primept.settings.RenderSettings.defaults()
-                            .withLightSampling(
-                                    dev.primept.settings.RenderSettings.LightSampling.TREE_SPHERE)
-                            .withIgnoreGlobalHistoryResets(true);
+            var settings = dev.primept.settings.RenderSettings.defaults()
+                                   .withNativeNoisyOutput(true)
+                                   .withLightSampling(
+                                           dev.primept.settings.RenderSettings.LightSampling.TREE)
+                                   .withIgnoreGlobalHistoryResets(true);
             bridge.configure(settings, false, dev.primept.settings.RenderSettings.View.OUTPUT);
             bridge.diagnosticsConfigure(3);
             bridge.diagnosticsFrame(91);
-            bridge.configure(settings.withIgnoreGlobalHistoryResets(false), false,
-                             dev.primept.settings.RenderSettings.View.OUTPUT);
+            bridge.configure(
+                    settings.withIgnoreGlobalHistoryResets(false).withNativeNoisyOutput(false),
+                    false, dev.primept.settings.RenderSettings.View.NOISY_COLOR);
             long before = bridge.diagnosticsClock();
             bridge.reset(2);
             String captured = bridge.diagnosticsRead();
@@ -28,9 +29,11 @@ public final class CpuDiagnosticsSmoke {
                 !captured.contains("\"f\":91") || !captured.contains("reset"))
                 throw new AssertionError("Real native reset interval missing from capture: " +
                                          captured);
-            verifyNativeAttribute(captured, "ls", 2);
+            verifyNativeAttribute(captured, "ls", 1);
             verifyNativeAttribute(captured, "ignore_global_resets", 1);
             verifyNativeAttribute(captured, "ignore_global_resets", 0);
+            verifyNativeSettings(captured, 1, 0);
+            verifyNativeSettings(captured, 0, 1);
             bridge.diagnosticsConfigure(0);
             long stopped = bridge.diagnosticsClock();
             bridge.diagnosticsRead();
@@ -99,11 +102,33 @@ public final class CpuDiagnosticsSmoke {
                 throw new AssertionError("First native owner must inherit the current Java frame");
         }
         System.out.println(
-                "PRIME_CPU_DIAGNOSTICS_FFM_OK: ABI13 108B settings, bounds-sphere ID2, global-reset bool true/false consumed by native and captured, real reset and transport spans/frame, final tail, UTF-8, retained clock and owner thread; no GPU");
+                "PRIME_CPU_DIAGNOSTICS_FFM_OK: ABI14 108B settings, native-noisy true/false with inverse RR and independent view consumed by native, power-distance Tree ID1, global-reset bool true/false captured, real reset and transport spans/frame, final tail, UTF-8, retained clock and owner thread; no GPU");
     }
 
     private record Event(long id, long parent, long frame, int name, long start, long duration,
                          boolean ok, String counts) {}
+    private static void verifyNativeSettings(String captured, int noisy, int view) {
+        var keys = java.util.regex.Pattern.compile("\"kb\":(\\d+),\"k\":\\[([^]]*)]")
+                           .matcher(captured);
+        if (!keys.find())
+            throw new AssertionError("Missing native attribute dictionary");
+        int base = Integer.parseInt(keys.group(1));
+        String[] entries = keys.group(2).split(",");
+        var ids = new java.util.HashMap<String, Integer>();
+        for (int index = 0; index < entries.length; index++)
+            ids.put(entries[index], base + index);
+        var attributes =
+                java.util.regex.Pattern.compile("\"a\":\\[((?:\\[[^\\]]*],?)+)]").matcher(captured);
+        while (attributes.find()) {
+            String values = attributes.group(1);
+            if (values.contains("[" + ids.get("\"native_noisy_output\"") + "," + noisy + "]") &&
+                values.contains("[" + ids.get("\"rr\"") + "," + (1 - noisy) + "]") &&
+                values.contains("[" + ids.get("\"view\"") + "," + view + "]"))
+                return;
+        }
+        throw new AssertionError("Native noisy/RR/view tuple missing: " + noisy + "/" +
+                                 (1 - noisy) + "/" + view);
+    }
     private static void verifyNativeAttribute(String captured, String key, int expected) {
         // Native attributes use dictionary IDs rather than repeating their field names.
         var keys = java.util.regex.Pattern.compile("\"kb\":(\\d+),\"k\":\\[([^]]*)]")

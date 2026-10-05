@@ -183,6 +183,11 @@ impl HostBenchmark {
         self.state.as_ref().unwrap().renderer.as_ref().unwrap()
     }
 
+    #[cfg(all(test, feature = "shader-tests"))]
+    pub(super) fn owner_for_test(&self) -> &Arc<Context> {
+        &self.state.as_ref().unwrap().owner
+    }
+
     /// Test-only frozen raw baseline. Offline's legacy Frame push and descriptor
     /// superset are ABI-compatible, while this SPIR-V does not read accumulation.
     #[cfg(all(test, feature = "shader-tests"))]

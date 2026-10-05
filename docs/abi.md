@@ -1,6 +1,6 @@
-# FFM ABI v13
+# FFM ABI v14
 
-Java 适配器与 Rust 核心作为同一构建产物配套使用。公共 ABI 为11，Minecraft 源 schema 为7，设置文件 schema 为7；版本用于边界拒绝，不承诺不同发布之间的二进制兼容。两版适配器共享同次构建的核心，JAR 和引擎不能混用。
+Java 适配器与 Rust 核心作为同一构建产物配套使用。公共 ABI 为14，Minecraft 源 schema 为7，设置文件 schema 为10；版本用于边界拒绝，不承诺不同发布之间的二进制兼容。两版适配器共享同次构建的核心，JAR 和引擎不能混用。
 
 ## 唯一结构契约与生成
 
@@ -10,7 +10,7 @@ Java 适配器与 Rust 核心作为同一构建产物配套使用。公共 ABI �
 
 固定输入以 `PrimeHeader { struct_size, abi_version }` 开始，两者精确匹配当前根结构。MC 根输入以 `PrimeMcIdentity` 开始，前两字段相同，另外携带 source/game version、resource generation、world epoch 和 batch。自然 padding 不传递语义，不要求清零，也不参与内容比较；显式 reserved 字段须为零。
 
-`prime_create(11)` 返回非零 handle，普通 status=0 成功、-1 失败；`prime_last_error` 返回 UTF-8 完整长度（不含 NUL），容量允许时补 NUL。除不使用 session 的真实 Present 转发外，所有 handle 调用都在创建它的 OS 线程执行。库名仍为 `prime_engine`。
+`prime_create(14)` 返回非零 handle，普通 status=0 成功、-1 失败；`prime_last_error` 返回 UTF-8 完整长度（不含 NUL），容量允许时补 NUL。除不使用 session 的真实 Present 转发外，所有 handle 调用都在创建它的 OS 线程执行。库名仍为 `prime_engine`。
 
 ## 诊断控制与排空
 
@@ -171,7 +171,7 @@ flags 的 bit0 表示已在这台逻辑设备启用 `VK_EXT_opacity_micromap` �
 
 ## 设置结构与文件 schema
 
-`prime_configure(handle,&settings)` 借用108 B `PrimeSettings`，header使用公共ABI v13。`light_sampling` 位于96字节偏移，1为默认Tree功率距离树、2为TreeSphere球界方向树，旧0规范化到Tree，其他值拒绝；创建时采用当前值，之后允许在外层帧边界变更。宿主先提交并证明旧命令完成，native重建所选管线，并在下一次录制中完成灯表和目录更新后才dispatch。`integrator` 位于100字节偏移，0为PathTrace、1为RestirPt，其他值拒绝。末字段`ignore_global_history_resets`位于104字节偏移，0为默认关闭、1为忽略显式全局历史重置的诊断，其他值拒绝。JAR与DLL须配套重建。磁盘`primept.properties`为schema v9，采样合法值为`TREE`、`TREE_SPHERE`；v8设置定向迁移，旧`GRID`转Tree、新诊断字段补false，其余合法字段保留。更旧版本或不完整字段仍按严格规则整份回退默认；内部配置包为v9/104B，不作为公共C ABI的替代。
+`prime_configure(handle,&settings)` 借用108 B `PrimeSettings`，header使用公共ABI v14。`native_noisy_output` 位于64字节偏移，1为禁用降噪并使用原生分辨率含噪输出，0为默认允许RR；此字段与旧v13的RR布尔语义相反，因此拒绝旧ABI。`light_sampling` 位于96字节偏移，1为功率距离Tree，旧0/2均规范化到Tree，其他值拒绝；生产仅保留Tree，字段迁移不重建管线或重置历史。`integrator` 位于100字节偏移，0为PathTrace、1为RestirPt，其他值拒绝。末字段`ignore_global_history_resets`位于104字节偏移，0为默认关闭、1为忽略显式全局历史重置的诊断，其他值拒绝。JAR与DLL须配套重建。磁盘`primept.properties`为schema v10，当前采样值为`TREE`，旧`GRID`/`TREE_SPHERE`在受支持版本中迁移到Tree；v8/v9定向迁移旧`render.ray_reconstruction`，取反写入`diagnostics.native_noisy_output`，v8缺少的忽略重置字段补false，其余合法字段保留。更旧版本或不完整字段仍按严格规则整份回退默认；内部配置包为v10/104B，不作为公共C ABI的替代。
 
 | 字段 | 范围/语义 |
 | --- | --- |
@@ -182,18 +182,19 @@ flags 的 bit0 表示已在这台逻辑设备启用 `VK_EXT_opacity_micromap` �
 | sun / sky / depth_range | 光强各`[1/256,256]`，预览深度`[1,4096]` |
 | seed | Java固定`0x13572468` |
 | latitude_degrees / solar_longitude_degrees | -90…90 / 0…359整数度 |
-| opacity_micromap / ray_reconstruction | 0关、1请求启用，默认1，RR固定preset F |
+| opacity_micromap | 0关、1请求启用，默认1 |
+| native_noisy_output | 0默认允许RR（固定preset F）；1禁用降噪并原生分辨率输出；与内部含噪颜色诊断视图独立 |
 | reconstruction_quality | 0 DLAA、1 Quality、2 Balanced、3 Performance默认、4 UltraPerformance |
 | terrain_batches_per_frame | 1–128默认8，每批4×4×4 section |
 | stars | `[0,4]`，默认1；独立于sky强度 |
 | auto_exposure_compensation | `[0,1]`，默认0.6；0关闭，其余为旧算法的补偿强度，并非EV |
 | hdr / hdr_reference_white | 0/1请求；0自动参考白，否则1–10000 nit；实际启用需surface及标定支持 |
 | frame_generation | 0/1请求，默认0；实时RR、早期interposer及实际SDK支持全部成立才准备 |
-| light_sampling | 1 Tree功率距离树默认、2 TreeSphere球界方向树；旧0规范化为Tree；帧边界切换，重置离线累积，实时历史继续复用 |
+| light_sampling | 1功率距离Tree；旧0/2规范化为Tree，未知值拒绝；无运行时采样器切换 |
 | ignore_global_history_resets | 默认false；诊断用，忽略显式ReSTIR/RR全局重置请求，实际存储重建和逐路径支持检查继续遵守有效性合同 |
 | integrator | 0 PathTrace默认、1 RestirPt Enhanced；独立管线与历史，帧边界切换 |
 
-结构尺寸/版本、枚举、有限性及范围完整验证后应用。模式、采样方式或实时RR布局改变前宿主先提交encoder并证明旧提交完成，在外层帧边界切换；native依旧资源最后consumer退休。显示控制和格预算无需模式切换等待。冻结拒绝实时源变更入口，但允许替换采样proposal；仅更新快照设置的`light_sampling`，保留姿态和其他冻结输运参数。资源及显示边界见[渲染模式](renderers.md)。
+结构尺寸/版本、枚举、有限性及范围完整验证后应用。模式、积分器或实时RR布局改变前宿主先提交encoder并证明旧提交完成，在外层帧边界切换；native依旧资源最后consumer退休。显示控制和地形预算无需模式切换等待。冻结拒绝实时源变更入口，并保留冻结姿态与光输运参数；资源及显示边界见[渲染模式](renderers.md)。
 
 地形批次上限控制 CPU 源编译和后段静态构建两个阶段，各自每帧最多 N 格；不参与 transport 比较，调整上限不重置 RR 历史或离线累积。冻结期间可修改并继续限制已发布源的后段积压，CPU 源编译暂停至恢复实时。实际几何内容变化与等价 OMM 重建的累积处理见 [渲染模式契约](renderers.md)。
 

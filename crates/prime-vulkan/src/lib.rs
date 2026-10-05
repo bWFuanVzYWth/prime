@@ -16,7 +16,6 @@ mod light_distance_cpu;
 mod light_sampler;
 #[cfg(feature = "light-sampling-bench")]
 pub mod light_sampling;
-mod light_sphere_cpu;
 mod light_tree;
 mod light_tree_cpu;
 mod objects;
@@ -59,6 +58,8 @@ mod restir;
 mod restir_adapter_tests;
 #[cfg(all(test, feature = "shader-tests"))]
 mod restir_history_tests;
+#[cfg(all(test, feature = "shader-tests"))]
+mod restir_reprojection_tests;
 #[cfg(all(test, feature = "shader-tests"))]
 mod restir_rr_tests;
 #[cfg(all(test, feature = "shader-tests"))]
@@ -455,24 +456,10 @@ impl Pipeline {
                 }
                 return Ok(result);
             }
-            // A frame-boundary configuration selects one binary; no per-path method branch.
-            let shader: &[u8] = match (mode, reconstruction, light_sampling) {
-                (RenderMode::Offline, _, LightSampling::Tree) => prime_shaders::path_trace_tree(),
-                (RenderMode::Offline, _, LightSampling::TreeSphere) => {
-                    prime_shaders::path_trace_tree_sphere()
-                }
-                (RenderMode::Realtime, true, LightSampling::Tree) => {
-                    prime_shaders::realtime_transport_rr_tree()
-                }
-                (RenderMode::Realtime, false, LightSampling::Tree) => {
-                    prime_shaders::realtime_transport_tree()
-                }
-                (RenderMode::Realtime, true, LightSampling::TreeSphere) => {
-                    prime_shaders::realtime_transport_rr_tree_sphere()
-                }
-                (RenderMode::Realtime, false, LightSampling::TreeSphere) => {
-                    prime_shaders::realtime_transport_tree_sphere()
-                }
+            let shader: &[u8] = match (mode, reconstruction) {
+                (RenderMode::Offline, _) => prime_shaders::path_trace_tree(),
+                (RenderMode::Realtime, true) => prime_shaders::realtime_transport_rr_tree(),
+                (RenderMode::Realtime, false) => prime_shaders::realtime_transport_tree(),
             };
             for (i, features) in [
                 [0, 0, 0],

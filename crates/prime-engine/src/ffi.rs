@@ -1124,7 +1124,7 @@ mod abi_tests {
             latitude_degrees: 30,
             solar_longitude_degrees: 0,
             opacity_micromap: 1,
-            ray_reconstruction: 1,
+            native_noisy_output: 0,
             reconstruction_quality: 3,
             terrain_batches_per_frame: 8,
             stars: 1.0,

@@ -2,7 +2,7 @@
 
 `restir_pt` 是独立的世界渲染器选择，与 `vanilla`、`path_trace` 互斥。Java 仅负责选择和已有批量源入口，Rust 复用 Prime 的场景、材质、BLAS/TLAS、大气和显示资源；积分、重放、shift、reservoir 与调度属于独立的 Slang/Vulkan 实现。选择普通 PT 时不创建 ReSTIR 的管线或屏幕状态。
 
-算法来源为 Falcor 9.0 的 `Source/Modules/ReSTIRPathTracing`，源提交 `759aad033ff610fb0d82c74f7e0a508d0096d5f2`。它包含 Enhanced 的双 footprint 判定、混合 PSS/立体角参数化和双向 pairwise MIS。来源及 BSD-3-Clause 许可见 [第三方声明](../THIRD_PARTY_NOTICES.md)。
+算法来源为 Falcor 9.0 的 `Source/Modules/ReSTIRPathTracing`，源提交 `759aad033ff610fb0d82c74f7e0a508d0096d5f2`。它包含 Enhanced 的双 footprint 判定、混合 PSS/立体角参数化和双向 pairwise MIS。来源及 BSD-3-Clause 许可见 [第三方声明](../THIRD_PARTY_NOTICES.md)。 相对上游的接口、数学与历史适配集中维护在[统一登记](restir-adaptations.md)，本文件维护生产管线与资源合同。
 
 ## 固定配置与支持边界
 
@@ -10,13 +10,13 @@
 
 材质适配使用 Prime 已接入的 OpenPBR/LabPBR、真实源色、发光、覆盖、介质与透射契约。自定义材质走上游不支持 BSDF component indexing 的 PDF roughness 判定；没有用单一粗糙度值代替混合 BSDF 的采样 PDF。上游默认的显式材质 LOD 0 保留，因此本渲染器没有采用普通 PT 的传播 ray-cone 纹理过滤。覆盖随机域使用固定的路径 seed 与位置哈希；重放不会再次执行宿主回调。命中身份保存实际复合表面的材质选择，避免重建浮点误差改变涂层来源。
 
-Prime 的局部光源 proposal 依赖接收点，TreeSphere 另依赖法线。两种树都在世界与页内逐层评分，逆向 PDF 也按实际接收点重放；TreeSphere 另计算角度界及 quad 两半的法线。连接到光源时重新计算目的点的 PDF，不能缓存旧接收点的 PMF；静止历史不保证跳过这些求值。天空与太阳具有不同 NEE 竞争规则，初始 RIS 分开保存它们。吸收介质属于 prefix replay 的显式数据，连接可见性继续使用 Prime 的透射查询。
+Prime的功率距离Tree proposal依赖接收点，在世界与页内逐层评分，逆向PDF按同一物理接收点重放。连接到光源时重新计算目的点的PDF，不能缓存旧接收点的PMF；静止历史不保证跳过这些求值。天空与太阳具有不同NEE竞争规则，初始RIS分开保存它们。吸收介质属于prefix replay的显式数据，连接可见性继续使用Prime的透射查询。
 
-求交起点复用 Prime 的重心/仿射误差界：静态命中和发光端点用 `reconstructStaticSurface`，动态命中用 `reconstructSurface`；初始路径与 prefix/suffix 重放的下一跳调用 `spawnRay`。有限 NEE 和 shift 重连接按实际方向在两端分别偏移后构造可见性线段，PDF/Jacobian 使用原物理点。`RESTIR_DISTANCE_THRESHOLD` 是重连接分类阈值，不是求交 epsilon。硬件误差常量仍基于 NVIDIA RTX，其他硬件与极端几何验证边界见 [PT-006](../HACK.md)。
+BSDF 续接与直接光照具有不同支持域。非光学 authored 薄 SSS 可以通过实际 BSDF 采样透射；重连和后缀重放保留这一事件，并要求带法线贴图的几何/着色事件一致。其实际散射 PDF 继续用于 footprint 和路径度量，但直接光照的竞争 PDF 为零，发光命中/环境端点的 MIS 因而为一。局部灯和太阳 NEE 使用朝向当前 view 的几何前半球，光学接收面保留透射支持；新太阳提议在阴影查询前检查，已有终端 NEE 在当前消费处检查，不依赖全局重置撤销错误端点。
 
-TreeSphere 下，带法线贴图的非光学接收面的采样法线会随入射方向修正。该情形沿用上游强制终端光源连接，把接收面保留在重放 prefix 中，避免复用过期的接收点 proposal PDF；生成和目的路径判定一致。代价是这类候选多一个 prefix 顶点和最近命中查询，可能多进入一个 Compact job，不增加常驻字段。
+求交起点复用 Prime 的重心/仿射误差界：静态命中和发光端点用 `reconstructStaticSurface`，动态命中用 `reconstructSurface`；初始路径与 prefix/suffix 重放的下一跳调用 `spawnRay`。有限 NEE 和 shift 可见性线段继续在两端使用同一偏移算法。BSDF 到达连接点的段以偏移后的 query 起点定义方向与几何项，shift 的第一 BSDF、连接点入射方向和 Jacobian 使用同一测度；只有终端 NEE 使用物理接收点测度，连接点之后的 NEE 不改变到达段的分类。物理连接与 query 连接必须保留源反射/透射事件及同一偏移侧。`RESTIR_DISTANCE_THRESHOLD` 是重连接分类阈值，不是求交 epsilon。现有生成器直接竞争物理光源角 PDF 与 query BSDF 角 PDF，以及两端可见性裁短的吸收距离，仍属于数值近似边界；不据此声明完整传输无偏。硬件误差常量仍基于 NVIDIA RTX，其他硬件与极端几何验证边界见 [PT-006](../HACK.md)，蠕动继续按 [PT-018](../HACK.md) 排查。
 
-实时可使用 DLSS RR 或原生分辨率原始输出，质量、线性颜色、PSR、完成状态、显示与 SDK 资源寿命遵循[重建合同](reconstruction.md)。RR 的 Halton 抖动同时用于 ReSTIR 生成、重放、shift 和主 guide；时间重投影扣除已接受前帧的抖动。普通粗糙首面共享生成时的真实交点；规范 guide 与照明随机分支独立，纯 delta 前缀才追加 guide 后缀遍历，不执行普通 PT 的照明管线。ReSTIR 的主交点与全部 guide 后缀都使用 LOD 0，保持与实际输运相同的材质语义。离线冻结每个样本执行初始生成与空间重采样，并在线累积最终线性 radiance；不把同一冻结历史反复计作独立样本。
+实时可使用 DLSS RR 或原生分辨率原始输出，质量、线性颜色、PSR、完成状态、显示与 SDK 资源寿命遵循[重建合同](reconstruction.md)。RR 的 Halton 抖动同时用于 ReSTIR 生成、重放、shift 和主 guide；时间 donor 选择使用去抖动的运动，当前 pinhole 交点的前帧投影扣当前抖动；源重放继续使用已接受前帧的抖动，见[适配登记 RA-002](restir-adaptations.md)。普通粗糙首面共享生成时的真实交点；规范 guide 与照明随机分支独立，纯 delta 前缀才追加 guide 后缀遍历，不执行普通 PT 的照明管线。ReSTIR 的主交点与全部 guide 后缀都使用 LOD 0，保持与实际输运相同的材质语义。离线冻结每个样本执行初始生成与空间重采样，并在线累积最终线性 radiance；不把同一冻结历史反复计作独立样本。
 
 ## GPU 数据流
 
@@ -24,7 +24,7 @@ TreeSphere 下，带法线贴图的非光学接收面的采样法线会随入射
 
 现有 GPU 诊断的 primary、transport、post 区间分别覆盖完整初始生成、重采样和 resolve；不能把这些同名区间当作普通 PT 的 K1/K2 阶段直接比较。性能比较使用完整 GPU 帧区间，并按实际后端解释子阶段。
 
-初始 RIS 的 reservoir 权重除以 `M * pHat` 并将 M 设为 1；之后合并使用 `pHat(dst) * Jacobian * source.weight * pairwiseMIS`，最终仅除以所选样本的 pHat。连接 Jacobian 仅为两端几何项之比；不得再乘 BSDF PDF 比。连接点相邻的真实 BSDF 响应在目的路径重新求值。
+初始 RIS 的 reservoir 权重除以 `M * pHat` 并将 M 设为 1；之后合并使用 `pHat(dst) * Jacobian * source.weight * pairwiseMIS`，最终仅除以所选样本的 pHat。连接 Jacobian 仅为两端几何项之比；不得再乘 BSDF PDF 比。连接点相邻的真实 BSDF 响应在目的路径重新求值。生成、重放与 shift 的面积 footprint 使用几何法线，BSDF 响应继续使用着色法线，避免强法线贴图改变逆向面积判定的支持域。
 
 所有阶段处于同一 GPU 提交，阶段间使用真实 compute/transfer/indirect 依赖。没有逐 bounce 的宿主调度、CPU 队列搬运或新增稳态完成等待。TLAS 实例矩阵直接读取当前已完成 frame slot 的输入 buffer；不复制第二套变换表。未重建 TLAS 的帧也只补该 slot 的脏范围，以保证 shader 读取期间不会被其他 slot 的 CPU 更新覆盖。
 
@@ -36,13 +36,23 @@ TreeSphere 下，带法线贴图的非光学接收面的采样法线会随入射
 
 ## 历史与完成证明
 
-局部源发布、动态快照、纹理/动画、太阳、大气眼高和 scene anchor 改变保留时间阶段。相机历史先转换到当前 anchor；普通相机运动由重投影处理。静态页、动态 placement 和 emitter 页保存最后身份修订与有效 primitive 数；历史主交点和连接点在任何几何或矩阵读取前检查 slot 存活、索引范围与已接受水位。替换、回收复用、dense 重排和未知对应只拒绝相关路径，不把旧索引解释成新几何。每 slot 的 GPU 记录为8 B，另有 CPU 镜像、变更记录与 emitter 身份 key；不扩大80 B reservoir，也不保存旧 TLAS/材质/纹理。身份表仅为 ReSTIR 延迟创建；首次构建扫描现有记录，之后静态/动态记录消费真实变更范围，光源页列表或采样器变更时比较当前全部 emitter 页身份。一般更新合并脏范围上传，容量增长全量上传对应表。稳态不扫描或上传身份表。
+局部源发布、动态快照、纹理/动画、太阳、大气眼高和 scene anchor 改变保留时间阶段。相机历史先转换到当前 anchor；普通相机运动由重投影处理。历史主交点和连接点在任何几何或矩阵读取前检查 slot 存活、索引范围与已接受水位。替换、回收复用、dense 重排和未知对应只拒绝相关路径，不把旧索引解释成新几何。
 
-纹理的 mip0 backing、尺寸、当前 region/next/blend 或删除事件累积实际采样支持变化，直到静态和动态消费者均处理。恒定 alpha 的不可变动画族例外：首发时只扫描完整族的 mip0 sprite 窗口，缓存一个 alpha 字节；后续相位变化复用已验证的族身份，不逐帧扫描像素。RGB 动画仍更新当前场景后缀，但不重复拒绝其未变的 coverage/coating 叶。族未知、alpha 非恒定、采样尺寸或 alpha 实际变化仍保留局部拒绝。动画所有帧的 OMM 覆盖证明不能证明当前采样仍选择同一透明度或涂层叶；受影响页、动态有效纹理依赖和同身份光源页立即更新身份修订，即使 OMM 重编译仍在排队。事件帧扫描现有静态依赖、动态 placement 和相关光源身份，不增加 shader 求交；无事件时不扫描。动态原型依赖集合在实际 packing 时建立。当前不增加逐 texel 透明度证明，未知 RGB backing 或动画阶段变化也保守拒绝依赖页，可能使持续动画页的历史不能累积；材质或 mip-only 更新继续走后缀求值。
+ReSTIR 静态地形在脏更新时按实际编码记录精确匹配面，哈希只用于查找候选。未变 quad 保留物理槽；删除槽写退化几何并清除两半有效位，新面复用空槽时取得新修订。页顺序保持稳定，新格式或容量分片追加页。目录扩容保留旧页号的别名，旧历史仍读取同一面槽和当前记录；别名随所属 Cell 卸载撤回。不会因为挖掘导致重新打包就修订同页的全部未变面。CPU 为 ReSTIR 保留已解析面和槽状态，普通 PT 不建立这份历史缓存。
 
-身份仍有效不代表旧光照有效。变化帧按上游动态分支重新求值环境端点、发光端点、连接点 NEE 或固定随机种子的后缀，包含当前可见性、材质、PDF/MIS 和介质吸收。源 integrand/weight 保留原 MIS 源项的顺序，合并选择更新后的 cache 并最终归一化。Prime 分离天空/太阳 proposal，失去原端点支持时拒绝，不伪造环境旋转。静态帧继续复用缓存；持续太阳运动会增加后缀重放查询，尚无整帧收益测量。此处采用原版无旧场景的更新模式，不声明任意动态场景下的精确旧场景 MIS。
+这里的粒度是已编译 physical quad。表面编译器在64×64平面 tile 内合并矩形；挖掉一格可能重分割旧大面，原 primitive/bary 无法直接表达新多个三角，因此旧大面上的路径仍会失效。当前方案不提供未变子区域的点对应，也不将此边界认定为已解决的局部历史问题。动态原型/实例仍按原实例身份更新；真实 Cell 撤回和依赖纹理删除仍撤回相应几何域。
 
-首次使用为无历史冷启动；世界/场景 owner 或 epoch 更换、实际内部尺寸变化及实时/离线或积分器域切换仍是全局失效边界。不能证明整个复用域失效时继续接收历史。采样编号归零、回绕、跳号、seed、暂时跳帧、纹理资源 owner/generation、顶点预算、光源采样方式或 FG 切换继续使用最近一次已接受历史。纹理换代保留单调身份表，并按真实变更日志更新相关 static/dynamic/emitter slot。整张 atlas 重装通过 `resourceGeneration` 撤销旧资源引用和重新编译，不推进世界 epoch；同 epoch 的资源目录替换保留 `SourceScene` 的 source owner，真实世界重置才更换该身份。预算和光源 proposal 改变按已有当前场景后缀更新处理，不保存旧 proposal/场景；维持当前动态模式的近似边界，不声明任意 proposal 切换下的严格无偏性。预算降低仅拒绝超过新支持的路径：NEE 端点的 `pathLength < budget`，BSDF-hit/escape 的 `pathLength+1 < budget`。
+静态页的8 B header 保存 quad 表起点和 primitive 容量，高位标记逐 quad 模式；每个 quad 另占8 B，保存修订和两半存活位。动态 placement 与回退 emitter 页继续用8 B页记录。NEE 的生产静态端点保存实际地形页/quad/半面身份，发光记录第二个顶点的 `w` padding 保存源 quad 序号，TreePage 的 byte44 标记对应静态页；不能把紧凑光源序号当作几何 quad 序号。这些字段不改变光页、发光记录或80 B reservoir 的 stride。464 B uniform 的 byte440 使用原 padding 保存 quad 表地址。
+
+身份表仅为 ReSTIR 延迟创建；首次构建扫描现有记录，之后消费真实变更范围，稳态不扫描或上传。一般更新合并脏范围上传，表容量增长全量上传对应表。目录别名共享同一 quad 表，不复制逐面身份；扩容保留旧目录范围增加CPU/GPU目录驻留和脏更新写入。旧几何、表和上传资源仍按最后消费者与完成证明退休，不保存旧 TLAS/材质/纹理副本。
+
+稳定光页身份不代表稳定GPU地址。实际灯源发布时重写当前节点、发光记录及静态面映射地址，并比较当前面积倒数、重放路径和世界根；相同数量的光源更新不能跳过这些绑定，仅地址变化保留已有世界路径。未变帧沿几何层的无灯源变化早退，不增加稳态扫描或提交；发布失败后的补发覆盖全部未完成范围，资源仍按完成证明退休。
+
+纹理的 mip0 backing、尺寸、当前 region/next/blend 或删除事件累积实际采样支持变化，直到静态和动态消费者均处理。不可变动画族若每个局部 texel 的 alpha 在全体帧中相同，即可保留其非均匀 cutout/coating 支持；首发时扫描完整族的 mip0 sprite 窗口，后续相位变化复用缓存证明，不逐帧扫描像素。恒定 alpha 字节还可证明等价替换族，非均匀 mask 只能在同一已验证族内复用，不能据“各自不变”认定两个未知 backing 相同。RGB 动画仍更新当前场景后缀。未知族、采样尺寸或 alpha 实际变化只修订依赖该支持的静态面；动态 placement 和回退页保持各自身份边界。IOR-only 资源不参与 coverage/coating 依赖。动画全帧 OMM 覆盖不能证明当前材质叶相同；支持修订在排队重编译前生效。事件帧消费静态依赖、动态 placement 和相关光源身份，无事件时不扫描；材质或 mip-only 更新继续走后缀求值。
+
+身份仍有效不代表旧光照有效。变化帧按上游动态分支重新求值环境端点、发光端点、连接点NEE或固定随机种子的后缀，包含当前可见性、材质、PDF/MIS和介质吸收。源integrand/weight保留原MIS源项的顺序，合并选择更新后的cache并最终归一化。Prime分离天空/太阳proposal，失去原端点支持时拒绝，不伪造环境旋转。Tree的选灯PMF不依赖接收法线或view；BSDF响应及反射/透射支持仍按当前连接求值。持续太阳运动会增加后缀重放查询，尚无整帧收益测量。此处采用原版无旧场景的更新模式，不声明任意动态场景下的精确旧场景MIS；适配与数学边界见[统一登记](restir-adaptations.md)。
+
+首次使用为无历史冷启动；世界/场景owner或epoch更换、实际内部尺寸变化及实时/离线或积分器域切换仍是全局失效边界。不能证明整个复用域失效时继续接收历史。采样编号归零、回绕、跳号、seed、暂时跳帧、纹理资源owner/generation、顶点预算或FG切换继续使用最近一次已接受历史。纹理换代保留单调身份表，并按真实变更日志更新相关static/dynamic/emitter slot。整张atlas重装通过 `resourceGeneration` 撤销旧资源引用和重新编译，不推进世界epoch；同epoch的资源目录替换保留 `SourceScene` 的source owner，真实世界重置才更换该身份。预算和场景灯proposal改变按已有当前场景后缀更新处理，不保存旧proposal/场景；维持当前动态模式的近似边界，不声明任意场景变化下的严格无偏性。预算降低仅拒绝超过新支持的路径：NEE端点的 `pathLength < budget`，BSDF-hit/escape的 `pathLength+1 < budget`。
 
 全局重置采用共享封闭黑名单，入口只接受预定义事件类型：世界替换、世界 epoch、场景身份域替换、渲染域、内部尺寸及 RR feature 配置/求值失败。普通 tick、内容修订、动画和采样编号没有全局重置事件。每次请求直接写日志中的 `event/action/valid`，性能录制另保存 `restir.history.reset` / `rr.history.reset` 的 `reason/ignored/valid`；不依赖开启录制才知道原因。首次没有历史是冷启动，实际 scratch/SDK feature 重建另记 `*.history.storage`，不能把未初始化存储标成有效历史。
 
@@ -54,4 +64,4 @@ TreeSphere 下，带法线贴图的非光学接收面的采样法线会随入射
 
 `scripts/test-restir-math.py` 将生产数学模块编译为 Slang CPU 目标并执行原 RNG 对照、RIS/合并统计、flags、Jacobian、pairwise MIS 和全部原配对邻域的互反性质；同时检查实际 BDA SPIR-V 布局。Vulkan 集成测试使用无窗口的真实 ray-query GPU，并与普通 PT 的线性结果对照。编译、数学测试及小场景 GPU 测试不能替代完整游戏画面或正式性能基线。
 
-游戏启动和验收由用户执行，命令见 [CONTRIBUTING](../CONTRIBUTING.md)。应固定路径预算、光源方式、原生1920×1080、场景和 seed，分别记录稳态与内容更新、CPU/GPU 时间。检查静止收敛、相机重投影、移动/编辑与纹理动画的失效、透明介质、镂空和模式/尺寸切换。
+游戏启动和验收由用户执行，命令见 [CONTRIBUTING](../CONTRIBUTING.md)。应固定路径预算、原生1920×1080、场景和seed，分别记录稳态与内容更新、CPU/GPU时间。检查静止收敛、相机重投影、移动/编辑与纹理动画的失效、透明介质、镂空和模式/尺寸切换。

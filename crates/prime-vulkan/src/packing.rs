@@ -215,6 +215,19 @@ impl<'a> Plan<'a> {
             .map(|g| g.count as usize * stride(g.format))
             .sum()
     }
+    pub fn with_format(
+        inputs: impl IntoIterator<Item = Input<'a>>,
+        format: usize,
+    ) -> Result<Self, String> {
+        let mut plan = Self::new(inputs, false)?;
+        if format >= FORMATS || plan.groups.iter().any(|group| group.format > format) {
+            return Err("Stable material page cannot narrow its record format".into());
+        }
+        for group in &mut plan.groups {
+            group.format = format;
+        }
+        Ok(plan)
+    }
     /// Identities embedded in these packed records, read without expanding source quads.
     pub fn texture_dependencies(&self, ids: &mut BTreeSet<u32>) {
         for source in &self.sources {
@@ -246,6 +259,39 @@ impl<'a> Plan<'a> {
         group.spans.iter().flat_map(move |span| {
             let source = &self.sources[span.source];
             span.range.clone().map(move |index| source.face(index))
+        })
+    }
+    /// Coverage/coating selection uses the base and detail alpha, never the
+    /// optical IOR lookup. Keep this dependency aligned with packed page order.
+    pub fn support_dependencies(&self, group: &Group) -> BTreeSet<u32> {
+        let mut ids = BTreeSet::new();
+        for face in self.faces(group) {
+            ids.insert(face.geometry.texture_id);
+            if let Some(detail) = face.detail {
+                ids.insert(detail.layer.texture_id);
+            }
+        }
+        ids.remove(&0);
+        ids.remove(&u32::MAX);
+        ids
+    }
+    pub fn resolved_faces<'b>(
+        &'b self,
+        group: &'b Group,
+    ) -> impl Iterator<Item = SurfaceFace> + 'b {
+        group.spans.iter().flat_map(move |span| {
+            let source = &self.sources[span.source];
+            span.range.clone().map(move |index| {
+                let mut face = source.face(index);
+                if let Some(offset) = source.input.offset {
+                    for point in &mut face.geometry.positions {
+                        for axis in 0..3 {
+                            point[axis] += offset[axis];
+                        }
+                    }
+                }
+                face
+            })
         })
     }
     pub fn pack(

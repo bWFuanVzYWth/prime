@@ -19,6 +19,9 @@ struct Entry {
     instance: u32,
     first: u32,
     count: u32,
+    capacity: u32,
+    history: bool,
+    aliases: Vec<(u32, u32, u32)>, // first, capacity, originally published count
 }
 pub(crate) struct StaticDirectory {
     entries: BTreeMap<Cell, Entry>,
@@ -50,9 +53,25 @@ impl StaticDirectory {
             .get(&key)
             .map(|e| (e.instance, e.first, e.count))
     }
+    #[cfg(all(test, feature = "shader-tests"))]
+    pub fn limit_history_capacity_for_test(&mut self, key: Cell, capacity: u32) {
+        let entry = self.entries.get_mut(&key).expect("published test Cell");
+        assert!(entry.history && entry.aliases.is_empty());
+        assert!(capacity >= entry.count && capacity <= entry.capacity);
+        // Only unused reservation is released. No accepted endpoint addresses
+        // this tail; the next real row growth follows the production alias path.
+        self.records
+            .release(entry.first + capacity, entry.capacity - capacity);
+        entry.capacity = capacity;
+        self.bytes.truncate(self.records.end as usize);
+    }
+
     pub fn remove(&mut self, key: Cell) {
         if let Some(entry) = self.entries.remove(&key) {
-            self.records.release(entry.first, entry.count);
+            self.records.release(entry.first, entry.capacity);
+            for (first, capacity, _) in entry.aliases {
+                self.records.release(first, capacity);
+            }
             self.slots.release(entry.instance, 1);
             self.instances[entry.instance as usize] = empty_instance();
             self.dirty_instances.push(entry.instance as usize);
@@ -70,32 +89,8 @@ impl StaticDirectory {
         if count == 0 {
             return Err("Empty static directory range".into());
         }
-        let entry = if let Some(entry) = self.entries.get_mut(&key) {
-            if entry.count != count {
-                let mut records = self.records.clone();
-                records.release(entry.first, entry.count);
-                let first = records.allocate(count)?;
-                self.records = records;
-                entry.first = first;
-                entry.count = count;
-            }
-            entry
-        } else {
-            let first = self.records.allocate(count)?;
-            let instance = match self.slots.allocate(1) {
-                Ok(instance) => instance,
-                Err(e) => {
-                    self.records.release(first, count);
-                    return Err(e);
-                }
-            };
-            let entry = Entry {
-                instance,
-                first,
-                count,
-            };
-            self.entries.entry(key).or_insert(entry)
-        };
+        self.reserve(key, count, count)?;
+        let entry = self.entries.get(&key).unwrap();
         self.bytes.resize(self.records.end as usize, [0; BYTES]);
         for (i, row) in rows.iter().enumerate() {
             let at = entry.first as usize + i;
@@ -104,15 +99,117 @@ impl StaticDirectory {
                 self.dirty_records.push(at);
             }
         }
+        for &(first, _, count) in &entry.aliases {
+            for index in 0..count as usize {
+                let row = rows.get(index).copied().unwrap_or([0; BYTES]);
+                let at = first as usize + index;
+                if self.bytes[at] != row {
+                    self.bytes[at] = row;
+                    self.dirty_records.push(at);
+                }
+            }
+        }
         instance.instance_custom_index_and_mask = vk::Packed24_8::new(entry.first, 0xff);
-        self.instances
-            .resize(self.slots.end as usize, empty_instance());
         self.instances[entry.instance as usize] = instance;
         self.dirty_instances.push(entry.instance as usize);
         Ok(())
     }
+
+    // Keep the custom-index base stable while historical rows append. Ordinary
+    // PT requests exactly count; ReSTIR reserves unused CPU/GPU directory rows.
+    pub fn reserve(&mut self, key: Cell, count: u32, capacity: u32) -> Result<u32, String> {
+        self.reserve_impl(key, count, capacity, false)
+    }
+    pub fn reserve_stable(&mut self, key: Cell, count: u32, capacity: u32) -> Result<u32, String> {
+        self.reserve_impl(key, count, capacity, true)
+    }
+    fn reserve_impl(
+        &mut self,
+        key: Cell,
+        count: u32,
+        capacity: u32,
+        history: bool,
+    ) -> Result<u32, String> {
+        if count == 0 {
+            return Err("Empty static directory range".into());
+        }
+        let capacity = capacity.max(count);
+        let entry = if let Some(entry) = self.entries.get_mut(&key) {
+            entry.history |= history;
+            if entry.capacity < count {
+                let capacity = if entry.history {
+                    capacity.max(
+                        entry
+                            .capacity
+                            .checked_mul(2)
+                            .ok_or("Static history directory capacity overflow")?,
+                    )
+                } else {
+                    capacity
+                };
+                let mut records = self.records.clone();
+                if !entry.history {
+                    records.release(entry.first, entry.capacity);
+                }
+                let first = records.allocate(capacity)?;
+                if entry.history {
+                    entry
+                        .aliases
+                        .push((entry.first, entry.capacity, entry.count));
+                }
+                self.records = records;
+                entry.first = first;
+                entry.capacity = capacity;
+            }
+            entry.count = count;
+            entry
+        } else {
+            let first = self.records.allocate(capacity)?;
+            let instance = match self.slots.allocate(1) {
+                Ok(instance) => instance,
+                Err(e) => {
+                    self.records.release(first, capacity);
+                    return Err(e);
+                }
+            };
+            let entry = Entry {
+                instance,
+                first,
+                count,
+                capacity,
+                history,
+                aliases: Vec::new(),
+            };
+            self.entries.entry(key).or_insert(entry)
+        };
+        self.bytes.resize(self.records.end as usize, [0; BYTES]);
+        self.instances
+            .resize(self.slots.end as usize, empty_instance());
+        Ok(entry.first)
+    }
+    pub fn history_ranges(&self, key: Cell) -> Vec<(u32, u32)> {
+        self.entries.get(&key).map_or_else(Vec::new, |entry| {
+            std::iter::once((entry.first, entry.count))
+                .chain(
+                    entry
+                        .aliases
+                        .iter()
+                        .map(|&(first, _, count)| (first, count)),
+                )
+                .collect()
+        })
+    }
+    pub fn aliases(&self, key: Cell) -> impl Iterator<Item = (u32, u32)> + '_ {
+        self.entries.get(&key).into_iter().flat_map(|entry| {
+            entry
+                .aliases
+                .iter()
+                .map(|&(first, _, count)| (first, count))
+        })
+    }
     /// Replace sampler fields on existing material rows without changing their TLAS instances.
     /// Each value is (first emitter, emitter buffer address, emitter format).
+    #[cfg(test)]
     pub fn light_fields(&mut self, key: Cell, values: &[(u32, u64, u32)]) -> Result<(), String> {
         let entry = self
             .entries
@@ -132,6 +229,16 @@ impl StaticDirectory {
                 row[24..32].copy_from_slice(&address);
                 row[44..48].copy_from_slice(&format);
                 self.dirty_records.push(at);
+            }
+        }
+        for &(first, _, count) in &entry.aliases {
+            for index in 0..count.min(entry.count) as usize {
+                let row = self.bytes[entry.first as usize + index];
+                let at = first as usize + index;
+                if self.bytes[at] != row {
+                    self.bytes[at] = row;
+                    self.dirty_records.push(at);
+                }
             }
         }
         Ok(())
@@ -163,6 +270,73 @@ mod tests {
     use super::*;
     fn cell(x: f64) -> Cell {
         Cell::containing([x, 0., 0.]).unwrap()
+    }
+    #[test]
+    fn stable_directory_growth_keeps_old_prefix_aliases_until_cell_unload() {
+        let mut directory = StaticDirectory::default();
+        let key = cell(0.);
+        directory.reserve_stable(key, 1, 1).unwrap();
+        directory
+            .publish(key, &[[1; BYTES]], empty_instance())
+            .unwrap();
+        let original = directory.slot(key).unwrap().1;
+        directory
+            .publish(cell(64.), &[[9; BYTES]], empty_instance())
+            .unwrap();
+        directory.reserve_stable(key, 2, 2).unwrap();
+        directory
+            .publish(key, &[[2; BYTES], [3; BYTES]], empty_instance())
+            .unwrap();
+        let middle = directory.slot(key).unwrap().1;
+        assert_ne!(original, middle);
+        assert_eq!(
+            directory.bytes[original as usize],
+            directory.bytes[middle as usize]
+        );
+        directory.reserve_stable(key, 3, 3).unwrap();
+        directory
+            .publish(key, &[[4; BYTES], [5; BYTES], [6; BYTES]], empty_instance())
+            .unwrap();
+        let current = directory.slot(key).unwrap().1;
+        assert_eq!(
+            directory.entries[&key].capacity, 4,
+            "growth must be geometric"
+        );
+        assert_eq!(
+            directory.aliases(key).collect::<Vec<_>>(),
+            [(original, 1), (middle, 2)]
+        );
+        assert_eq!(
+            directory.bytes[original as usize],
+            directory.bytes[current as usize]
+        );
+        assert_eq!(
+            directory.bytes[middle as usize + 1],
+            directory.bytes[current as usize + 1]
+        );
+        directory
+            .light_fields(key, &[(7, 100, 1), (8, 200, 2), (9, 300, 3)])
+            .unwrap();
+        assert_eq!(
+            directory.bytes[original as usize],
+            directory.bytes[current as usize]
+        );
+        assert_eq!(
+            directory.bytes[middle as usize + 1],
+            directory.bytes[current as usize + 1]
+        );
+        let ranges = directory.history_ranges(key);
+        assert_eq!(ranges.len(), 3);
+        directory.remove(key);
+        assert!(directory.history_ranges(key).is_empty());
+        directory
+            .publish(cell(128.), &[[8; BYTES]], empty_instance())
+            .unwrap();
+        assert_eq!(
+            directory.slot(cell(128.)).unwrap().1,
+            original,
+            "aliases release only after their Cell identity is withdrawn"
+        );
     }
     #[test]
     fn local_edits_retain_unaffected_slots_and_removals_reuse_holes() {

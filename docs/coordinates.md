@@ -47,6 +47,8 @@ Streamline 的固定 C ABI 使用 row-major 存储和 row-vector 变换：`world
 
 RR/FG 的密集运动是 `previousUv-currentSampleUv`，表示当前采样位置向最近一次实际接受提交的前帧位置的位移。它包含已知相机与物体运动，不包含帧采样 jitter。静态相机和静态点投影回同一实际 SampleUv，因此运动应为零；不能减去像素中心而留下当前 jitter。
 
+ReSTIR 时间复用也按无 jitter 的运动选择前帧 reservoir：`floor(pixel+.5+previousProjection(Pprev)-currentProjection(Pcur))`。投影使用已接受前相机及已证明的物体对应；当前 pinhole 主交点满足 `currentProjection(Pcur)=pixel+.5+currentJitter`，故实现只需从前投影扣除当前 jitter。前帧实际 jitter 仍用于源主射线重放，不进入 donor 地址的取整。两套合同不能混用，否则周期性的亚像素 jitter 可变为定向历史搬运；适配见 [RA-002](restir-adaptations.md)。
+
 主/specular/FG motion 写入 RG16F 时均为输入像素单位：`MotionPixels=MotionUv*inputExtent`。SDK adapter 的 `mvecScale=(1/inputWidth,1/inputHeight)` 由锁定 Streamline 再乘输入尺寸，令 NGX 消费像素 scale 1；`cameraMotionIncluded=true`、`motionVectorsJittered=false`。SDK 的 `ProjectionJitterPixels=-SampleJitterPixels`，XY 都以输入像素计。未知对应或非法投影写有限零并带引擎独立状态，不用魔数冒充 SDK 支持的有效性标记。
 
 | 深度/距离 | 单位与定义 |

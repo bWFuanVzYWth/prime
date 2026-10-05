@@ -9,7 +9,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Properties;
 
-/** Current schema; v8 adds the disabled reset diagnostic and maps retired GRID to TREE. */
+/** Current schema; v8/v9 retain settings while migrating the inverse noisy-output control. */
 public final class SettingsFile {
     public record Loaded(RenderSettings settings, String resetReason) {}
     private SettingsFile() {}
@@ -28,19 +28,24 @@ public final class SettingsFile {
             var properties = new Properties();
             properties.load(new StringReader(text));
             String version = properties.getProperty("version");
-            boolean previousVersion = "8".equals(version);
-            if (!previousVersion && !Integer.toString(RenderSettings.VERSION).equals(version))
+            boolean beforeResetDiagnostic = "8".equals(version);
+            boolean legacyReconstruction = beforeResetDiagnostic || "9".equals(version);
+            if (!legacyReconstruction && !Integer.toString(RenderSettings.VERSION).equals(version))
                 return new Loaded(RenderSettings.defaults(),
                                   "Settings version mismatch; defaults restored");
             var renderer = RenderSettings.Renderer.fromKey(properties.getProperty("renderer"));
             String opacityMicromap = properties.getProperty("render.opacity_micromap");
             if (!"true".equals(opacityMicromap) && !"false".equals(opacityMicromap))
                 throw new IllegalArgumentException("Invalid render.opacity_micromap");
-            String rayReconstruction = properties.getProperty("render.ray_reconstruction");
-            if (!"true".equals(rayReconstruction) && !"false".equals(rayReconstruction))
-                throw new IllegalArgumentException("Invalid render.ray_reconstruction");
-            String ignoreGlobalResets = properties.getProperty(
-                    "diagnostics.ignore_global_history_resets", previousVersion ? "false" : null);
+            String noisyKey = legacyReconstruction ? "render.ray_reconstruction"
+                                                   : "diagnostics.native_noisy_output";
+            String noisyValue = properties.getProperty(noisyKey);
+            if (!"true".equals(noisyValue) && !"false".equals(noisyValue))
+                throw new IllegalArgumentException("Invalid " + noisyKey);
+            boolean nativeNoisyOutput = Boolean.parseBoolean(noisyValue) != legacyReconstruction;
+            String ignoreGlobalResets =
+                    properties.getProperty("diagnostics.ignore_global_history_resets",
+                                           beforeResetDiagnostic ? "false" : null);
             if (!"true".equals(ignoreGlobalResets) && !"false".equals(ignoreGlobalResets))
                 throw new IllegalArgumentException(
                         "Invalid diagnostics.ignore_global_history_resets");
@@ -48,7 +53,7 @@ public final class SettingsFile {
                     RenderSettings.defaults()
                             .withRenderer(renderer)
                             .withOpacityMicromap(Boolean.parseBoolean(opacityMicromap))
-                            .withRayReconstruction(Boolean.parseBoolean(rayReconstruction))
+                            .withNativeNoisyOutput(nativeNoisyOutput)
                             .withIgnoreGlobalHistoryResets(Boolean.parseBoolean(ignoreGlobalResets))
                             .withDlssQuality(RenderSettings.DlssQuality.valueOf(
                                     properties.getProperty("render.dlss_quality", "")))
@@ -64,14 +69,14 @@ public final class SettingsFile {
         }
     }
     public static String encode(RenderSettings settings) {
-        var text = new StringBuilder("version=" + RenderSettings.VERSION +
-                                     "\nrenderer=" + settings.renderer().key +
-                                     "\nrender.opacity_micromap=" + settings.opacityMicromap() +
-                                     "\nrender.ray_reconstruction=" + settings.rayReconstruction() +
-                                     "\nrender.dlss_quality=" + settings.dlssQuality().name() +
-                                     "\nrender.light_sampling=" + settings.lightSampling().name() +
-                                     "\ndiagnostics.ignore_global_history_resets=" +
-                                     settings.ignoreGlobalHistoryResets() + "\n");
+        var text = new StringBuilder(
+                "version=" + RenderSettings.VERSION + "\nrenderer=" + settings.renderer().key +
+                "\nrender.opacity_micromap=" + settings.opacityMicromap() +
+                "\ndiagnostics.native_noisy_output=" + settings.nativeNoisyOutput() +
+                "\nrender.dlss_quality=" + settings.dlssQuality().name() +
+                "\nrender.light_sampling=" + settings.lightSampling().name() +
+                "\ndiagnostics.ignore_global_history_resets=" +
+                settings.ignoreGlobalHistoryResets() + "\n");
         for (var control : RenderSettings.Control.values())
             text.append(control.key).append('=').append(settings.value(control)).append('\n');
         return text.toString();

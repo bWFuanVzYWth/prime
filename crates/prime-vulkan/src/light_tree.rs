@@ -1,6 +1,6 @@
-//! Device publication for the power-distance or directional sphere page/world proposal.
-//! Immutable local trees belong to their source LightPage; only changed ranges and world metadata
-//! are uploaded here. Sampler changes replace metadata at an explicit completion boundary.
+//! Device publication for the power-distance page/world proposal.
+//! Local trees belong to their current source LightPage. Stable numeric page identity does not
+//! preserve buffer addresses: every publication rebinds the current source owners.
 use crate::{
     arena::{Arena, Lease},
     light_tree_cpu::{Input, Tree as CpuTree},
@@ -16,6 +16,15 @@ pub(crate) struct LightTree {
     pages: Option<Buffer>,
     world: Option<Buffer>,
     header: Option<Buffer>,
+    needs_full_publication: bool,
+}
+
+#[derive(Clone, Copy)]
+struct PageBinding {
+    nodes: u64,
+    emitters: u64,
+    format: u32,
+    static_page: Option<u32>,
 }
 
 struct Copy {
@@ -32,6 +41,7 @@ impl LightTree {
             pages: None,
             world: None,
             header: None,
+            needs_full_publication: true,
         }
     }
 
@@ -65,7 +75,6 @@ impl LightTree {
         anchor: [f64; 3],
         sources: &BTreeMap<u64, ([f64; 3], &LightPage)>,
         uploads: &mut Arena,
-        method: prime_scene::settings::LightSampling,
     ) -> Result<(), String> {
         let mut trace = prime_diagnostics::scope("lt.update");
         trace.fail();
@@ -81,6 +90,10 @@ impl LightTree {
                 paths: &tree.paths,
             });
         }
+        // The CPU planner commits before staging. A failed allocation/copy/submission must not
+        // make its next unchanged snapshot skip the GPU ranges that were never published.
+        let retry = self.needs_full_publication;
+        self.needs_full_publication = true;
         let changes = self.cpu.update(&inputs, anchor)?;
         if self.cpu.world.is_empty() {
             // Buffer drops retire against the Context recording/submitted serial.
@@ -88,41 +101,10 @@ impl LightTree {
             trace.succeed();
             return Ok(());
         }
-        if !changes.changed {
-            trace.succeed();
-            return Ok(());
-        }
-        let sphere = if method == prime_scene::settings::LightSampling::TreeSphere {
-            let roots = self
-                .cpu
-                .pages
-                .iter()
-                .enumerate()
-                .filter_map(|(slot, page)| {
-                    page.as_ref().map(|page| {
-                        let tree = &sources[&page.key].1.tree;
-                        let mut root = tree
-                            .sphere_root
-                            .ok_or("Sphere sampler received a power tree page")?;
-                        // Match GPU's represented page origin + local position, then widen the
-                        // endpoints by one ULP so the sphere encloses the actual translated corners.
-                        let relative: [f32; 3] =
-                            std::array::from_fn(|a| (page.origin[a] - anchor[a]) as f32);
-                        root.bounds = [
-                            std::array::from_fn(|a| (relative[a] + root.bounds[0][a]).next_down()),
-                            std::array::from_fn(|a| (relative[a] + root.bounds[1][a]).next_up()),
-                        ];
-                        Ok((slot as u32, root))
-                    })
-                })
-                .collect::<Result<Vec<_>, String>>()?;
-            Some(crate::light_sphere_cpu::Tree::world(
-                &roots,
-                self.cpu.pages.len(),
-            )?)
-        } else {
-            None
-        };
+        let world_changed = retry || changes.world_changed;
+        let world_count = self.world_count();
+        trace.count("changed", u64::from(changes.changed));
+        trace.count("world", u64::from(world_changed));
         let mut copies = Vec::new();
         let mut staging = prime_diagnostics::scope("lt.stage");
         staging.fail();
@@ -130,7 +112,7 @@ impl LightTree {
             let mut refs = prime_diagnostics::scope("lt.refs");
             refs.fail();
             let full = grow(context, &mut self.refs, self.cpu.refs.len() * 16)?;
-            let ranges = if full {
+            let ranges = if full || retry {
                 vec![0..self.cpu.refs.len() as u32]
             } else {
                 changes.ranges
@@ -160,37 +142,40 @@ impl LightTree {
             refs.count("bytes", size);
             refs.succeed();
             drop(refs);
-            let mut world = prime_diagnostics::scope("lt.world_stage");
-            world.fail();
-            let bytes = sphere.as_ref().map_or_else(
-                || crate::light_distance_cpu::node_bytes(&self.cpu.world),
-                |tree| crate::light_sphere_cpu::node_bytes(&tree.nodes),
-            );
-            world.count("nodes", self.cpu.world.len() as u64);
-            world.count("bytes", bytes.len() as u64);
-            stage_table(context, uploads, &bytes, &mut self.world, &mut copies)?;
-            world.succeed();
-            drop(world);
+            if world_changed {
+                let mut world = prime_diagnostics::scope("lt.world_stage");
+                world.fail();
+                let bytes = crate::light_distance_cpu::node_bytes(&self.cpu.world);
+                world.count("nodes", self.cpu.world.len() as u64);
+                world.count("bytes", bytes.len() as u64);
+                stage_table(context, uploads, &bytes, &mut self.world, &mut copies)?;
+                world.succeed();
+            }
             let mut pages = prime_diagnostics::scope("lt.pages");
             pages.fail();
-            let bytes = page_bytes(
-                &self.cpu,
-                anchor,
-                sources,
-                sphere.as_ref().map(|tree| tree.paths.as_slice()),
-            )?;
+            let bytes = page_bytes(&self.cpu, anchor, |key| {
+                let source = sources[&key].1;
+                PageBinding {
+                    nodes: source.tree.nodes.address(),
+                    emitters: source.emitters.address(),
+                    format: source.format,
+                    static_page: source.static_page,
+                }
+            })?;
             pages.count("bytes", bytes.len() as u64);
             stage_table(context, uploads, &bytes, &mut self.pages, &mut copies)?;
-            let bytes = header_bytes(
-                [
-                    self.world.as_ref().unwrap().address(),
-                    self.pages.as_ref().unwrap().address(),
-                    self.refs.as_ref().unwrap().address(),
-                ],
-                self.cpu.power,
-                self.world_count(),
-            );
-            stage_table(context, uploads, &bytes, &mut self.header, &mut copies)?;
+            if world_changed {
+                let bytes = header_bytes(
+                    [
+                        self.world.as_ref().unwrap().address(),
+                        self.pages.as_ref().unwrap().address(),
+                        self.refs.as_ref().unwrap().address(),
+                    ],
+                    self.cpu.power,
+                    world_count,
+                );
+                stage_table(context, uploads, &bytes, &mut self.header, &mut copies)?;
+            }
             pages.succeed();
             Ok::<_, String>(())
         })();
@@ -225,6 +210,7 @@ impl LightTree {
             uploads.retire(copy.source);
         }
         submitted?;
+        self.needs_full_publication = false;
         publish.succeed();
         trace.succeed();
         Ok(())
@@ -234,16 +220,14 @@ impl LightTree {
 fn page_bytes(
     cpu: &CpuTree,
     anchor: [f64; 3],
-    sources: &BTreeMap<u64, ([f64; 3], &LightPage)>,
-    paths: Option<&[u32]>,
+    mut binding: impl FnMut(u64) -> PageBinding,
 ) -> Result<Vec<u8>, String> {
     let mut bytes = Vec::with_capacity(cpu.pages.len() * 48);
-    for (slot, page) in cpu.pages.iter().enumerate() {
+    for page in &cpu.pages {
         if let Some(page) = page {
-            let source = sources[&page.key].1;
-            let tree = &source.tree;
-            bytes.extend_from_slice(&tree.nodes.address().to_le_bytes());
-            bytes.extend_from_slice(&source.emitters.address().to_le_bytes());
+            let source = binding(page.key);
+            bytes.extend_from_slice(&source.nodes.to_le_bytes());
+            bytes.extend_from_slice(&source.emitters.to_le_bytes());
             for (origin, anchor) in page.origin.into_iter().zip(anchor) {
                 let relative = (origin - anchor) as f32;
                 if !relative.is_finite() {
@@ -251,8 +235,13 @@ fn page_bytes(
                 }
                 bytes.extend_from_slice(&relative.to_le_bytes());
             }
-            let selection = paths.map_or(page.path, |paths| paths[slot]);
-            for word in [source.format, page.first, page.count, selection, 0] {
+            for word in [
+                source.format,
+                page.first,
+                page.count,
+                page.path,
+                source.static_page.map_or(0, |page| page + 1),
+            ] {
                 bytes.extend_from_slice(&word.to_le_bytes());
             }
         } else {
@@ -336,6 +325,78 @@ fn stage_table(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn input() -> Input<'static> {
+        Input {
+            key: 31,
+            origin: [2.0, 4.0, 6.0],
+            root: prime_scene::surface::LightNode {
+                bounds: [[0.0; 3], [1.0; 3]],
+                power: 1.0,
+                child: 1 << 31,
+            },
+            inverse_areas: &[1.0],
+            paths: &[0],
+        }
+    }
+
+    fn word(bytes: &[u8], offset: usize) -> u32 {
+        u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap())
+    }
+
+    #[test]
+    fn stable_page_rebinds_current_gpu_owners_and_material_mapping() {
+        let mut cpu = CpuTree::default();
+        let input = input();
+        cpu.update(&[input], [1.0; 3]).unwrap();
+        let old = PageBinding {
+            nodes: 0x1020304050607080,
+            emitters: 0x8070605040302010,
+            format: 1,
+            static_page: Some(11),
+        };
+        let before = page_bytes(&cpu, [1.0; 3], |_| old).unwrap();
+        let changes = cpu.update(&[input], [1.0; 3]).unwrap();
+        assert!(!changes.changed);
+        assert!(!changes.world_changed);
+        let current = PageBinding {
+            nodes: 0x1122334455667788,
+            emitters: 0x8877665544332211,
+            format: 3,
+            static_page: Some(42),
+        };
+        let bytes = page_bytes(&cpu, [1.0; 3], |key| {
+            assert_eq!(key, input.key);
+            current
+        })
+        .unwrap();
+        assert_eq!(bytes.len(), 48);
+        assert_eq!(
+            u64::from_le_bytes(bytes[0..8].try_into().unwrap()),
+            current.nodes
+        );
+        assert_eq!(
+            u64::from_le_bytes(bytes[8..16].try_into().unwrap()),
+            current.emitters
+        );
+        assert_eq!(&bytes[16..28], &before[16..28]);
+        assert_eq!(
+            (word(&bytes, 16), word(&bytes, 20), word(&bytes, 24)),
+            (1.0f32.to_bits(), 3.0f32.to_bits(), 5.0f32.to_bits())
+        );
+        assert_eq!(word(&bytes, 28), current.format);
+        assert_eq!(&bytes[32..44], &before[32..44]);
+        assert_eq!(word(&bytes, 32), cpu.page(input.key).unwrap().first);
+        assert_eq!(word(&bytes, 36), 1);
+        assert_eq!(word(&bytes, 40), cpu.page(input.key).unwrap().path);
+        assert_eq!(word(&bytes, 44), 43);
+        let dynamic = PageBinding {
+            static_page: None,
+            ..current
+        };
+        let bytes = page_bytes(&cpu, [1.0; 3], |_| dynamic).unwrap();
+        assert_eq!(word(&bytes, 44), 0);
+    }
 
     #[test]
     fn gpu_header_has_explicit_little_endian_layout() {

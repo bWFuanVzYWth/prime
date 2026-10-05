@@ -3,6 +3,21 @@ use super::*;
 use prime_scene::{settings::DiagnosticView, surface::Emission};
 use realtime_tests::{camera, face, scene};
 
+fn artifact_output() -> std::path::PathBuf {
+    std::env::var_os("PRIME_RESTIR_ORACLE_ARTIFACT")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            // A repeated standalone run must not replace a previous experiment's CSVs.
+            let time = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../artifacts/restir-tests")
+                .join(format!("{}-{time}", std::process::id()))
+        })
+}
+
 fn settings(mode: RenderMode) -> RenderSettings {
     RenderSettings {
         integrator: Integrator::RestirPt,
@@ -13,7 +28,7 @@ fn settings(mode: RenderMode) -> RenderSettings {
         sky: 1. / 256.,
         auto_exposure_compensation: 0.,
         stars: 0.,
-        ray_reconstruction: false,
+        native_noisy_output: true,
         opacity_micromap: false,
         ..Default::default()
     }
@@ -38,6 +53,26 @@ fn illuminated_scene(revision: u64) -> Scene {
     let mut rear = face(6.);
     rear.geometry.positions.reverse();
     scene(revision, vec![face(0.), rear, lamp])
+}
+
+fn multiple_light_scene(revision: u64) -> Scene {
+    let mut rear = face(6.);
+    rear.geometry.positions.reverse();
+    let mut warm = face(3.);
+    warm.geometry.positions = [[12., 8., 3.], [12., 10., 3.], [14., 10., 3.], [14., 8., 3.]];
+    warm.emission = Emission {
+        radiance: [4., 2., 1.],
+        two_sided: true,
+        textured: false,
+    };
+    let mut cool = face(2.);
+    cool.geometry.positions = [[2., 5., 2.], [2., 8., 2.], [3., 8., 2.], [3., 5., 2.]];
+    cool.emission = Emission {
+        radiance: [0.5, 3., 7.],
+        two_sided: true,
+        textured: false,
+    };
+    scene(revision, vec![face(0.), rear, warm, cool])
 }
 
 fn complete_rgba(image: &[u8], width: u32, height: u32) {
@@ -168,8 +203,8 @@ fn gpu_restir_independent_pipeline_preserves_primary_and_history_boundaries() {
     );
     renderer.render(&changed, &camera, 17, 31, 0).unwrap();
     assert!(
-        !renderer.restir.as_ref().unwrap().temporal_this_frame,
-        "explicit sequence restart must invalidate history"
+        renderer.restir.as_ref().unwrap().temporal_this_frame,
+        "sampling sequence restart must retain accepted history"
     );
     let mut environment = renderer.environment;
     environment.world_y += 1e-9;
@@ -277,7 +312,8 @@ fn gpu_restir_offline_batch_matches_sequential_fp32_for_each_light_sampler() {
         offline_samples: 3,
         ..config
     });
-    for method in [LightSampling::Tree, LightSampling::TreeSphere] {
+    {
+        let method = LightSampling::Tree;
         let config = RenderSettings {
             light_sampling: method,
             ..config
@@ -482,6 +518,21 @@ fn variance_of_mean(batches: &[[f64; 3]]) -> [f64; 3] {
 }
 
 fn temporal_snapshot(renderer: &Renderer, width: u32, height: u32) -> (Vec<[f32; 5]>, Vec<f32>) {
+    let (records, linear) = temporal_snapshot_words(renderer, width, height);
+    (
+        records
+            .iter()
+            .map(|record| std::array::from_fn(|i| f32::from_bits(record[i])))
+            .collect(),
+        linear,
+    )
+}
+
+fn temporal_snapshot_words(
+    renderer: &Renderer,
+    width: u32,
+    height: u32,
+) -> (Vec<[u32; 20]>, Vec<f32>) {
     let (storage, offset, padded_pixels) = renderer.restir.as_ref().unwrap().history_for_test();
     let reservoir_bytes = u64::from(padded_pixels) * 80;
     let linear_bytes = u64::from(width) * u64::from(height) * 16;
@@ -556,9 +607,9 @@ fn temporal_snapshot(renderer: &Renderer, width: u32, height: u32) -> (Vec<[f32;
                 offset | (((x >> bit) & 1) << (2 * bit)) | (((y >> bit) & 1) << (2 * bit + 1))
             });
             let index = ((y / 16) * width.div_ceil(16) + x / 16) * 256 + morton;
-            let record = &bytes[index as usize * 80..][..20];
+            let record = &bytes[index as usize * 80..][..80];
             reservoirs.push(std::array::from_fn(|word| {
-                f32::from_le_bytes(record[word * 4..word * 4 + 4].try_into().unwrap())
+                u32::from_le_bytes(record[word * 4..word * 4 + 4].try_into().unwrap())
             }));
         }
     }
@@ -769,7 +820,8 @@ fn gpu_restir_offline_mean_agrees_with_path_trace_on_direct_and_indirect_lightin
         config.seed
     );
     let mut failures = Vec::new();
-    for method in [LightSampling::Tree, LightSampling::TreeSphere] {
+    {
+        let method = LightSampling::Tree;
         for bounces in [1, 3] {
             println!(
                 "ReSTIR versus PT: {method:?}, {bounces} bounces, {} samples",
@@ -837,5 +889,371 @@ fn gpu_restir_offline_mean_agrees_with_path_trace_on_direct_and_indirect_lightin
     std::fs::create_dir_all(&output).unwrap();
     std::fs::write(output.join("offline-mean-comparison.csv"), &report).unwrap();
     println!("{report}");
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+#[ignore = "requires windowless Vulkan; independent continuous-reuse chains versus ordinary PT"]
+fn gpu_restir_continuous_reuse_chain_means_agree_with_path_trace() {
+    const WIDTH: u32 = 31;
+    const HEIGHT: u32 = 17;
+    const CHAINS: u32 = 8;
+    const WARMUP: u32 = 16;
+    const SAMPLES: u32 = 64;
+    let camera = camera();
+    let fixture = multiple_light_scene(1);
+    // Request the existing linear display intermediate. Exposure is applied only
+    // later in display, and does not alter the sampled FP32 radiance copied below.
+    let config = RenderSettings {
+        bounces: 3,
+        auto_exposure_compensation: 0.1,
+        ..settings(RenderMode::Realtime)
+    };
+    let mut restir = renderer(config);
+    let mut reference = renderer(RenderSettings {
+        integrator: Integrator::PathTrace,
+        mode: RenderMode::Offline,
+        offline_samples: SAMPLES,
+        auto_exposure_compensation: 0.,
+        ..config
+    });
+    let mut frames = String::from("sampler,chain,seed,frame,warmup,mean_M,max_M,max_rgb,R,G,B\n");
+    let mut report = String::from("sampler,chain,seed,restir_R,restir_G,restir_B,pt_R,pt_G,pt_B\n");
+    let mut failures = Vec::new();
+    {
+        let method = LightSampling::Tree;
+        let mut means = [Vec::new(), Vec::new()];
+        for chain in 0..CHAINS {
+            let seed = 0x1357_2468_u32.wrapping_add(chain.wrapping_mul(0x9e37_79b9));
+            restir
+                .configure(RenderSettings {
+                    seed,
+                    light_sampling: method,
+                    ..config
+                })
+                .unwrap();
+            reference
+                .configure(RenderSettings {
+                    seed,
+                    light_sampling: method,
+                    integrator: Integrator::PathTrace,
+                    mode: RenderMode::Offline,
+                    offline_samples: SAMPLES,
+                    auto_exposure_compensation: 0.,
+                    ..config
+                })
+                .unwrap();
+            // Each chain has its own accepted history. Frames and pixels within
+            // one chain are correlated and are not treated as independent trials.
+            restir.reset_world().unwrap();
+            reference.reset_world().unwrap();
+            let mut sum = [0.; 3];
+            for frame in 0..WARMUP + SAMPLES {
+                restir
+                    .render(&fixture, &camera, WIDTH, HEIGHT, frame)
+                    .unwrap();
+                assert_eq!(
+                    restir.restir.as_ref().unwrap().temporal_this_frame,
+                    frame != 0
+                );
+                let (reservoirs, linear) = temporal_snapshot(&restir, WIDTH, HEIGHT);
+                let rgb = rgb_mean(&linear);
+                let mean_m = reservoirs
+                    .iter()
+                    .map(|record| record[0] as f64)
+                    .sum::<f64>()
+                    / reservoirs.len() as f64;
+                let max_m = reservoirs.iter().map(|record| record[0]).fold(0., f32::max);
+                let max_rgb = linear
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .flat_map(|pixel| &pixel[..3])
+                    .copied()
+                    .fold(0., f32::max);
+                assert!(mean_m.is_finite() && mean_m >= 1.);
+                if frame >= WARMUP {
+                    for (total, value) in sum.iter_mut().zip(rgb) {
+                        *total += value;
+                    }
+                }
+                frames.push_str(&format!(
+                    "{method:?},{chain},{seed},{frame},{},{mean_m},{max_m},{max_rgb},{},{},{}\n",
+                    frame < WARMUP,
+                    rgb[0],
+                    rgb[1],
+                    rgb[2]
+                ));
+            }
+            reference
+                .render(&fixture, &camera, WIDTH, HEIGHT, 0)
+                .unwrap();
+            let restir_mean = sum.map(|value| value / SAMPLES as f64);
+            let pt_mean = rgb_mean(&linear_history(&reference, WIDTH, HEIGHT));
+            assert!(pt_mean.iter().all(|value| *value > 0.001));
+            report.push_str(&format!(
+                "{method:?},{chain},{seed},{},{},{},{},{},{}\n",
+                restir_mean[0], restir_mean[1], restir_mean[2], pt_mean[0], pt_mean[1], pt_mean[2]
+            ));
+            means[0].push(restir_mean);
+            means[1].push(pt_mean);
+        }
+        let variance = means.each_ref().map(|batches| variance_of_mean(batches));
+        for channel in 0..3 {
+            let average = means
+                .each_ref()
+                .map(|chains| chains.iter().map(|mean| mean[channel]).sum::<f64>() / CHAINS as f64);
+            let error = (average[0] - average[1]).abs();
+            // Independent chain uncertainty includes temporal/spatial correlation;
+            // the small relative allowance also covers center-versus-pixel-area primary sampling.
+            let tolerance = 0.02 * average[1].abs()
+                + 5. * (variance[0][channel] + variance[1][channel]).sqrt()
+                + 0.0001;
+            println!(
+                "continuous reuse {method:?} channel{channel}: ReSTIR={} PT={} error={error} tolerance={tolerance}",
+                average[0], average[1]
+            );
+            if error > tolerance {
+                failures.push(format!(
+                    "{method:?} channel{channel}: error {error} > {tolerance}"
+                ));
+            }
+        }
+    }
+    let output = artifact_output();
+    std::fs::create_dir_all(&output).unwrap();
+    std::fs::write(output.join("continuous-reuse-frames.csv"), frames).unwrap();
+    std::fs::write(output.join("continuous-reuse-chains.csv"), report).unwrap();
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+#[ignore = "requires windowless Vulkan; RR-off directional motion, estimator means and path lineage"]
+fn gpu_restir_opposite_camera_motion_preserves_transport_mean() {
+    opposite_camera_motion_preserves_transport_mean(1., "directional-motion", false);
+}
+
+#[test]
+#[ignore = "requires windowless Vulkan; RR-off opposite motion with actual cross-pixel history lineage"]
+fn gpu_restir_cross_pixel_opposite_camera_motion_preserves_transport_mean() {
+    opposite_camera_motion_preserves_transport_mean(0.05, "cross-pixel-directional-motion", true);
+}
+
+fn opposite_camera_motion_preserves_transport_mean(
+    vertical_fov_radians: f32,
+    report_prefix: &str,
+    require_changed_addresses: bool,
+) {
+    const WIDTH: u32 = 31;
+    const HEIGHT: u32 = 17;
+    const CHAINS: u32 = 4;
+    const WARMUP: u32 = 16;
+    const FRAMES: u32 = 64;
+    let fixture = multiple_light_scene(1);
+    let config = RenderSettings {
+        bounces: 3,
+        auto_exposure_compensation: 0.1,
+        ..settings(RenderMode::Realtime)
+    };
+    let mut restir = renderer(config);
+    let mut reference = renderer(RenderSettings {
+        integrator: Integrator::PathTrace,
+        mode: RenderMode::Offline,
+        offline_samples: 8,
+        auto_exposure_compensation: 0.,
+        ..config
+    });
+    let mut frames = String::from(
+        "sampler,direction,chain,seed,frame,warmup,camera_x,camera_y,mean_M,max_rgb,reprojected_lineage_fraction,R,G,B,pt_R,pt_G,pt_B\n",
+    );
+    let mut pixels = String::from(
+        "sampler,direction,chain,frame,x,y,old_x,old_y,init_seed,rc_seed,path_length,rc_length,M,weight,R,G,B\n",
+    );
+    let mut chains =
+        String::from("sampler,direction,chain,seed,restir_R,restir_G,restir_B,pt_R,pt_G,pt_B\n");
+    let mut failures = Vec::new();
+    // Each positive/negative pair visits the same set of camera positions in reverse order.
+    // Compare radiance to PT at every moving position rather than to one static image.
+    for (method, direction, axis, sign) in [LightSampling::Tree].into_iter().flat_map(|method| {
+        [("x+", 0, 1.), ("x-", 0, -1.), ("y+", 1, 1.), ("y-", 1, -1.)]
+            .map(move |(direction, axis, sign)| (method, direction, axis, sign))
+    }) {
+        let mut means = [Vec::new(), Vec::new()];
+        for chain in 0..CHAINS {
+            let seed = 0x1357_2468_u32.wrapping_add(chain.wrapping_mul(0x9e37_79b9));
+            restir
+                .configure(RenderSettings {
+                    seed,
+                    light_sampling: method,
+                    ..config
+                })
+                .unwrap();
+            reference
+                .configure(RenderSettings {
+                    seed,
+                    light_sampling: method,
+                    integrator: Integrator::PathTrace,
+                    mode: RenderMode::Offline,
+                    offline_samples: 8,
+                    auto_exposure_compensation: 0.,
+                    ..config
+                })
+                .unwrap();
+            restir.reset_world().unwrap();
+            reference.reset_world().unwrap();
+            let mut sums = [[0.; 3]; 2];
+            let mut retained_seed_families = 0;
+            let mut changed_addresses = 0;
+            let mut previous = None::<(Camera, Vec<[u32; 20]>)>;
+            for frame in 0..WARMUP + FRAMES {
+                let mut current = camera();
+                current.vertical_fov_radians = vertical_fov_radians;
+                let step = frame.saturating_sub(WARMUP).min(FRAMES - 1);
+                current.position[axis] += sign * (step as f32 / (FRAMES - 1) as f32 - 0.5);
+                restir
+                    .render(&fixture, &current, WIDTH, HEIGHT, frame)
+                    .unwrap();
+                assert_eq!(
+                    restir.restir.as_ref().unwrap().temporal_this_frame,
+                    frame != 0,
+                    "{direction} frame{frame}: camera motion triggered global reset"
+                );
+                let (records, linear) = temporal_snapshot_words(&restir, WIDTH, HEIGHT);
+                let rgb = rgb_mean(&linear);
+                let mut matches = 0;
+                let mut eligible = 0;
+                let mut mean_m = 0.;
+                let max_rgb = linear
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .flat_map(|pixel| &pixel[..3])
+                    .copied()
+                    .fold(0., f32::max);
+                for y in 0..HEIGHT {
+                    for x in 0..WIDTH {
+                        let index = (y * WIDTH + x) as usize;
+                        let record = records[index];
+                        let m = f32::from_bits(record[0]);
+                        let weight = f32::from_bits(record[1]);
+                        assert!(m.is_finite() && m >= 1. && m <= 84.);
+                        assert!(weight.is_finite() && weight >= 0.);
+                        mean_m += m as f64;
+                        let old_pixel = previous.as_ref().map_or([-1; 2], |(old, _)| {
+                            restir_reprojection_tests::expected_pixel(
+                                current,
+                                *old,
+                                [x, y],
+                                [WIDTH, HEIGHT],
+                            )
+                        });
+                        if frame >= WARMUP && old_pixel[0] >= 0 && old_pixel != [x as i32, y as i32]
+                        {
+                            changed_addresses += 1;
+                        }
+                        if let Some((_, old)) = &previous {
+                            if old_pixel[0] >= 0 && weight > 0. {
+                                let old_index =
+                                    (old_pixel[1] as u32 * WIDTH + old_pixel[0] as u32) as usize;
+                                if f32::from_bits(old[old_index][1]) > 0. {
+                                    eligible += 1;
+                                    matches += usize::from(record[6] == old[old_index][6]);
+                                }
+                            }
+                        }
+                        // Include both sides of Morton tile boundaries and a small bright-source ROI.
+                        if [7, 15, 16, 23].contains(&x) && [4, 8, 12].contains(&y) {
+                            let color = &linear[4 * index..][..3];
+                            pixels.push_str(&format!(
+                                "{method:?},{direction},{chain},{frame},{x},{y},{},{},{},{},{},{},{m},{weight},{},{},{}\n",
+                                old_pixel[0], old_pixel[1], record[6], record[7],
+                                record[5] & 255, (record[5] >> 8) & 255, color[0], color[1], color[2]
+                            ));
+                        }
+                    }
+                }
+                mean_m /= (WIDTH * HEIGHT) as f64;
+                let mut pt = [0.; 3];
+                if frame >= WARMUP {
+                    retained_seed_families += matches;
+                    reference
+                        .render(&fixture, &current, WIDTH, HEIGHT, frame)
+                        .unwrap();
+                    assert_eq!(
+                        reference.samples, 8,
+                        "moving PT reference accumulated another viewpoint"
+                    );
+                    pt = rgb_mean(&linear_history(&reference, WIDTH, HEIGHT));
+                    for channel in 0..3 {
+                        sums[0][channel] += rgb[channel];
+                        sums[1][channel] += pt[channel];
+                    }
+                }
+                let lineage = if eligible == 0 {
+                    0.
+                } else {
+                    matches as f64 / eligible as f64
+                };
+                frames.push_str(&format!(
+                    "{method:?},{direction},{chain},{seed},{frame},{},{},{},{mean_m},{max_rgb},{lineage},{},{},{},{},{},{}\n",
+                    frame < WARMUP, current.position[0], current.position[1],
+                    rgb[0], rgb[1], rgb[2], pt[0], pt[1], pt[2]
+                ));
+                previous = Some((current, records));
+            }
+            // Require actual retained source seed families, not merely a dispatched
+            // temporal stage. This does not assert that every reconstructed path is identical.
+            assert!(
+                retained_seed_families > 0,
+                "{method:?} {direction}: no retained seed family"
+            );
+            if require_changed_addresses {
+                assert!(
+                    changed_addresses > 0,
+                    "{method:?} {direction} chain{chain}: no measured cross-pixel address"
+                );
+            }
+            eprintln!(
+                "moving reuse {method:?} {direction} chain{chain}: fov={vertical_fov_radians} measured_changed_addresses={changed_addresses} retained_seed_families={retained_seed_families}"
+            );
+            let averages = sums.map(|sum| sum.map(|value| value / FRAMES as f64));
+            for index in 0..2 {
+                means[index].push(averages[index]);
+            }
+            chains.push_str(&format!(
+                "{method:?},{direction},{chain},{seed},{},{},{},{},{},{}\n",
+                averages[0][0],
+                averages[0][1],
+                averages[0][2],
+                averages[1][0],
+                averages[1][1],
+                averages[1][2]
+            ));
+        }
+        let variance = means.each_ref().map(|chains| variance_of_mean(chains));
+        for channel in 0..3 {
+            let average = means
+                .each_ref()
+                .map(|chains| chains.iter().map(|x| x[channel]).sum::<f64>() / CHAINS as f64);
+            let error = (average[0] - average[1]).abs();
+            let tolerance = 0.02 * average[1].abs()
+                + 5. * (variance[0][channel] + variance[1][channel]).sqrt()
+                + 0.0001;
+            println!(
+                "moving reuse {method:?} {direction} channel{channel}: ReSTIR={} PT={} error={error} tolerance={tolerance}",
+                average[0], average[1]
+            );
+            if error > tolerance {
+                failures.push(format!(
+                    "{method:?} {direction} channel{channel}: error{error} > {tolerance}"
+                ));
+            }
+        }
+    }
+    let output = artifact_output();
+    std::fs::create_dir_all(&output).unwrap();
+    std::fs::write(output.join(format!("{report_prefix}-frames.csv")), frames).unwrap();
+    std::fs::write(output.join(format!("{report_prefix}-pixels.csv")), pixels).unwrap();
+    std::fs::write(output.join(format!("{report_prefix}-chains.csv")), chains).unwrap();
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

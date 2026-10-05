@@ -4,7 +4,8 @@ import "frame.slang";
 import "restir/types.slang";
 import "restir/reservoir.slang";
 
-// Binding 23, 464 bytes. All pointers borrow private GPU state until host completion.
+// RA-001/009, docs/restir-adaptations.md: binding 23 is a verified 464-byte Prime ABI.
+// All pointers borrow private GPU state until host completion.
 public struct RestirParameters {
     public Frame frame;
     public Frame previousFrame;
@@ -28,7 +29,8 @@ public struct RestirParameters {
     public uint2 *historyStatic;
     public uint2 *historyDynamic;
     public uint2 *historyEmitters;
-    public uint4 identityControl; // static/dynamic/emitter counts, accepted scene revision
+    public uint2 *historyStaticQuads; // Former alignment padding at byte 440.
+    public uint4 identityControl;     // static/dynamic/emitter counts, accepted scene revision
 };
 public struct RestirPass {
     public uint phase; // 0 temporal (two directions), 1 spatial (three paired directions)

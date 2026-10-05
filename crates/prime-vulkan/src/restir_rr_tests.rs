@@ -185,7 +185,7 @@ impl Fixture {
             sun: 1.0 / 256.0,
             sky: 1.0 / 256.0,
             stars: 0.0,
-            ray_reconstruction: false,
+            native_noisy_output: true,
             opacity_micromap: false,
             ..Default::default()
         };

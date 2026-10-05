@@ -4,13 +4,15 @@ use super::resources::{Acceleration, Buffer, Context};
 use super::textures::Textures;
 #[path = "history_identity.rs"]
 mod history_identity;
+#[path = "static_history.rs"]
+mod static_history;
 use crate::cpu_profile::{FrameCpu, Stage};
 use crate::material_arena::{Allocation, MaterialArena};
 use crate::objects::Objects;
 use crate::plan::{OBJECT_BIT, validate_material_count};
 use ash::vk;
-use history_identity::HistoryIdentity;
 pub(super) use history_identity::HistoryIdentityInput;
+use history_identity::{HistoryIdentity, StaticHistory};
 use prime_scene::instances::InstanceInput;
 use prime_scene::{
     geometry::MeshGeometry,
@@ -36,6 +38,14 @@ fn record_bytes(format: usize) -> u64 {
     crate::packing::stride(format) as u64
 }
 
+fn same_history_layout(old: &[StaticAllocation], plans: &[crate::packing::Plan<'_>]) -> bool {
+    let groups = plans.iter().flat_map(|plan| &plan.groups);
+    old.len() == groups.clone().count()
+        && old.iter().zip(groups).all(|(allocation, group)| {
+            allocation.format == group.format && allocation.records.count == group.count
+        })
+}
+
 struct Cluster {
     generation: u64,
     allocations: Vec<StaticAllocation>,
@@ -44,6 +54,9 @@ struct Cluster {
     micromaps: Vec<crate::omm::Micromap>,
     omm_textures: BTreeSet<u32>,
     texture_dependencies: BTreeSet<u32>,
+    support_dependencies: Vec<BTreeSet<u32>>,
+    history_cutout_squares: bool,
+    history_packing: Option<static_history::StaticPacking>,
     omm_counts: [u64; 4],
     // A deferred rebuild must use shader alpha against the current texture coverage.
     stale_omm: bool,
@@ -131,6 +144,7 @@ impl Cluster {
 }
 
 pub(super) struct Geometry {
+    stable_history: bool,
     history_identity: Option<HistoryIdentity>,
     history_revision_floor: u32,
     workers: Arc<prime_scene::workers::CpuWorkers>,
@@ -159,8 +173,6 @@ pub(super) struct Geometry {
     materials: [MaterialArena; crate::packing::FORMATS],
     pub static_bases: Buffer,
     light_sampler: crate::light_sampler::LightSampler,
-    light_sampling: prime_scene::settings::LightSampling,
-    sampler_dirty: bool,
     next_light_key: u64,
     has_surfaces: bool,
     has_compounds: bool,
@@ -179,15 +191,8 @@ pub(super) struct Geometry {
 
 #[cfg(test)]
 pub(super) struct LightSamplingSnapshot {
-    pub method: prime_scene::settings::LightSampling,
-    pub dirty: bool,
     pub has_lights: bool,
-    pub pages: Vec<(
-        u64,
-        Arc<Buffer>,
-        Arc<prime_scene::surface::LightTree>,
-        prime_scene::settings::LightSampling,
-    )>,
+    pub pages: Vec<(u64, Arc<Buffer>, Arc<prime_scene::surface::LightTree>)>,
     pub blas: Vec<vk::AccelerationStructureKHR>,
     pub local_depths: [u64; 28],
 }
@@ -227,6 +232,7 @@ impl Geometry {
             cell_budget,
             resources,
             prime_scene::settings::LightSampling::Tree,
+            false,
         )
     }
     pub fn new_with_resources(
@@ -236,9 +242,11 @@ impl Geometry {
         enabled: bool,
         cell_budget: usize,
         resources: crate::scene_resources::SharedResources,
-        light_sampling: prime_scene::settings::LightSampling,
+        _light_sampling: prime_scene::settings::LightSampling,
+        stable_history: bool,
     ) -> Result<Self, String> {
         let mut geometry = Self {
+            stable_history,
             workers: workers.clone(),
             indices: [
                 crate::objects::index_buffer_with_stride(context, 16, 11)?,
@@ -284,9 +292,7 @@ impl Geometry {
                 vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
                 false,
             )?,
-            light_sampler: crate::light_sampler::LightSampler::new(context, light_sampling),
-            light_sampling,
-            sampler_dirty: false,
+            light_sampler: crate::light_sampler::LightSampler::new(context),
             next_light_key: 1,
             has_surfaces: false,
             has_compounds: false,
@@ -307,6 +313,20 @@ impl Geometry {
     }
     pub fn textures(&self) -> std::cell::Ref<'_, Textures> {
         std::cell::Ref::map(self.resources.borrow(), |resources| &resources.textures)
+    }
+    pub fn set_stable_history(&mut self, enabled: bool) {
+        if self.stable_history == enabled {
+            return;
+        }
+        self.stable_history = enabled;
+        if enabled {
+            self.static_planner
+                .invalidate_cells(self.clusters.keys().copied());
+        } else {
+            for cluster in self.clusters.values_mut() {
+                cluster.history_packing = None;
+            }
+        }
     }
     pub fn begin_frame(&mut self, context: &Context, completed: u64) {
         // Frozen frames do not execute an object plan; do not report the prior frame's rebuilds.
@@ -379,6 +399,20 @@ impl Geometry {
                     .directory
                     .slot(key)
                     .ok_or("Missing history static directory range")?;
+                if let Some(packing) = &cluster.history_packing {
+                    for (index, page) in packing.pages.iter().enumerate() {
+                        identity.static_quads(first + index as u32, &page.states, false)?;
+                    }
+                    for (previous, count) in self.directory.aliases(key) {
+                        identity.alias_static(
+                            previous,
+                            first,
+                            count,
+                            cluster.allocations.len() as u32,
+                        );
+                    }
+                    continue;
+                }
                 identity.static_range(
                     first,
                     cluster
@@ -406,9 +440,22 @@ impl Geometry {
         self.history_identity.as_ref().unwrap().buffers_for_test()
     }
 
+    #[cfg(all(test, feature = "shader-tests"))]
+    pub fn history_quad_buffer_for_test(&self) -> Option<&Buffer> {
+        self.history_identity
+            .as_ref()
+            .unwrap()
+            .quad_buffer_for_test()
+    }
+
+    #[cfg(all(test, feature = "shader-tests"))]
+    pub fn limit_history_capacity_for_test(&mut self, key: Cell, capacity: u32) {
+        self.directory
+            .limit_history_capacity_for_test(key, capacity);
+    }
+
     pub fn needs_update(&self, scene: SceneInput<'_>) -> bool {
         self.compactions.needs_update(self.completed)
-            || self.sampler_dirty
             || self.omm_dirty
             || self.source_changed(scene)
             || self.static_planner.has_pending()
@@ -457,21 +504,17 @@ impl Geometry {
         for (_, page) in self.light_sources.values() {
             for (total, count) in local_depths
                 .iter_mut()
-                .zip(crate::light_sphere_cpu::leaf_depths(&page.tree.paths))
+                .zip(crate::light_tree_cpu::leaf_depths(&page.tree.paths))
             {
                 *total += count;
             }
         }
         LightSamplingSnapshot {
-            method: self.light_sampling,
-            dirty: self.sampler_dirty,
             has_lights: self.light_sampler.has_lights,
             pages: self
                 .light_sources
                 .iter()
-                .map(|(&key, (_, page))| {
-                    (key, page.emitters.clone(), page.source.clone(), page.method)
-                })
+                .map(|(&key, (_, page))| (key, page.emitters.clone(), page.source.clone()))
                 .collect(),
             blas: self
                 .clusters
@@ -480,39 +523,6 @@ impl Geometry {
                 .collect(),
             local_depths,
         }
-    }
-
-    /// Defer uploads to the next active record; published BLAS and emitter identities survive.
-    pub fn set_light_sampling(&mut self, method: prime_scene::settings::LightSampling) {
-        if self.light_sampling != method {
-            self.light_sampling = method;
-            self.sampler_dirty = true;
-        }
-    }
-
-    fn rebuild_light_sampler(&mut self, context: &Arc<Context>) -> Result<(), String> {
-        let mut trace = prime_diagnostics::scope("lights.switch");
-        trace.fail();
-        trace.count("ls", self.light_sampling as u64);
-        trace.count("pg", self.light_sources.len() as u64);
-        let mut sources = BTreeMap::new();
-        for (&key, (origin, page)) in &self.light_sources {
-            let page = if page.method == self.light_sampling {
-                page.clone()
-            } else {
-                Rc::new(page.rebuild_sampler(context, self.light_sampling)?)
-            };
-            sources.insert(key, (*origin, page));
-        }
-        for cluster in self.clusters.values_mut() {
-            for page in cluster.light_pages.iter_mut().flatten() {
-                *page = sources[&page.key].1.clone();
-            }
-        }
-        self.light_sources = sources;
-        self.light_sampler = crate::light_sampler::LightSampler::new(context, self.light_sampling);
-        trace.succeed();
-        Ok(())
     }
 
     pub fn set_omm(&mut self, enabled: bool) {
@@ -590,7 +600,7 @@ impl Geometry {
                     .map(|(&key, _)| key),
             );
         }
-        let mut lights_changed = self.anchor != scene.anchor || self.sampler_dirty;
+        let mut lights_changed = self.anchor != scene.anchor;
         let mut instance_flags_changed = self.omm_dirty;
         let owner = self.resources.clone();
         let mut resources = owner.borrow_mut();
@@ -671,14 +681,42 @@ impl Geometry {
                     .directory
                     .slot(key)
                     .ok_or("Missing texture support history range")?;
-                identity.static_range(
-                    first,
-                    cluster
-                        .allocations
-                        .iter()
-                        .map(|allocation| allocation.records.count * 2),
-                );
-                emitter_keys.extend(cluster.light_pages.iter().flatten().map(|page| page.key));
+                if let Some(packing) = &cluster.history_packing {
+                    for (index, page) in packing.pages.iter().enumerate() {
+                        identity.invalidate_static_quads(
+                            first + index as u32,
+                            page.mesh
+                                .quads
+                                .iter()
+                                .enumerate()
+                                .filter_map(|(quad, face)| {
+                                    let base = (face.geometry.flags != 0 || face.detail.is_some())
+                                        && resources
+                                            .history_support_changed
+                                            .contains(&face.geometry.texture_id);
+                                    let detail = face.detail.as_ref().is_some_and(|detail| {
+                                        detail.layer.flags != 0
+                                            && resources
+                                                .history_support_changed
+                                                .contains(&detail.layer.texture_id)
+                                    });
+                                    (base || detail).then_some(quad)
+                                }),
+                        );
+                    }
+                    continue;
+                }
+                for (index, dependencies) in cluster.support_dependencies.iter().enumerate() {
+                    if !dependencies.is_disjoint(&resources.history_support_changed) {
+                        identity.static_range(
+                            first + index as u32,
+                            [cluster.allocations[index].records.count * 2],
+                        );
+                        if let Some(page) = &cluster.light_pages[index] {
+                            emitter_keys.insert(page.key);
+                        }
+                    }
+                }
             }
             if !emitter_keys.is_empty() {
                 identity.invalidate_emitter_keys(&emitter_keys);
@@ -715,6 +753,17 @@ impl Geometry {
         )?;
         compile_trace.succeed();
         drop(compile_trace);
+        let mut prepared_packing = BTreeMap::new();
+        if self.stable_history {
+            for update in &mut plan.geometry {
+                let old = self
+                    .clusters
+                    .get(&update.key)
+                    .and_then(|cluster| cluster.history_packing.as_ref());
+                let packing = static_history::StaticPacking::prepare(update, old, scene.revision)?;
+                prepared_packing.insert(update.key, packing);
+            }
+        }
         let mut material_trace = prime_diagnostics::scope("geom.material");
         material_trace.fail();
         self.static_occlusion_changed |= !plan.removed.is_empty()
@@ -748,10 +797,10 @@ impl Geometry {
             self.epoch = scene.epoch;
         }
         for key in &plan.removed {
-            if let Some(identity) = &mut self.history_identity
-                && let Some((_, first, count)) = self.directory.slot(*key)
-            {
-                identity.remove_static(first, count);
+            if let Some(identity) = &mut self.history_identity {
+                for (first, count) in self.directory.history_ranges(*key) {
+                    identity.remove_static(first, count);
+                }
             }
             self.directory.remove(*key);
             if let Some(old) = self.clusters.remove(key) {
@@ -772,12 +821,58 @@ impl Geometry {
             }
         }
         let mut allocated_changes = Vec::with_capacity(plan.geometry.len());
+        let mut preserved_history: BTreeMap<Cell, StaticHistory> = BTreeMap::new();
+        let mut preserved_emitters: BTreeMap<Cell, Vec<Option<u64>>> = BTreeMap::new();
+        let mut compatible_stable_ranges = BTreeSet::new();
         for update in &plan.geometry {
             directory_changed.insert(update.key);
-            if let Some(identity) = &mut self.history_identity
-                && let Some((_, first, count)) = self.directory.slot(update.key)
+            let plans = update
+                .geometries
+                .iter()
+                .enumerate()
+                .map(|(index, geometry)| {
+                    let inputs = geometry.members.iter().map(|member| crate::packing::Input {
+                        triangles: member.triangles.view(member.range.clone()),
+                        offset: Some(member.offset),
+                        flags: Some(geometry.flags),
+                    });
+                    if let Some(packing) = prepared_packing.get(&update.key) {
+                        crate::packing::Plan::with_format(inputs, packing.pages[index].format)
+                    } else {
+                        crate::packing::Plan::new(inputs, true)
+                    }
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            // An unchanged immutable source signature and the same deterministic
+            // compiler mode prove the primitive/leaf order. Layout counts alone
+            // are insufficient for a changed source, even if its positions match.
+            if let Some(old) = self.clusters.get(&update.key)
+                && !update.content_changed
+                && old.history_cutout_squares == self.opacity_micromap
+                && same_history_layout(&old.allocations, &plans)
             {
-                identity.remove_static(first, count);
+                if let Some(identity) = &self.history_identity
+                    && let Some((_, first, count)) = self.directory.slot(update.key)
+                    && let Some(saved) = identity.snapshot_static(first, count)
+                {
+                    preserved_history.insert(update.key, saved);
+                }
+                preserved_emitters.insert(
+                    update.key,
+                    old.light_pages
+                        .iter()
+                        .map(|page| page.as_ref().map(|p| p.key))
+                        .collect(),
+                );
+            }
+            if let Some(identity) = &mut self.history_identity {
+                for (first, count) in self.directory.history_ranges(update.key) {
+                    if prepared_packing.contains_key(&update.key) {
+                        identity.suspend_static(first, count);
+                    } else {
+                        identity.remove_static(first, count);
+                    }
+                }
             }
             if let Some(old) = self.clusters.remove(&update.key) {
                 self.static_count -= old.triangle_count;
@@ -795,20 +890,6 @@ impl Geometry {
                     self.materials[allocation.format].free(allocation.records);
                 }
             }
-            let plans = update
-                .geometries
-                .iter()
-                .map(|geometry| {
-                    crate::packing::Plan::new(
-                        geometry.members.iter().map(|member| crate::packing::Input {
-                            triangles: member.triangles.view(member.range.clone()),
-                            offset: Some(member.offset),
-                            flags: Some(geometry.flags),
-                        }),
-                        true,
-                    )
-                })
-                .collect::<Result<Vec<_>, String>>()?;
             let allocations = plans
                 .iter()
                 .flat_map(|p| &p.groups)
@@ -820,6 +901,23 @@ impl Geometry {
                     })
                 })
                 .collect::<Result<Vec<_>, String>>()?;
+            if prepared_packing.contains_key(&update.key) {
+                let old = self.directory.slot(update.key);
+                let count = allocations.len() as u32;
+                let capacity = count
+                    .checked_next_power_of_two()
+                    .ok_or("Static history row capacity overflow")?
+                    .max(12);
+                let first = self.directory.reserve_stable(update.key, count, capacity)?;
+                if let Some((_, previous, old_count)) = old {
+                    compatible_stable_ranges.insert(update.key);
+                    if previous != first
+                        && let Some(identity) = &mut self.history_identity
+                    {
+                        identity.relocate_static_quads(previous, first, old_count)?;
+                    }
+                }
+            }
             allocated_changes.push((update, plans, allocations));
         }
         self.rebuilt_clusters = allocated_changes.len() as u32;
@@ -1077,21 +1175,32 @@ impl Geometry {
                 // The shared owner uploads the emitter records once, independent of formats.
                 let mut light_pages = Vec::with_capacity(allocations.len());
                 for (g, plan) in update.geometries.iter().zip(plans) {
+                    let preserved_key = preserved_emitters
+                        .get(&key)
+                        .and_then(|pages| pages.get(light_pages.len()).copied().flatten());
                     let light = if let Some(member) = g.members.first()
                         && let MeshGeometry::Surfaces(mesh) = &member.triangles
                     {
-                        crate::surface::upload_lights(
+                        let mut light = crate::surface::upload_lights(
                             context,
                             mesh,
                             &resources.textures.indices,
-                            self.next_light_key,
-                            self.light_sampling,
-                        )?
-                        .map(Rc::new)
+                            preserved_key.unwrap_or(self.next_light_key),
+                        )?;
+                        if prepared_packing.contains_key(&key)
+                            && let Some(light) = &mut light
+                        {
+                            let (_, first, _) = self
+                                .directory
+                                .slot(key)
+                                .ok_or("Missing stable light material row")?;
+                            light.static_page = Some(first + light_pages.len() as u32);
+                        }
+                        light.map(Rc::new)
                     } else {
                         None
                     };
-                    if light.is_some() {
+                    if light.is_some() && preserved_key.is_none() {
                         self.next_light_key = self
                             .next_light_key
                             .checked_add(1)
@@ -1113,6 +1222,11 @@ impl Geometry {
                             for plan in plans { plan.texture_dependencies(&mut ids); }
                             ids
                         },
+                        support_dependencies: plans.iter().flat_map(|plan| {
+                            plan.groups.iter().map(|group| plan.support_dependencies(group))
+                        }).collect(),
+                        history_cutout_squares: self.opacity_micromap,
+                        history_packing: prepared_packing.remove(&key),
                         omm_counts,
                         stale_omm: false,
                         allocations: allocations.clone(),
@@ -1152,7 +1266,7 @@ impl Geometry {
         };
         plan.placements_changed |= compacted;
         self.top_dirty |= compacted;
-        if !plan.placements_changed && !self.sampler_dirty {
+        if !plan.placements_changed {
             self.omm_dirty = false;
             self.revision = scene.publication();
             self.anchor = scene.anchor;
@@ -1162,9 +1276,6 @@ impl Geometry {
             resources.coverage_changed.clear();
             self.static_planner.recycle(plan);
             return Ok(false);
-        }
-        if self.sampler_dirty {
-            self.rebuild_light_sampler(context)?;
         }
         if lights_changed {
             let mut lights_trace = prime_diagnostics::scope("geom.lights");
@@ -1253,37 +1364,35 @@ impl Geometry {
                     .directory
                     .slot(key)
                     .ok_or("Missing published history range")?;
-                identity.static_range(
-                    first,
-                    cluster
-                        .allocations
-                        .iter()
-                        .map(|allocation| allocation.records.count * 2),
-                );
+                if let Some(packing) = &cluster.history_packing {
+                    for (index, page) in packing.pages.iter().enumerate() {
+                        identity.static_quads(
+                            first + index as u32,
+                            &page.states,
+                            compatible_stable_ranges.contains(&key),
+                        )?;
+                    }
+                    for (previous, count) in self.directory.aliases(key) {
+                        identity.alias_static(
+                            previous,
+                            first,
+                            count,
+                            cluster.allocations.len() as u32,
+                        );
+                    }
+                    continue;
+                }
+                let counts = || cluster.allocations.iter().map(|a| a.records.count * 2);
+                if !preserved_history
+                    .get(&key)
+                    .is_some_and(|saved| identity.restore_static(first, counts(), saved))
+                {
+                    identity.static_range(first, counts());
+                }
             }
         }
-        if (lights_changed || self.sampler_dirty)
-            && let Some(identity) = &mut self.history_identity
-        {
+        if lights_changed && let Some(identity) = &mut self.history_identity {
             identity.synchronize_emitters(self.light_sampler.history_pages());
-        }
-        if self.sampler_dirty {
-            for (&key, cluster) in &self.clusters {
-                let fields: Vec<_> = cluster
-                    .light_pages
-                    .iter()
-                    .map(|page| {
-                        page.as_ref().map_or((0, 0, 1), |page| {
-                            (
-                                self.light_sampler.first_emitter(page.key),
-                                page.emitters.address(),
-                                page.format,
-                            )
-                        })
-                    })
-                    .collect();
-                self.directory.light_fields(key, &fields)?;
-            }
         }
         self.directory.light_header(
             self.light_sampler.world_count(),
@@ -1363,7 +1472,6 @@ impl Geometry {
         self.omm_revision = resources.omm_revision;
         resources.coverage_changed.clear();
         directory_trace.succeed();
-        self.sampler_dirty = false;
         Ok(published_changed)
     }
 
@@ -1660,7 +1768,7 @@ mod tests {
         let settings = crate::RenderSettings {
             mode: crate::RenderMode::Realtime,
             view: prime_scene::settings::DiagnosticView::NoisyColor,
-            ray_reconstruction: false,
+            native_noisy_output: true,
             stars: 0.0,
             auto_exposure_compensation: 0.0,
             ..Default::default()
@@ -1802,6 +1910,7 @@ mod tests {
         let source = mesh(0., 1, [1.; 4]);
         let update = |triangles: MeshGeometry| TerrainUpdate {
             key: cell([0; 3]),
+            content_changed: true,
             geometries: vec![TerrainGeometry {
                 flags: 1,
                 triangle_count: 2,

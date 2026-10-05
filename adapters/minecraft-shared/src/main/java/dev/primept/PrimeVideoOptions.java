@@ -5,7 +5,6 @@ import dev.primept.settings.RenderSettings;
 import dev.primept.settings.RenderSettings.Control;
 import dev.primept.settings.RenderSettings.View;
 import dev.primept.settings.RenderSettings.DlssQuality;
-import dev.primept.settings.RenderSettings.LightSampling;
 import dev.primept.settings.RenderSettings.Renderer;
 import java.util.EnumMap;
 import java.util.List;
@@ -28,7 +27,6 @@ public final class PrimeVideoOptions {
     private OptionInstance<Renderer> renderer;
     private OptionInstance<View> view;
     private OptionInstance<DlssQuality> dlssQuality;
-    private OptionInstance<LightSampling> lightSampling;
     private PrimeVideoOptions(OptionsList list, Runnable rebuildScreen) {
         this.list = list;
         this.rebuildScreen = rebuildScreen;
@@ -104,13 +102,12 @@ public final class PrimeVideoOptions {
                 value
                 -> PrimeClient.updateSettings(PrimeClient.settings().withOpacityMicromap(value)));
         nativeNoisyOutput = OptionInstance.createBoolean(
-                "primept.settings.ray_reconstruction",
+                "primept.settings.native_noisy_output",
                 OptionInstance.cachedConstantTooltip(
-                        Component.translatable("primept.settings.ray_reconstruction.tooltip")),
-                !PrimeClient.settings().rayReconstruction(),
+                        Component.translatable("primept.settings.native_noisy_output.tooltip")),
+                PrimeClient.settings().nativeNoisyOutput(),
                 value
-                -> PrimeClient.updateSettings(
-                        PrimeClient.settings().withRayReconstruction(!value)));
+                -> PrimeClient.updateSettings(PrimeClient.settings().withNativeNoisyOutput(value)));
         dlssQuality = new OptionInstance<>(
                 "primept.settings.dlss_quality",
                 OptionInstance.cachedConstantTooltip(
@@ -129,20 +126,6 @@ public final class PrimeVideoOptions {
         list.addBig(controls.get(Control.OFFLINE_SAMPLES));
         list.addBig(controls.get(Control.TERRAIN_BATCHES_PER_FRAME));
         list.addHeader(Component.translatable("primept.settings.lighting"));
-        lightSampling = new OptionInstance<>(
-                "primept.settings.light_sampling",
-                OptionInstance.cachedConstantTooltip(
-                        Component.translatable("primept.settings.light_sampling.tooltip")),
-                (caption, value)
-                        -> Component.translatable("primept.settings.light_sampling." +
-                                                  value.name().toLowerCase(Locale.ROOT)),
-                new OptionInstance.Enum<>(
-                        List.of(LightSampling.values()),
-                        Codec.STRING.xmap(LightSampling::fromKey, LightSampling::name)),
-                PrimeClient.settings().lightSampling(),
-                value
-                -> PrimeClient.updateSettings(PrimeClient.settings().withLightSampling(value)));
-        list.addBig(lightSampling);
         list.addBig(controls.get(Control.SUN_EV));
         list.addBig(controls.get(Control.SKY_EV));
         list.addBig(controls.get(Control.STARS));
@@ -197,7 +180,7 @@ public final class PrimeVideoOptions {
         }
         syncToggle(performanceCapture, Diagnostics.captureRequested());
         syncToggle(ignoreGlobalHistoryResets, PrimeClient.settings().ignoreGlobalHistoryResets());
-        syncToggle(nativeNoisyOutput, !PrimeClient.settings().rayReconstruction());
+        syncToggle(nativeNoisyOutput, PrimeClient.settings().nativeNoisyOutput());
         if (offline.get() != PrimeClient.offlineRequested()) {
             offline.set(PrimeClient.offlineRequested());
             if (list.findOption(offline) instanceof CycleButton<?> button) {
@@ -228,9 +211,9 @@ public final class PrimeVideoOptions {
         list.findOption(nativeNoisyOutput).active = PrimeClient.controlsAvailable() && !frozen;
         list.findOption(controls.get(Control.FRAME_GENERATION)).active =
                 PrimeClient.controlsAvailable() && !frozen &&
-                PrimeClient.settings().rayReconstruction();
+                !PrimeClient.settings().nativeNoisyOutput();
         list.findOption(dlssQuality).active = PrimeClient.controlsAvailable() && !frozen &&
-                                              PrimeClient.settings().rayReconstruction();
+                                              !PrimeClient.settings().nativeNoisyOutput();
         for (var control : List.of(Control.BOUNCES, Control.SUN_EV, Control.SKY_EV, Control.STARS,
                                    Control.LATITUDE, Control.SOLAR_LONGITUDE))
             list.findOption(controls.get(control)).active = !frozen;

@@ -13,6 +13,17 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 final class SettingsTest {
+    private static String legacyFile(RenderSettings settings, int version) {
+        String result =
+                SettingsFile.encode(settings)
+                        .replace("version=10", "version=" + version)
+                        .replace("diagnostics.native_noisy_output=" + settings.nativeNoisyOutput(),
+                                 "render.ray_reconstruction=" + !settings.nativeNoisyOutput());
+        return version == 8 ? result.replace("diagnostics.ignore_global_history_resets=" +
+                                                     settings.ignoreGlobalHistoryResets() + "\n",
+                                             "")
+                            : result;
+    }
     @Test
     void vertexBudgetDefaultsAndExplicitLegacyValues(@TempDir Path dir) {
         assertEquals(12, RenderSettings.defaults().value(RenderSettings.Control.BOUNCES));
@@ -43,7 +54,7 @@ final class SettingsTest {
         var settings = RenderSettings.defaults()
                                .withPathTracing(false)
                                .withOpacityMicromap(false)
-                               .withRayReconstruction(false)
+                               .withNativeNoisyOutput(true)
                                .withDlssQuality(RenderSettings.DlssQuality.QUALITY)
                                .withLightSampling(RenderSettings.LightSampling.TREE);
         for (var control : RenderSettings.Control.values())
@@ -65,10 +76,10 @@ final class SettingsTest {
                 RenderSettings.Control.BOUNCES, 12);
         String valid = SettingsFile.encode(changed);
         for (String broken : new String[] {
-                     valid.replace("version=9", "version=0"),
-                     valid.replace("version=9", "version=7"),
-                     valid.replace("version=9", "version=10"),
-                     valid.replace("version=9", ""),
+                     valid.replace("version=10", "version=0"),
+                     valid.replace("version=10", "version=7"),
+                     valid.replace("version=10", "version=11"),
+                     valid.replace("version=10", ""),
                      valid.replace("render.bounces=12", ""),
                      valid.replace("render.bounces=12", "render.bounces=65"),
                      valid.replace("terrain.batches_per_frame=8", ""),
@@ -79,9 +90,9 @@ final class SettingsTest {
                      valid.replace("renderer=vanilla\n", ""),
                      valid.replace("render.opacity_micromap=true", ""),
                      valid.replace("render.opacity_micromap=true", "render.opacity_micromap=maybe"),
-                     valid.replace("render.ray_reconstruction=true", ""),
-                     valid.replace("render.ray_reconstruction=true",
-                                   "render.ray_reconstruction=maybe"),
+                     valid.replace("diagnostics.native_noisy_output=false", ""),
+                     valid.replace("diagnostics.native_noisy_output=false",
+                                   "diagnostics.native_noisy_output=maybe"),
                      valid.replace("render.dlss_quality=PERFORMANCE", ""),
                      valid.replace("render.dlss_quality=PERFORMANCE",
                                    "render.dlss_quality=UNKNOWN"),
@@ -127,7 +138,7 @@ final class SettingsTest {
         assertEquals(30, PrimeSettings.latitude_degrees(view(bytes)));
         assertEquals(0, PrimeSettings.solar_longitude_degrees(view(bytes)));
         assertEquals(1, PrimeSettings.opacity_micromap(view(bytes)));
-        assertEquals(1, PrimeSettings.ray_reconstruction(view(bytes)));
+        assertEquals(0, PrimeSettings.native_noisy_output(view(bytes)));
         assertEquals(3, PrimeSettings.reconstruction_quality(view(bytes)));
         assertEquals(8, PrimeSettings.terrain_batches_per_frame(view(bytes)));
         assertEquals(1f, PrimeSettings.stars(view(bytes)));
@@ -145,7 +156,7 @@ final class SettingsTest {
             throws Exception {
         var control = RenderSettings.Control.SATURATION;
         var defaults = RenderSettings.defaults();
-        assertEquals(9, RenderSettings.VERSION);
+        assertEquals(10, RenderSettings.VERSION);
         assertEquals(20, defaults.value(control));
         Path file = dir.resolve("primept.properties");
         assertEquals(20, SettingsFile.load(file).settings().value(control));
@@ -271,7 +282,7 @@ final class SettingsTest {
                          SettingsFile.decode(SettingsFile.encode(chosen)).settings().hashCode());
             var changed = chosen.with(RenderSettings.Control.BOUNCES, 8)
                                   .withOpacityMicromap(false)
-                                  .withRayReconstruction(false)
+                                  .withNativeNoisyOutput(true)
                                   .withDlssQuality(RenderSettings.DlssQuality.QUALITY)
                                   .withLightSampling(RenderSettings.LightSampling.TREE);
             assertEquals(renderer, changed.renderer());
@@ -304,68 +315,95 @@ final class SettingsTest {
         assertEquals(0, PrimeSettings.opacity_micromap(view(bytes)));
     }
     @Test
-    void rayReconstructionAndQualityRoundTripPreserveIndependentSettings() {
+    void nativeNoisyOutputAndQualityRoundTripPreserveIndependentSettings() {
         var defaults = RenderSettings.defaults();
-        assertTrue(defaults.rayReconstruction());
+        assertFalse(defaults.nativeNoisyOutput());
         assertEquals(RenderSettings.DlssQuality.PERFORMANCE, defaults.dlssQuality());
-        var disabled = defaults.withRayReconstruction(false);
-        assertNotEquals(defaults, disabled);
-        assertFalse(disabled.withPathTracing(false)
-                            .withOpacityMicromap(false)
-                            .with(RenderSettings.Control.BOUNCES, 8)
-                            .rayReconstruction());
+        var noisy = defaults.withNativeNoisyOutput(true);
+        assertNotEquals(defaults, noisy);
+        assertTrue(noisy.withPathTracing(false)
+                           .withOpacityMicromap(false)
+                           .with(RenderSettings.Control.BOUNCES, 8)
+                           .nativeNoisyOutput());
         var bytes = settingsBuffer();
         for (var quality : RenderSettings.DlssQuality.values()) {
-            var changed = disabled.withDlssQuality(quality);
-            assertFalse(changed.rayReconstruction());
+            var changed = noisy.withDlssQuality(quality);
+            assertTrue(changed.nativeNoisyOutput());
             assertEquals(changed, SettingsFile.decode(SettingsFile.encode(changed)).settings());
             changed.write(bytes, false, RenderSettings.View.OUTPUT);
-            assertEquals(0, PrimeSettings.ray_reconstruction(view(bytes)));
+            assertEquals(1, PrimeSettings.native_noisy_output(view(bytes)));
             assertEquals(quality.ordinal(), PrimeSettings.reconstruction_quality(view(bytes)));
-            assertEquals(quality, changed.withRayReconstruction(true).dlssQuality());
+            assertEquals(quality, changed.withNativeNoisyOutput(false).dlssQuality());
         }
-        assertTrue(defaults.rayReconstruction());
+        assertFalse(defaults.nativeNoisyOutput());
         assertThrows(NullPointerException.class, () -> defaults.withDlssQuality(null));
     }
     @Test
-    void lightSamplingChoicePersistsAndCopiesWithoutChangingOtherWireFields() {
+    void oldReconstructionBooleanMigratesWithOppositeNoisyOutputMeaning() {
+        for (int version : new int[] {8, 9}) {
+            for (boolean oldReconstruction : new boolean[] {false, true}) {
+                var expected = RenderSettings.defaults()
+                                       .withRenderer(RenderSettings.Renderer.RESTIR_PT)
+                                       .withNativeNoisyOutput(!oldReconstruction)
+                                       .withDlssQuality(RenderSettings.DlssQuality.BALANCED)
+                                       .withLightSampling(RenderSettings.LightSampling.TREE)
+                                       .withIgnoreGlobalHistoryResets(version == 9)
+                                       .with(RenderSettings.Control.BOUNCES, 32)
+                                       .with(RenderSettings.Control.EXPOSURE_EV, -8);
+                String legacy = legacyFile(expected, version);
+                assertTrue(
+                        legacy.contains("render.ray_reconstruction=" + oldReconstruction + "\n"));
+                var migrated = SettingsFile.decode(legacy);
+                assertEquals("", migrated.resetReason());
+                assertEquals(expected, migrated.settings());
+                String canonical = SettingsFile.encode(migrated.settings());
+                assertTrue(canonical.contains("version=10\n"));
+                assertTrue(canonical.contains(
+                        "diagnostics.native_noisy_output=" + !oldReconstruction + "\n"));
+                assertFalse(canonical.contains("ray_reconstruction"));
+                assertEquals(expected, SettingsFile.decode(canonical).settings());
+                var before = settingsBuffer();
+                var after = settingsBuffer();
+                for (var diagnosticView : RenderSettings.View.values()) {
+                    expected.write(before, false, diagnosticView);
+                    expected.withNativeNoisyOutput(oldReconstruction)
+                            .write(after, false, diagnosticView);
+                    assertEquals(!oldReconstruction ? 1 : 0,
+                                 PrimeSettings.native_noisy_output(view(before)));
+                    assertEquals(diagnosticView.ordinal(), PrimeSettings.view(view(before)));
+                    assertOnlyFieldChanged(before, after, 64);
+                }
+                for (String malformed : new String[] {
+                             legacy.replace("render.ray_reconstruction=" + oldReconstruction + "\n",
+                                            ""),
+                             legacy.replace("render.ray_reconstruction=" + oldReconstruction,
+                                            "render.ray_reconstruction=maybe")}) {
+                    var rejected = SettingsFile.decode(malformed);
+                    assertEquals(RenderSettings.defaults(), rejected.settings());
+                    assertFalse(rejected.resetReason().isEmpty());
+                }
+            }
+        }
+        // A v10 file cannot use the old boolean name to claim the opposite behavior.
+        var current = SettingsFile.encode(RenderSettings.defaults());
+        var rejected = SettingsFile.decode(current.replace(
+                "diagnostics.native_noisy_output=false\n", "render.ray_reconstruction=true\n"));
+        assertEquals(RenderSettings.defaults(), rejected.settings());
+        assertFalse(rejected.resetReason().isEmpty());
+    }
+    @Test
+    void powerDistanceTreeIsTheOnlyCanonicalSampler() {
         var defaults = RenderSettings.defaults();
         assertEquals(RenderSettings.LightSampling.TREE, defaults.lightSampling());
         assertSame(defaults, defaults.withLightSampling(RenderSettings.LightSampling.TREE));
         assertEquals(1, RenderSettings.LightSampling.TREE.wireId);
-        assertEquals(2, RenderSettings.LightSampling.TREE_SPHERE.wireId);
-        assertArrayEquals(
-                new RenderSettings.LightSampling[] {RenderSettings.LightSampling.TREE,
-                                                    RenderSettings.LightSampling.TREE_SPHERE},
-                RenderSettings.LightSampling.values());
+        assertArrayEquals(new RenderSettings.LightSampling[] {RenderSettings.LightSampling.TREE},
+                          RenderSettings.LightSampling.values());
         assertThrows(NullPointerException.class, () -> defaults.withLightSampling(null));
-        var before = settingsBuffer();
-        var after = settingsBuffer();
-        for (var method : new RenderSettings.LightSampling[] {
-                     RenderSettings.LightSampling.TREE, RenderSettings.LightSampling.TREE_SPHERE}) {
-            var changed = defaults.withLightSampling(method);
-            assertEquals(method == defaults.lightSampling(), defaults.equals(changed));
-            assertSame(changed, changed.withLightSampling(method));
-            assertEquals(changed, SettingsFile.decode(SettingsFile.encode(changed)).settings());
-            assertEquals(changed.hashCode(),
-                         SettingsFile.decode(SettingsFile.encode(changed)).settings().hashCode());
-            assertEquals(RenderSettings.LightSampling.TREE, defaults.lightSampling());
-            assertEquals(method, changed.withPathTracing(false)
-                                         .withOpacityMicromap(false)
-                                         .withRayReconstruction(false)
-                                         .withDlssQuality(RenderSettings.DlssQuality.QUALITY)
-                                         .with(RenderSettings.Control.BOUNCES, 8)
-                                         .lightSampling());
-            for (boolean offline : new boolean[] {false, true}) {
-                defaults.write(before, offline, RenderSettings.View.OUTPUT);
-                changed.write(after, offline, RenderSettings.View.OUTPUT);
-                assertEquals(method.wireId, PrimeSettings.light_sampling(view(after)));
-                assertOnlyFieldChanged(before, after, 96);
-            }
-        }
+        assertTrue(SettingsFile.encode(defaults).contains("render.light_sampling=TREE\n"));
     }
     @Test
-    void retiredGridSettingMigratesWithoutResettingOtherValues(@TempDir Path dir) throws Exception {
+    void retiredSamplersMigrateWithoutResettingOtherValues(@TempDir Path dir) throws Exception {
         var expected = RenderSettings.defaults()
                                .withRenderer(RenderSettings.Renderer.RESTIR_PT)
                                .with(RenderSettings.Control.BOUNCES, 32)
@@ -374,34 +412,39 @@ final class SettingsTest {
                                .with(RenderSettings.Control.EXPOSURE_EV, -4)
                                .with(RenderSettings.Control.HDR, 1)
                                .withOpacityMicromap(false)
-                               .withRayReconstruction(false)
+                               .withNativeNoisyOutput(true)
                                .withDlssQuality(RenderSettings.DlssQuality.QUALITY);
-        String legacy =
-                SettingsFile.encode(expected)
-                        .replace("version=9", "version=8")
-                        .replace("diagnostics.ignore_global_history_resets=false\n", "")
-                        .replace("render.light_sampling=TREE", "render.light_sampling=GRID");
-        var file = dir.resolve("primept.properties");
-        Files.writeString(file, legacy);
-        var loaded = SettingsFile.load(file);
-        assertEquals("", loaded.resetReason());
-        assertEquals(expected, loaded.settings());
-        var wire = settingsBuffer();
-        loaded.settings().write(wire, false, RenderSettings.View.OUTPUT);
-        assertEquals(1, PrimeSettings.light_sampling(view(wire)));
-        SettingsFile.save(file, loaded.settings());
-        String canonical = Files.readString(file);
-        assertTrue(canonical.contains("version=9\n"));
-        assertTrue(canonical.contains("diagnostics.ignore_global_history_resets=false\n"));
-        assertTrue(canonical.contains("render.light_sampling=TREE\n"));
-        assertFalse(canonical.contains("GRID"));
-        assertEquals(expected, SettingsFile.load(file).settings());
+        for (int version : new int[] {8, 9, 10}) {
+            for (String retired : new String[] {"GRID", "TREE_SPHERE"}) {
+                String original = version == 10 ? SettingsFile.encode(expected)
+                                                : legacyFile(expected, version);
+                String legacy = original.replace("render.light_sampling=TREE",
+                                                 "render.light_sampling=" + retired);
+                var file = dir.resolve("settings-" + version + "-" + retired + ".properties");
+                Files.writeString(file, legacy);
+                var loaded = SettingsFile.load(file);
+                assertEquals("", loaded.resetReason());
+                assertEquals(expected, loaded.settings());
+                var wire = settingsBuffer();
+                loaded.settings().write(wire, false, RenderSettings.View.OUTPUT);
+                assertEquals(1, PrimeSettings.light_sampling(view(wire)));
+                SettingsFile.save(file, loaded.settings());
+                String canonical = Files.readString(file);
+                assertTrue(canonical.contains("version=10\n"));
+                assertTrue(canonical.contains("render.light_sampling=TREE\n"));
+                assertFalse(canonical.contains(retired));
+                assertEquals(expected, SettingsFile.load(file).settings());
+            }
+        }
         assertEquals(RenderSettings.LightSampling.TREE,
                      RenderSettings.LightSampling.fromKey("GRID"));
+        assertEquals(RenderSettings.LightSampling.TREE,
+                     RenderSettings.LightSampling.fromKey("TREE_SPHERE"));
         assertThrows(IllegalArgumentException.class,
-                     () -> RenderSettings.LightSampling.fromKey("grid"));
-        // The migration is narrow: another missing required value still invalidates the file.
-        var malformed = SettingsFile.decode(legacy.replace("render.bounces=32\n", ""));
+                     () -> RenderSettings.LightSampling.fromKey("tree_sphere"));
+        // Migration does not conceal another invalid required field.
+        var malformed =
+                SettingsFile.decode(legacyFile(expected, 8).replace("render.bounces=32\n", ""));
         assertEquals(RenderSettings.defaults(), malformed.settings());
         assertFalse(malformed.resetReason().isEmpty());
     }
@@ -423,9 +466,9 @@ final class SettingsTest {
         }
         var copied = enabled.withRenderer(RenderSettings.Renderer.RESTIR_PT)
                              .withOpacityMicromap(false)
-                             .withRayReconstruction(false)
+                             .withNativeNoisyOutput(true)
                              .withDlssQuality(RenderSettings.DlssQuality.QUALITY)
-                             .withLightSampling(RenderSettings.LightSampling.TREE_SPHERE)
+                             .withLightSampling(RenderSettings.LightSampling.TREE)
                              .with(RenderSettings.Control.BOUNCES, 32);
         assertTrue(copied.ignoreGlobalHistoryResets());
         var loaded = SettingsFile.decode(SettingsFile.encode(copied));
@@ -435,11 +478,9 @@ final class SettingsTest {
         assertFalse(copied.withIgnoreGlobalHistoryResets(false).ignoreGlobalHistoryResets());
         String current = SettingsFile.encode(defaults);
         for (var method : RenderSettings.LightSampling.values()) {
-            String previous =
-                    current.replace("version=9", "version=8")
-                            .replace("diagnostics.ignore_global_history_resets=false\n", "")
-                            .replace("render.light_sampling=TREE\n",
-                                     "render.light_sampling=" + method.name() + "\n");
+            String previous = legacyFile(defaults, 8)
+                                      .replace("render.light_sampling=TREE\n",
+                                               "render.light_sampling=" + method.name() + "\n");
             var migrated = SettingsFile.decode(previous);
             assertEquals("", migrated.resetReason());
             assertEquals(defaults.withLightSampling(method), migrated.settings());

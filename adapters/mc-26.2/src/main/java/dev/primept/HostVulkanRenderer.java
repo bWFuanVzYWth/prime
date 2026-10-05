@@ -175,7 +175,7 @@ public final class HostVulkanRenderer implements AutoCloseable {
         var owner = submissionOwner;
         return owner != null && !owner.closed && !owner.offline && owner.appliedSettings != null &&
                 owner.appliedSettings.frameGeneration() &&
-                owner.appliedSettings.rayReconstruction() &&
+                !owner.appliedSettings.nativeNoisyOutput() &&
                 owner.appliedView == RenderSettings.View.OUTPUT &&
                 !PrimeClient.offlineRequested() && !PrimeClient.offlineActive();
     }
@@ -305,10 +305,8 @@ public final class HostVulkanRenderer implements AutoCloseable {
         if (offline == nextOffline && settings.equals(appliedSettings) && view == appliedView)
             return;
         if (offline != nextOffline ||
-            (appliedSettings != null &&
-             settings.lightSampling() != appliedSettings.lightSampling()) ||
             (!nextOffline && appliedSettings != null &&
-             (settings.rayReconstruction() != appliedSettings.rayReconstruction() ||
+             (settings.nativeNoisyOutput() != appliedSettings.nativeNoisyOutput() ||
               settings.dlssQuality() != appliedSettings.dlssQuality())))
             submitAndAwait(encoder);
         bridge.configure(settings, nextOffline, view);

@@ -151,7 +151,7 @@ fn settings(mode: RenderMode) -> RenderSettings {
         exposure: 0.25,
         sun: 1. / 256.,
         sky: 1. / 256.,
-        ray_reconstruction: false,
+        native_noisy_output: true,
         opacity_micromap: false,
         ..Default::default()
     }

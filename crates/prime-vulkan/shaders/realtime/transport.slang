@@ -40,9 +40,6 @@ public float3 primeTraceLanding<Distance>(TraceScene resources, AtmLighting envi
     float3 origin = float3(0.0);
     float3 direction = float3(0.0);
     float3 previous = float3(0.0);
-#if defined(PRIME_LIGHT_TREE_SPHERE)
-    float3 previousLightNormal = float3(0);
-#endif
     float previousPdf = 0.0;
     float3 throughput = float3(1.0);
     float etaScale = 1.0;
@@ -111,12 +108,7 @@ public float3 primeTraceLanding<Distance>(TraceScene resources, AtmLighting envi
                          : hit.transmitted;
             float lightPdf = previousPdf == 0.0 || lightFeatures == 0
                                      ? 0.0
-                                     : emissiveHitPdf(resources, hit, previous
-#if defined(PRIME_LIGHT_TREE_SPHERE)
-                                                      ,
-                                                      previousLightNormal
-#endif
-                                       );
+                                     : emissiveHitPdf(resources, hit, previous);
             float weight = lightPdf == 0.0 ? 1.0 : primePowerHeuristicValue(previousPdf, lightPdf);
             radiance += primeTripleProduct(throughput, linear709ToWorking(hit.emission), weight);
         }
@@ -148,9 +140,6 @@ public float3 primeTraceLanding<Distance>(TraceScene resources, AtmLighting envi
         direction = scatter.direction;
         medium = sampled.medium;
         previous = surface.position;
-#if defined(PRIME_LIGHT_TREE_SPHERE)
-        previousLightNormal = primePbrVertexIsDielectric(material) ? float3(0) : material.normal;
-#endif
         previousPdf = primeDirectLightingMisPdf(primePbrVertexIsDielectric(material), scatter);
         origin = spawnRay(surface, direction);
         if (primeRussianRouletteApplies(bounce, PRIME_RUSSIAN_ROULETTE_START)) {

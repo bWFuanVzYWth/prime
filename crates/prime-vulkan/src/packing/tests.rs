@@ -54,6 +54,57 @@ fn optical_reference_uses_existing_padding_and_keeps_repeat_coordinates() {
     let packed = encode(&face, 2, None, None, &textures).unwrap();
     assert_eq!(packed[188..192], [0; 4]);
 }
+
+#[test]
+fn support_dependencies_follow_each_packed_format_and_exclude_ior_only_lookups() {
+    use prime_scene::surface::{LayerMode, Medium, Optics, SurfaceDetail, SurfaceLayer};
+    let plain = SurfaceFace::from_quad(quad());
+    let mut optical = plain.clone();
+    optical.geometry.texture_id = 8;
+    optical.optics = Some(Optics {
+        negative: Medium::default(),
+        positive: Medium::default(),
+        ior_textures: [Some(90), Some(91)],
+        transmit: true,
+        thin: false,
+    });
+    let mut coating = plain.clone();
+    coating.geometry.texture_id = 9;
+    coating.detail = Some(Arc::new(SurfaceDetail {
+        mode: LayerMode::OverlayBoth,
+        layer: SurfaceLayer {
+            colors: [[1.; 4]; 4],
+            uvs: [[0.; 2]; 4],
+            texture_id: 10,
+            flags: 1,
+            repeat: None,
+            emission: Emission::default(),
+        },
+    }));
+    let geometry = MeshGeometry::Surfaces(Arc::new(
+        prime_scene::surface::SurfaceMesh::from_resolved(1, vec![coating, plain, optical]).unwrap(),
+    ));
+    let plan = Plan::new([input(geometry.view(0..6))], true).unwrap();
+    assert_eq!(
+        plan.groups.iter().map(|g| g.format).collect::<Vec<_>>(),
+        [0, 2, 3]
+    );
+    assert_eq!(
+        plan.support_dependencies(&plan.groups[0]),
+        BTreeSet::from([7])
+    );
+    assert_eq!(
+        plan.support_dependencies(&plan.groups[1]),
+        BTreeSet::from([8])
+    );
+    assert_eq!(
+        plan.support_dependencies(&plan.groups[2]),
+        BTreeSet::from([9, 10])
+    );
+    let mut all = BTreeSet::new();
+    plan.texture_dependencies(&mut all);
+    assert_eq!(all, BTreeSet::from([7, 8, 9, 10, 90, 91]));
+}
 fn input(triangles: TriangleView<'_>) -> Input<'_> {
     Input {
         triangles,

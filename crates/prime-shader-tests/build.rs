@@ -12,7 +12,6 @@ fn main() {
         "display",
         "emitter_sampling",
         "light_tree",
-        "sphere_tree",
         "optics",
         "texture",
         "roulette",
@@ -30,7 +29,7 @@ fn main() {
             &[],
         );
     }
-    for stage in ["restir_adapter", "restir_history"] {
+    for stage in ["restir_adapter", "restir_history", "restir_rc_view"] {
         build_support::samplers(
             &mut shaders,
             &format!("tests/shaders/{stage}.slang"),

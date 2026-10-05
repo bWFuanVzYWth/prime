@@ -12,8 +12,10 @@ pub(crate) const PAGE_BYTES: usize = 64;
 pub(crate) struct LightPage {
     pub key: u64,
     pub emitters: Arc<Buffer>,
+    #[cfg(test)]
     pub source: Arc<prime_scene::surface::LightTree>,
-    pub method: prime_scene::settings::LightSampling,
+    // Stable material row; None retains the legacy compact-emitter identity.
+    pub static_page: Option<u32>,
     pub inverse_areas: Vec<f32>,
     pub tree: TreePage,
     pub format: u32,
@@ -22,7 +24,6 @@ pub(crate) struct LightPage {
 pub(crate) struct TreePage {
     pub nodes: Buffer,
     pub root: prime_scene::surface::LightNode,
-    pub sphere_root: Option<crate::light_sphere_cpu::Root>,
     pub paths: Vec<u32>,
 }
 
@@ -52,7 +53,6 @@ pub(crate) fn upload_lights(
     mesh: &SurfaceMesh,
     textures: &BTreeMap<u32, u32>,
     key: u64,
-    method: prime_scene::settings::LightSampling,
 ) -> Result<Option<LightPage>, String> {
     if mesh.lights.emitters.is_empty() {
         return Ok(None);
@@ -77,6 +77,8 @@ pub(crate) fn upload_lights(
         let mut record = crate::packing::encode(face, format, None, None, textures)?;
         // Position padding carries the area selection probability. Geometry still reads xyz.
         record[12..16].copy_from_slice(&emitter.first_fraction.to_le_bytes());
+        // The second corner's unused w lane carries the physical quad mapping.
+        record[28..32].copy_from_slice(&emitter.quad.to_le_bytes());
         bytes.extend_from_slice(&record[..stride]);
     }
     encode_trace.count("bytes", bytes.len() as u64);
@@ -85,45 +87,24 @@ pub(crate) fn upload_lights(
     drop(encode_trace);
     let usage = vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS;
     let emitters = Arc::new(Buffer::upload_device(context, &bytes, usage)?);
-    let source = Arc::clone(&mesh.lights);
-    let (inverse_areas, tree) = sampler(context, &source, method)?;
+    let (inverse_areas, tree) = sampler(context, &mesh.lights)?;
     page_trace.succeed();
     Ok(Some(LightPage {
         key,
         emitters,
-        source,
-        method,
+        #[cfg(test)]
+        source: Arc::clone(&mesh.lights),
+        static_page: None,
         inverse_areas,
         tree,
         format: format as u32,
     }))
 }
 
-impl LightPage {
-    pub(crate) fn rebuild_sampler(
-        &self,
-        context: &Arc<Context>,
-        method: prime_scene::settings::LightSampling,
-    ) -> Result<Self, String> {
-        let (inverse_areas, tree) = sampler(context, &self.source, method)?;
-        Ok(Self {
-            key: self.key,
-            emitters: Arc::clone(&self.emitters),
-            source: Arc::clone(&self.source),
-            method,
-            inverse_areas,
-            tree,
-            format: self.format,
-        })
-    }
-}
-
 fn sampler(
     context: &Arc<Context>,
     source: &prime_scene::surface::LightTree,
-    method: prime_scene::settings::LightSampling,
 ) -> Result<(Vec<f32>, TreePage), String> {
-    use prime_scene::settings::LightSampling;
     let inverse_areas = {
         let _area_trace = prime_diagnostics::scope("light.areas");
         source
@@ -132,47 +113,17 @@ fn sampler(
             .map(|emitter| 1.0 / emitter.area)
             .collect()
     };
-    let tree = match method {
-        LightSampling::TreeSphere => {
-            let mut trace = prime_diagnostics::scope("ls.local");
-            trace.fail();
-            let tree = crate::light_sphere_cpu::Tree::local(&source.emitters)?;
-            let bytes = crate::light_sphere_cpu::node_bytes(&tree.nodes);
-            trace.count("nodes", tree.nodes.len() as u64);
-            trace.count("bytes", bytes.len() as u64);
-            let page = TreePage {
-                nodes: Buffer::upload_device(
-                    context,
-                    &bytes,
-                    vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
-                )?,
-                root: source.nodes[0],
-                sphere_root: Some(tree.root()),
-                paths: tree.paths,
-            };
-            trace.succeed();
-            page
-        }
-        LightSampling::Tree => {
-            let mut trace = prime_diagnostics::scope("lt.local");
-            trace.fail();
-            let distance = crate::light_distance_cpu::Tree::local(&source.nodes, &source.emitters)?;
-            let bytes = crate::light_distance_cpu::node_bytes(&distance.nodes);
-            trace.count("nodes", distance.nodes.len() as u64);
-            trace.count("bytes", bytes.len() as u64);
-            let tree = TreePage {
-                nodes: Buffer::upload_device(
-                    context,
-                    &bytes,
-                    vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
-                )?,
-                root: source.nodes[0],
-                sphere_root: None,
-                paths: distance.paths,
-            };
-            trace.succeed();
-            tree
-        }
+    let mut trace = prime_diagnostics::scope("lt.local");
+    trace.fail();
+    let distance = crate::light_distance_cpu::Tree::local(&source.nodes, &source.emitters)?;
+    let bytes = crate::light_distance_cpu::node_bytes(&distance.nodes);
+    trace.count("nodes", distance.nodes.len() as u64);
+    trace.count("bytes", bytes.len() as u64);
+    let tree = TreePage {
+        nodes: Buffer::upload_device(context, &bytes, vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS)?,
+        root: source.nodes[0],
+        paths: distance.paths,
     };
+    trace.succeed();
     Ok((inverse_areas, tree))
 }

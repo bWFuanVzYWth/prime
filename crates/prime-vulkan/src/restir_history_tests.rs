@@ -101,7 +101,7 @@ fn gpu_restir_source_resource_reload_retains_history_and_withdraws_old_geometry(
         sky: 1. / 256.,
         stars: 0.,
         auto_exposure_compensation: 0.,
-        ray_reconstruction: false,
+        native_noisy_output: true,
         opacity_micromap: false,
         ..Default::default()
     })
@@ -213,7 +213,7 @@ fn gpu_restir_retains_history_without_a_proved_global_change() {
         sky: 1. / 256.,
         stars: 0.,
         auto_exposure_compensation: 0.,
-        ray_reconstruction: false,
+        native_noisy_output: true,
         opacity_micromap: false,
         ..Default::default()
     };
@@ -289,7 +289,7 @@ fn gpu_restir_retains_history_without_a_proved_global_change() {
     assert!(renderer.restir.as_ref().unwrap().temporal_this_frame);
     for (budget, method) in [
         (2, LightSampling::Tree),
-        (8, LightSampling::TreeSphere),
+        (8, LightSampling::Tree),
         (1, LightSampling::Tree),
     ] {
         let accepted = renderer.restir.as_ref().unwrap().accepted_history();
@@ -403,24 +403,22 @@ fn gpu_restir_temporal_update_replays_all_cached_suffix_cases() {
         sun: 1. / 256.,
         sky: 1. / 256.,
         stars: 0.,
-        ray_reconstruction: false,
+        native_noisy_output: true,
         opacity_micromap: false,
         ..Default::default()
     };
     let mut renderer =
         Renderer::with_settings_and_workers(settings, Arc::new(CpuWorkers::configured().unwrap()))
             .unwrap();
-    for method in [LightSampling::Tree, LightSampling::TreeSphere] {
+    {
+        let method = LightSampling::Tree;
         renderer
             .configure(RenderSettings {
                 light_sampling: method,
                 ..settings
             })
             .unwrap();
-        let code = match method {
-            LightSampling::Tree => prime_shader_tests::restir_history_tree(),
-            LightSampling::TreeSphere => prime_shader_tests::restir_history_tree_sphere(),
-        };
+        let code = prime_shader_tests::restir_history_tree();
         let mut cases = [0u32; 5];
         let mut sky_changes = 0u32;
         let mut medium_changes = 0u32;
@@ -514,6 +512,451 @@ fn gpu_restir_temporal_update_replays_all_cached_suffix_cases() {
         assert!(
             adjacent_colored > 0,
             "{method:?}: colored adjacent RC BSDF endpoint was not executed"
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires windowless Vulkan; stable physical quad slots, NEE endpoints and directory alias growth"]
+fn gpu_restir_topology_edits_preserve_unmodified_quads_and_nee_endpoints() {
+    stable_quad_fixture(false);
+}
+
+#[test]
+#[ignore = "requires windowless Vulkan; independent sampled-point, physical-half and forward/inverse NEE oracle"]
+fn gpu_restir_nee_sampled_points_match_physical_endpoints() {
+    stable_quad_fixture(true);
+}
+
+fn stable_quad_fixture(endpoint_only: bool) {
+    use prime_scene::surface::{Emission, LayerMode, Medium, Optics, SurfaceDetail, SurfaceLayer};
+    use restir_support_tests::{Snapshot, snapshot};
+    const EXTENT: [u32; 2] = [31, 17];
+    fn lamp(x: f32, emission: [f32; 3]) -> prime_scene::surface::SurfaceFace {
+        let mut value = realtime_tests::face(3.);
+        value.geometry.positions = [
+            [x, 8., 3.],
+            [x + 2., 8., 3.],
+            [x + 2., 10., 3.],
+            [x, 10., 3.],
+        ];
+        value.emission = Emission {
+            radiance: emission,
+            two_sided: true,
+            textured: false,
+        };
+        value
+    }
+    fn publish(scene: &mut Scene, faces: Vec<prime_scene::surface::SurfaceFace>) {
+        scene.revision += 1;
+        let replacement = realtime_tests::scene(scene.revision, faces);
+        scene.meshes = replacement.meshes;
+        scene.ready_terrain = replacement.ready_terrain;
+    }
+    fn record(snapshot: &Snapshot, hit: [u32; 2]) -> [u32; 2] {
+        let page = (hit[0] & 0x00ff_ffff) as usize;
+        let header = snapshot.identities[0][page];
+        assert_ne!(header[1] & 0x8000_0000, 0, "actual static quad-mode page");
+        assert!(hit[1] < header[1] & 0x7fff_ffff);
+        snapshot.quads[header[0] as usize + (hit[1] >> 1) as usize]
+    }
+    fn saved(renderer: &Renderer, hit: [u32; 2], valid: bool) -> Vec<[u32; 32]> {
+        let values = run_probe(
+            renderer,
+            2,
+            prime_shader_tests::restir_history_tree(),
+            [2, hit[0], 2, hit[1] & !1],
+        );
+        for row in &values {
+            assert_eq!(
+                f32::from_bits(row[7]),
+                if valid { 1. } else { 0. },
+                "saved endpoint guard {hit:?}"
+            );
+            if valid {
+                assert!(
+                    row[4..7]
+                        .iter()
+                        .copied()
+                        .map(f32::from_bits)
+                        .all(f32::is_finite)
+                );
+            }
+        }
+        values
+    }
+    fn same_surface(actual: &[[u32; 32]], expected: &[[u32; 32]]) {
+        assert_eq!(actual.len(), expected.len());
+        for (actual, expected) in actual.iter().zip(expected) {
+            assert_eq!(
+                &actual[4..11],
+                &expected[4..11],
+                "saved alias surface position/selected emission changed"
+            );
+            // loaded.light is a current compact sampling address, intentionally
+            // rebuilt when an unrelated emitter is added or removed.
+        }
+    }
+    fn probe(renderer: &Renderer, expected: Option<[[u32; 2]; 4]>) -> [[u32; 2]; 4] {
+        let rows = run_probe(
+            renderer,
+            512,
+            prime_shader_tests::restir_history_tree(),
+            [512, 0, 1, 0],
+        );
+        if let Some(directory) = std::env::var_os("PRIME_RESTIR_ORACLE_ARTIFACT") {
+            static PROBE_SEQUENCE: std::sync::atomic::AtomicUsize =
+                std::sync::atomic::AtomicUsize::new(0);
+            let sequence = PROBE_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let directory = std::path::PathBuf::from(directory);
+            std::fs::create_dir_all(&directory).unwrap();
+            let bytes: Vec<_> = rows
+                .iter()
+                .flatten()
+                .flat_map(|word| word.to_le_bytes())
+                .collect();
+            std::fs::write(
+                directory.join(format!("Tree-nee-points-{sequence}.bin")),
+                bytes,
+            )
+            .unwrap();
+        }
+        let hits = std::array::from_fn(|index| [rows[index][0], rows[index][1]]);
+        if let Some(expected) = expected {
+            assert_eq!(hits, expected, "unchanged physical endpoint remapped");
+        }
+        for (index, row) in rows[..4].iter().enumerate() {
+            assert_eq!(f32::from_bits(row[7]), 1., "actual emitter query missed");
+            assert_eq!(row[1] & 1, index as u32 & 1, "both physical halves");
+        }
+        assert_eq!(
+            hits[0][0] & 0x4000_0000,
+            0,
+            "terminal NEE must address the static quad guard"
+        );
+        assert_eq!(
+            hits[2][0] >> 24 & 1,
+            1,
+            "bilateral back leaf must be selected"
+        );
+        let mut selected = [[0usize; 2]; 2];
+        let mut max_pdf_error = 0_f32;
+        for row in &rows {
+            if row[8] == u32::MAX {
+                continue;
+            }
+            assert_eq!(row[27], 1, "actual local emitter branch");
+            let endpoint = [row[8], row[9]];
+            let category = hits
+                .iter()
+                .position(|hit| *hit == endpoint)
+                .expect("NEE physical page/quad/selected-leaf differs from ray query");
+            selected[category / 2][category & 1] += 1;
+            let forward = f32::from_bits(row[15]);
+            let inverse = f32::from_bits(row[23]);
+            assert!(forward.is_finite() && forward > 0. && inverse.is_finite() && inverse > 0.);
+            let error = (forward - inverse).abs() / forward.max(inverse);
+            max_pdf_error = max_pdf_error.max(error);
+            assert!(
+                error < 1e-4,
+                "Tree forward/inverse NEE PDF mismatch: {forward}/{inverse}"
+            );
+            // The FP32 shader recovery adds a second round of division/multiply/add
+            // rounding at world coordinates 12..14. Recover independently in FP64
+            // from the actual proposal direction, retaining the original point bound.
+            let direction: [f64; 3] =
+                std::array::from_fn(|axis| f64::from(f32::from_bits(row[28 + axis])));
+            assert!(direction.iter().all(|value| value.is_finite()) && direction[2] > 0.);
+            let sampled = [
+                8. + 3. * direction[0] / direction[2],
+                8. + 3. * direction[1] / direction[2],
+                3.,
+            ];
+            let loaded: [f64; 3] =
+                std::array::from_fn(|axis| f64::from(f32::from_bits(row[16 + axis])));
+            let distance = |point: [f64; 3]| {
+                point
+                    .into_iter()
+                    .zip(loaded)
+                    .map(|(a, b)| (a - b) * (a - b))
+                    .sum::<f64>()
+                    .sqrt()
+            };
+            assert!(
+                distance(sampled) < 1e-6,
+                "endpoint reconstruction moved the sampled point: f64_error={} shader_error={} raw={row:?}",
+                distance(sampled),
+                f32::from_bits(row[19])
+            );
+            // Also compare with the authored physical triangle, using the real
+            // HitInfo barycentrics rather than a second production hit decoder.
+            let x = if category < 2 { 2. } else { 12. };
+            let b1 = f64::from(f32::from_bits(row[10]));
+            let b2 = f64::from(f32::from_bits(row[11]));
+            let authored = if row[9] & 1 == 0 {
+                [x + 2. * (b1 + b2), 8. + 2. * b2, 3.]
+            } else {
+                [x + 2. * (1. - b1 - b2), 10. - 2. * b2, 3.]
+            };
+            assert!(
+                distance(authored) < 1e-6,
+                "endpoint barycentrics differ from the authored triangle: {} raw={row:?}",
+                distance(authored)
+            );
+            for channel in 0..3 {
+                let sampled = f32::from_bits(row[12 + channel]);
+                let loaded = f32::from_bits(row[20 + channel]);
+                assert!(sampled.is_finite() && loaded.is_finite());
+                assert!(
+                    (sampled - loaded).abs() <= sampled.abs().max(loaded.abs()).max(1.) * 1e-6,
+                    "Tree NEE/load selected emission mismatch {sampled}/{loaded}"
+                );
+            }
+        }
+        assert!(
+            selected.into_iter().flatten().all(|count| count > 0),
+            "Tree missed an emitter half: {selected:?}"
+        );
+        eprintln!(
+            "stable quad Tree: actual NEE halves={selected:?}, max_pdf_relative_error={max_pdf_error}"
+        );
+        hits
+    }
+    let settings = RenderSettings {
+        integrator: Integrator::RestirPt,
+        mode: RenderMode::Realtime,
+        bounces: 1,
+        sun: 1. / 256.,
+        sky: 1. / 256.,
+        stars: 0.,
+        // Request the realtime linear intermediate read by snapshot().
+        // The copied radiance is before display exposure adaptation.
+        auto_exposure_compensation: 0.1,
+        native_noisy_output: true,
+        opacity_micromap: false,
+        ..Default::default()
+    };
+    {
+        let method = LightSampling::Tree;
+        let mut renderer = Renderer::with_settings_and_workers(
+            RenderSettings {
+                light_sampling: method,
+                ..settings
+            },
+            Arc::new(CpuWorkers::new(1).unwrap()),
+        )
+        .unwrap();
+        renderer.set_diagnostics(false).unwrap();
+        let mut floor = realtime_tests::face(0.);
+        floor.emission.two_sided = true; // Non-emitting format1, physical row remains stable.
+        let mut red = lamp(2., [20., 0., 0.]);
+        red.optics = Some(Optics {
+            negative: Medium::default(),
+            positive: Medium::default(),
+            ior_textures: [None; 2],
+            transmit: false,
+            thin: false,
+        });
+        let mut neighbor = red.clone();
+        neighbor.emission.radiance = [0.; 3];
+        for point in &mut neighbor.geometry.positions {
+            point[0] += 4.;
+        }
+        let mut green = lamp(12., [0., 20., 0.]);
+        green.detail = Some(Arc::new(SurfaceDetail {
+            mode: LayerMode::Bilateral,
+            layer: SurfaceLayer {
+                colors: [[1.; 4]; 4],
+                uvs: [[0.; 2]; 4],
+                texture_id: 0,
+                flags: 0,
+                repeat: None,
+                emission: Emission {
+                    radiance: [0., 0., 20.],
+                    two_sided: true,
+                    textured: false,
+                },
+            },
+        }));
+        let mut scene = realtime_tests::scene(
+            1,
+            vec![floor.clone(), neighbor.clone(), red.clone(), green.clone()],
+        );
+        let camera = realtime_tests::camera();
+        let mut sequence = 0;
+        let render = |renderer: &mut Renderer, scene: &Scene, sequence: &mut u32| {
+            renderer
+                .render(scene, &camera, EXTENT[0], EXTENT[1], *sequence)
+                .unwrap();
+            *sequence += 1;
+        };
+        // The endpoint oracle needs current production resources and an accepted
+        // history watermark, but does not need the topology fixture's M warmup.
+        for _ in 0..if endpoint_only { 2 } else { 12 } {
+            render(&mut renderer, &scene, &mut sequence);
+        }
+        assert_eq!(renderer.geometry.as_ref().unwrap().triangle_count, 8);
+        if endpoint_only {
+            assert!(renderer.restir.as_ref().unwrap().temporal_this_frame);
+            let original = probe(&renderer, None);
+            assert_eq!(
+                original[0][1] >> 1,
+                1,
+                "non-emitting slot precedes compact red emitter0"
+            );
+            eprintln!(
+                "stable NEE independent-point oracle {method:?}: initial production resources, two submitted frames, 512 actual samples"
+            );
+            return;
+        }
+        let before = snapshot(&renderer);
+        assert!(
+            before.mean(true).0 > 4.,
+            "fixture history did not accumulate"
+        );
+        let original = probe(&renderer, None);
+        assert_eq!(
+            original[0][1] >> 1,
+            1,
+            "non-emitting slot precedes compact red emitter0"
+        );
+        let saved_red = saved(&renderer, original[0], true);
+        let saved_green = saved(&renderer, original[2], true);
+        let deleted = run_probe(
+            &renderer,
+            2,
+            prime_shader_tests::restir_history_tree(),
+            [2, 0, 3, 0],
+        );
+        assert_eq!(
+            f32::from_bits(deleted[0][7]),
+            1.,
+            "neighbor source must actually be queryable"
+        );
+        let deleted_hit = [deleted[0][0], deleted[0][1]];
+        renderer
+            .geometry
+            .as_mut()
+            .unwrap()
+            .limit_history_capacity_for_test(
+                prime_scene::spatial::Cell::containing([0.; 3]).unwrap(),
+                3,
+            );
+        let mut appended = lamp(18., [0.; 3]);
+        appended.geometry.flags = 1; // fourth valid (flags,format) row forces real migration.
+        publish(
+            &mut scene,
+            vec![green.clone(), floor.clone(), red.clone(), appended.clone()],
+        );
+        render(&mut renderer, &scene, &mut sequence);
+        assert!(renderer.restir.as_ref().unwrap().temporal_this_frame);
+        assert_eq!(renderer.geometry.as_ref().unwrap().triangle_count, 8);
+        let after = snapshot(&renderer);
+        let current = probe(&renderer, None);
+        assert_ne!(
+            current[0][0] & 0x00ff_ffff,
+            original[0][0] & 0x00ff_ffff,
+            "fixture did not exercise row-base growth"
+        );
+        for index in 0..4 {
+            assert_eq!(
+                current[index][1], original[index][1],
+                "physical quad ordinal moved on source reorder"
+            );
+            assert_eq!(
+                record(&before, original[index]),
+                record(&after, original[index]),
+                "unchanged actual GPU quad stamp changed"
+            );
+            assert_eq!(
+                record(&after, original[index]),
+                record(&after, current[index]),
+                "old alias must share current quad records"
+            );
+        }
+        same_surface(&saved(&renderer, original[0], true), &saved_red);
+        same_surface(&saved(&renderer, original[2], true), &saved_green);
+        saved(&renderer, deleted_hit, false);
+        let holes = run_probe(
+            &renderer,
+            2,
+            prime_shader_tests::restir_history_tree(),
+            [2, 0, 3, 0],
+        );
+        assert!(
+            holes.iter().all(|row| f32::from_bits(row[7]) == 0.),
+            "degenerate tombstone was hit"
+        );
+        assert!(
+            after.mean(true).0 > 4.,
+            "unchanged receiver lost temporal reuse on excavation/growth"
+        );
+
+        publish(
+            &mut scene,
+            vec![
+                appended.clone(),
+                neighbor.clone(),
+                red.clone(),
+                floor.clone(),
+                green.clone(),
+            ],
+        );
+        render(&mut renderer, &scene, &mut sequence);
+        assert_eq!(renderer.geometry.as_ref().unwrap().triangle_count, 10);
+        probe(&renderer, Some(current));
+        saved(&renderer, deleted_hit, false); // dead slot reuse stamped this submission.
+        let reused = snapshot(&renderer);
+        assert!(record(&reused, deleted_hit)[0] > reused.watermark);
+        assert!(reused.mean(true).0 > 4.);
+
+        publish(
+            &mut scene,
+            vec![
+                floor.clone(),
+                neighbor.clone(),
+                green.clone(),
+                appended.clone(),
+            ],
+        );
+        render(&mut renderer, &scene, &mut sequence);
+        assert_eq!(renderer.geometry.as_ref().unwrap().triangle_count, 8);
+        saved(&renderer, original[0], false);
+        same_surface(&saved(&renderer, original[2], true), &saved_green);
+        red.emission.radiance = [15., 1., 0.];
+        publish(
+            &mut scene,
+            vec![
+                green.clone(),
+                red.clone(),
+                floor.clone(),
+                neighbor.clone(),
+                appended,
+            ],
+        );
+        render(&mut renderer, &scene, &mut sequence);
+        assert_eq!(renderer.geometry.as_ref().unwrap().triangle_count, 10);
+        probe(&renderer, Some(current));
+        saved(&renderer, original[0], false);
+        render(&mut renderer, &scene, &mut sequence);
+        saved(&renderer, original[0], true);
+        assert!(snapshot(&renderer).mean(true).0 > 4.);
+
+        scene.revision += 1;
+        scene.meshes.clear();
+        scene.ready_terrain.clear();
+        render(&mut renderer, &scene, &mut sequence);
+        assert_eq!(renderer.geometry.as_ref().unwrap().triangle_count, 0);
+        saved(&renderer, original[0], false);
+        saved(&renderer, original[2], false);
+        publish(&mut scene, vec![floor, red, green]);
+        render(&mut renderer, &scene, &mut sequence);
+        assert_eq!(renderer.geometry.as_ref().unwrap().triangle_count, 6);
+        saved(&renderer, original[0], false);
+        saved(&renderer, original[2], false);
+        probe(&renderer, None);
+        eprintln!(
+            "stable quad {method:?}: excavation/reorder/dead reuse/row growth/emitter edit/Cell unload executed; unaffected receiver M continued"
         );
     }
 }

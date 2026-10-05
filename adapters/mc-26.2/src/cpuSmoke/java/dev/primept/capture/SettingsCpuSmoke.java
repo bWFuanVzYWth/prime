@@ -328,18 +328,13 @@ public final class SettingsCpuSmoke {
                                                   PrimeVideoOptions.class, "opacityMicromap")
                                                   .get(owner);
                     check(opacityMicromap.get(), "OMM default must be enabled");
-                    var rayReconstruction = (net.minecraft.client.OptionInstance<Boolean>)field(
-                                                    PrimeVideoOptions.class, "rayReconstruction")
+                    var nativeNoisyOutput = (net.minecraft.client.OptionInstance<Boolean>)field(
+                                                    PrimeVideoOptions.class, "nativeNoisyOutput")
                                                     .get(owner);
                     var dlssQuality =
                             (net.minecraft.client.OptionInstance<RenderSettings.DlssQuality>)field(
                                     PrimeVideoOptions.class, "dlssQuality")
                                     .get(owner);
-                    var lightSampling = (OptionInstance<RenderSettings.LightSampling>)field(
-                                                PrimeVideoOptions.class, "lightSampling")
-                                                .get(owner);
-                    var lightButton = (CycleButton<RenderSettings.LightSampling>)list.findOption(
-                            lightSampling);
                     var ignoreGlobalResets =
                             (OptionInstance<Boolean>)field(PrimeVideoOptions.class,
                                                            "ignoreGlobalHistoryResets")
@@ -352,16 +347,16 @@ public final class SettingsCpuSmoke {
                                   translations.containsKey(
                                           "primept.settings.ignore_global_history_resets.tooltip"),
                           "The global reset diagnostic is translated");
-                    check(lightSampling.get() == RenderSettings.LightSampling.TREE,
-                          "Power-distance tree is the default sampler");
-                    check(translations.containsKey("primept.settings.light_sampling.tree") &&
-                                  translations.containsKey(
-                                          "primept.settings.light_sampling.tree_sphere") &&
-                                  !translations.containsKey("primept.settings.light_sampling.grid"),
-                          "Both active samplers have translations and GRID is retired");
-                    check(rayReconstruction.get(), "RR default must be enabled");
+                    check(PrimeClient.settings().lightSampling() ==
+                                  RenderSettings.LightSampling.TREE,
+                          "Power-distance tree is the only sampler");
+                    check(!translations.containsKey("primept.settings.light_sampling") &&
+                                  !translations.containsKey(
+                                          "primept.settings.light_sampling.tree_sphere"),
+                          "Retired sampler controls are absent");
+                    check(!nativeNoisyOutput.get(), "Native noisy diagnostic must default off");
                     check(list.findOption(opacityMicromap) instanceof CycleButton<?> &&
-                                  list.findOption(rayReconstruction) instanceof CycleButton<?>,
+                                  list.findOption(nativeNoisyOutput) instanceof CycleButton<?>,
                           "Diagnostic booleans use toggle buttons");
                     for (var control : RenderSettings.Control.values()) {
                         var widget = list.findOption(controls.get(control));
@@ -407,7 +402,7 @@ public final class SettingsCpuSmoke {
                                   list.findOption(controls.get(RenderSettings.Control.HDR_WHITE))
                                           .active,
                           "Frozen display controls stay available without changing accumulation");
-                    check(!list.findOption(rayReconstruction).active &&
+                    check(!list.findOption(nativeNoisyOutput).active &&
                                   !list.findOption(dlssQuality).active,
                           "Offline accumulation disables realtime reconstruction controls");
                     // OptionInstance only dispatches value callbacks once the client is running.
@@ -427,19 +422,6 @@ public final class SettingsCpuSmoke {
                                           .settings()
                                           .equals(PrimeClient.settings()),
                                   "The reset diagnostic callback preserves all persisted settings");
-                        }
-                        for (var sampler : List.of(RenderSettings.LightSampling.TREE_SPHERE,
-                                                   RenderSettings.LightSampling.TREE)) {
-                            lightButton.onPress(new net.minecraft.client.input.KeyEvent(
-                                    InputConstants.KEY_RETURN, 0, 0));
-                            check(lightSampling.get() == sampler &&
-                                          PrimeClient.settings().lightSampling() == sampler &&
-                                          offline.active() && offline.requested(),
-                                  "The actual sampler button cycles only the two trees without thawing");
-                            check(SettingsFile.decode(SettingsFile.encode(PrimeClient.settings()))
-                                          .settings()
-                                          .equals(PrimeClient.settings()),
-                                  "Sampler callbacks preserve all persisted settings");
                         }
                         for (int budget : new int[] {1, 128, 8}) {
                             terrainBatches.set(budget);
@@ -470,7 +452,7 @@ public final class SettingsCpuSmoke {
                         opacityMicromap.set(true);
                         offline.reset();
                         screen.tick();
-                        check(list.findOption(rayReconstruction).active &&
+                        check(list.findOption(nativeNoisyOutput).active &&
                                       list.findOption(dlssQuality).active,
                               "Realtime reconstruction controls become available");
                         for (var control : List.of(RenderSettings.Control.STARS,
@@ -484,12 +466,12 @@ public final class SettingsCpuSmoke {
                             }
                             controls.get(control).set(settings.value(control));
                         }
-                        rayReconstruction.set(false);
+                        nativeNoisyOutput.set(true);
                         screen.tick();
-                        check(!PrimeClient.settings().rayReconstruction() &&
+                        check(PrimeClient.settings().nativeNoisyOutput() &&
                                       !list.findOption(dlssQuality).active,
-                              "RR toggle is persisted and disables its quality control");
-                        rayReconstruction.set(true);
+                              "Native noisy output is persisted and disables RR quality control");
+                        nativeNoisyOutput.set(false);
                         for (var quality : RenderSettings.DlssQuality.values()) {
                             dlssQuality.set(quality);
                             check(PrimeClient.settings().dlssQuality() == quality,
@@ -660,7 +642,7 @@ public final class SettingsCpuSmoke {
         int vanilla = firstVanillaRow(list);
         var owner = videoOptions(screen);
         var omm = (OptionInstance<?>)field(PrimeVideoOptions.class, "opacityMicromap").get(owner);
-        var rr = (OptionInstance<?>)field(PrimeVideoOptions.class, "rayReconstruction").get(owner);
+        var rr = (OptionInstance<?>)field(PrimeVideoOptions.class, "nativeNoisyOutput").get(owner);
         var globalResets =
                 (OptionInstance<?>)field(PrimeVideoOptions.class, "ignoreGlobalHistoryResets")
                         .get(owner);

@@ -415,7 +415,7 @@ impl SurfaceCompiler {
         let mut leaves = Vec::new();
         let mut labels = BTreeMap::new();
         let mut representatives = Vec::new();
-        let mut cell_sources = [0; 4096];
+        let mut cell_indices = [0; 4096];
         let mut cell_labels = [0; 4096];
         let mut ranges = Vec::new();
         let mut covered = [false; 4096];
@@ -454,7 +454,7 @@ impl SurfaceCompiler {
                         value: NonZeroU16::new(value).unwrap(),
                     });
                     let at = usize::from(cell.xy[1]) * 64 + usize::from(cell.xy[0]);
-                    cell_sources[at] = cell.source;
+                    cell_indices[at] = first;
                     cell_labels[at] = value;
                     stats.grid_quads += 1;
                 }
@@ -467,11 +467,9 @@ impl SurfaceCompiler {
                 (leaf.u != 0 && cell_labels[at - 1] == leaf.value.get())
                     || (leaf.v != 0 && cell_labels[at - 64] == leaf.value.get())
             }) {
-                retained.extend(
-                    leaves
-                        .iter()
-                        .map(|leaf| cell_sources[usize::from(leaf.v) * 64 + usize::from(leaf.u)]),
-                );
+                retained.extend(leaves.iter().map(|leaf| {
+                    cells[cell_indices[usize::from(leaf.v) * 64 + usize::from(leaf.u)]].source
+                }));
                 stats.rectangles += leaves.len();
                 continue;
             }
@@ -518,15 +516,20 @@ impl SurfaceCompiler {
                     }
                 }
             }
-            for (x, y, value) in &ranges {
+            for (x, y, _) in &ranges {
                 let width = x.end - x.start;
                 let height = y.end - y.start;
                 stats.rectangles += 1;
                 if width == 1 && height == 1 {
-                    retained.push(cell_sources[usize::from(y.start) * 64 + usize::from(x.start)]);
+                    retained.push(
+                        cells[cell_indices[usize::from(y.start) * 64 + usize::from(x.start)]]
+                            .source,
+                    );
                     continue;
                 }
-                let cell = representatives[usize::from(*value) - 1];
+                // Numeric corners belong to this range's first actual occupant.
+                // A disconnected equal-label component must not reorder its triangles.
+                let cell = cells[cell_indices[usize::from(y.start) * 64 + usize::from(x.start)]];
                 let source = &quads[cell.source];
                 let mut q = source.clone();
                 let u = (plane.axis + 1) % 3;

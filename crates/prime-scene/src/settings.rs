@@ -38,13 +38,12 @@ pub enum ReconstructionQuality {
     UltraPerformance = 4,
 }
 
-/// Frame-boundary renderer choice; each method has its own CPU data and shader variant.
+/// The production power-distance proposal. Legacy settings IDs normalize to this variant.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[repr(u32)]
 pub enum LightSampling {
     #[default]
     Tree = 1,
-    TreeSphere = 2,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -64,7 +63,8 @@ pub struct RenderSettings {
     pub depth_range: f32,
     pub seed: u32,
     pub opacity_micromap: bool,
-    pub ray_reconstruction: bool,
+    /// Diagnostic: bypass reconstruction and render noisy output at native resolution.
+    pub native_noisy_output: bool,
     pub reconstruction_quality: ReconstructionQuality,
     pub stars: f32,
     pub auto_exposure_compensation: f32,
@@ -92,7 +92,7 @@ impl Default for RenderSettings {
             depth_range: 128.0,
             seed: 0x1357_2468,
             opacity_micromap: true,
-            ray_reconstruction: true,
+            native_noisy_output: false,
             reconstruction_quality: ReconstructionQuality::Performance,
             stars: 1.0,
             auto_exposure_compensation: 0.6,
@@ -105,7 +105,7 @@ impl Default for RenderSettings {
     }
 }
 impl RenderSettings {
-    pub const VERSION: u32 = 9;
+    pub const VERSION: u32 = 10;
     pub const BYTES: usize = 104;
     pub fn parse(bytes: &[u8]) -> Result<Self, String> {
         if bytes.len() != Self::BYTES {
@@ -147,10 +147,10 @@ impl RenderSettings {
                 1 => true,
                 _ => return Err("Unknown opacity micromap setting".into()),
             },
-            ray_reconstruction: match word(60) {
+            native_noisy_output: match word(60) {
                 0 => false,
                 1 => true,
-                _ => return Err("Unknown ray reconstruction setting".into()),
+                _ => return Err("Unknown native noisy output diagnostic setting".into()),
             },
             reconstruction_quality: match word(64) {
                 0 => ReconstructionQuality::Native,
@@ -174,8 +174,7 @@ impl RenderSettings {
                 _ => return Err("Unknown frame generation setting".into()),
             },
             light_sampling: match word(92) {
-                0 | 1 => LightSampling::Tree,
-                2 => LightSampling::TreeSphere,
+                0..=2 => LightSampling::Tree,
                 _ => return Err("Unknown light sampling method".into()),
             },
             integrator: match word(96) {
@@ -225,10 +224,10 @@ impl RenderSettings {
                 1 => true,
                 _ => return Err("Unknown opacity micromap setting".into()),
             },
-            ray_reconstruction: match s.ray_reconstruction {
+            native_noisy_output: match s.native_noisy_output {
                 0 => false,
                 1 => true,
-                _ => return Err("Unknown ray reconstruction setting".into()),
+                _ => return Err("Unknown native noisy output diagnostic setting".into()),
             },
             reconstruction_quality: match s.reconstruction_quality {
                 0 => ReconstructionQuality::Native,
@@ -252,8 +251,7 @@ impl RenderSettings {
                 _ => return Err("Unknown frame generation setting".into()),
             },
             light_sampling: match s.light_sampling {
-                0 | 1 => LightSampling::Tree,
-                2 => LightSampling::TreeSphere,
+                0..=2 => LightSampling::Tree,
                 _ => return Err("Unknown light sampling method".into()),
             },
             integrator: match s.integrator {
@@ -306,7 +304,7 @@ mod tests {
     use super::*;
     fn golden() -> Vec<u8> {
         [
-            9_u32,
+            10_u32,
             1,
             12,
             1,
@@ -321,7 +319,7 @@ mod tests {
             30,
             0,
             1,
-            1,
+            0,
             3,
             8,
             1_f32.to_bits(),
@@ -361,7 +359,8 @@ mod tests {
             (0, 6),
             (0, 7),
             (0, 8),
-            (0, 10),
+            (0, 9),
+            (0, 11),
             (48, 91),
             (48, (-91i32) as u32),
             (52, 360),
@@ -431,15 +430,14 @@ mod tests {
         assert!(RenderSettings::parse(&golden()[..96]).is_err());
     }
     #[test]
-    fn light_sampling_defaults_and_exact_wire_and_abi_values() {
+    fn light_sampling_legacy_wire_and_abi_values_normalize_to_tree() {
         let defaults = RenderSettings::default();
         assert_eq!(defaults.light_sampling, LightSampling::Tree);
         assert_eq!(LightSampling::Tree as u32, 1);
-        assert_eq!(LightSampling::TreeSphere as u32, 2);
         for (word, method) in [
             (0_u32, LightSampling::Tree),
             (1, LightSampling::Tree),
-            (2, LightSampling::TreeSphere),
+            (2, LightSampling::Tree),
         ] {
             let mut bytes = golden();
             bytes[92..96].copy_from_slice(&word.to_le_bytes());
@@ -456,13 +454,10 @@ mod tests {
                     ..defaults
                 }
             );
-            assert_eq!(
-                defaults.transport_matches(RenderSettings {
-                    light_sampling: method,
-                    ..defaults
-                }),
-                method == LightSampling::Tree
-            );
+            assert!(defaults.transport_matches(RenderSettings {
+                light_sampling: parsed.light_sampling,
+                ..defaults
+            }));
         }
         let abi = prime_abi::PrimeSettings {
             header: Default::default(),
@@ -480,7 +475,7 @@ mod tests {
             latitude_degrees: defaults.astronomy.latitude_degrees,
             solar_longitude_degrees: defaults.astronomy.solar_longitude_degrees,
             opacity_micromap: defaults.opacity_micromap as u32,
-            ray_reconstruction: defaults.ray_reconstruction as u32,
+            native_noisy_output: defaults.native_noisy_output as u32,
             reconstruction_quality: defaults.reconstruction_quality as u32,
             terrain_batches_per_frame: defaults.terrain_batches_per_frame,
             stars: defaults.stars,
@@ -495,7 +490,7 @@ mod tests {
         for (word, method) in [
             (0, LightSampling::Tree),
             (1, LightSampling::Tree),
-            (2, LightSampling::TreeSphere),
+            (2, LightSampling::Tree),
         ] {
             assert_eq!(
                 RenderSettings::from_abi(&prime_abi::PrimeSettings {
@@ -541,7 +536,7 @@ mod tests {
     fn global_reset_diagnostic_defaults_off_and_does_not_change_transport() {
         let defaults = RenderSettings::default();
         assert!(!defaults.ignore_global_history_resets);
-        assert_eq!(RenderSettings::VERSION, 9);
+        assert_eq!(RenderSettings::VERSION, 10);
         assert_eq!(RenderSettings::BYTES, 104);
         for value in [0_u32, 1] {
             let mut bytes = golden();
@@ -619,18 +614,18 @@ mod tests {
         }
     }
     #[test]
-    fn ray_reconstruction_is_enabled_by_default_and_is_not_a_transport_change() {
+    fn native_noisy_output_defaults_off_and_is_not_a_transport_change() {
         let enabled = RenderSettings::default();
-        assert!(enabled.ray_reconstruction);
+        assert!(!enabled.native_noisy_output);
         assert_eq!(
             enabled.reconstruction_quality,
             ReconstructionQuality::Performance
         );
         let mut bytes = golden();
-        bytes[60..64].copy_from_slice(&0_u32.to_le_bytes());
-        assert!(!RenderSettings::parse(&bytes).unwrap().ray_reconstruction);
+        bytes[60..64].copy_from_slice(&1_u32.to_le_bytes());
+        assert!(RenderSettings::parse(&bytes).unwrap().native_noisy_output);
         assert!(enabled.transport_matches(RenderSettings {
-            ray_reconstruction: false,
+            native_noisy_output: true,
             ..enabled
         }));
         for quality in 0..=4_u32 {

@@ -1,5 +1,6 @@
 //! Independent ReSTIR PT Enhanced point profile. Scratch is queue-local GPU memory;
 //! only completed descriptor slots have mapped uniforms and temporal commits advance on acceptance.
+//! Prime interface/history adaptations are registered in docs/restir-adaptations.md (RA-001/009).
 use super::{Buffer, Context, FRAME_SLOTS, Image, LightSampling, RenderMode, ShaderModule, error};
 use crate::temporal_reset::{self, Backend, GlobalReset, StorageCold};
 use ash::vk;
@@ -51,7 +52,7 @@ impl Pipelines {
     pub fn new(
         context: &Arc<Context>,
         layout: vk::PipelineLayout,
-        method: LightSampling,
+        _method: LightSampling,
         mode: RenderMode,
         reconstruction: bool,
         frame_generation: bool,
@@ -90,19 +91,11 @@ impl Pipelines {
             }
             Ok(pipelines)
         };
-        macro_rules! sampler_binary {
-            ($tree:ident, $sphere:ident) => {
-                match method {
-                    LightSampling::Tree => prime_shaders::$tree(),
-                    LightSampling::TreeSphere => prime_shaders::$sphere(),
-                }
-            };
-        }
         result.generate = create_group(
             if reconstruction {
-                sampler_binary!(restir_generate_rr_tree, restir_generate_rr_tree_sphere)
+                prime_shaders::restir_generate_rr_tree()
             } else {
-                sampler_binary!(restir_generate_tree, restir_generate_tree_sphere)
+                prime_shaders::restir_generate_tree()
             },
             if reconstruction {
                 1 | (u32::from(frame_generation) << 1)
@@ -111,19 +104,10 @@ impl Pipelines {
             },
         )?;
         result.workload = create_group(prime_shaders::restir_workload(), 0)?;
-        result.retrace = create_group(
-            sampler_binary!(restir_retrace_tree, restir_retrace_tree_sphere),
-            0,
-        )?;
-        result.shift = create_group(
-            sampler_binary!(restir_shift_tree, restir_shift_tree_sphere),
-            0,
-        )?;
+        result.retrace = create_group(prime_shaders::restir_retrace_tree(), 0)?;
+        result.shift = create_group(prime_shaders::restir_shift_tree(), 0)?;
         if mode == RenderMode::Realtime {
-            result.temporal = create_group(
-                sampler_binary!(restir_temporal_tree, restir_temporal_tree_sphere),
-                0,
-            )?;
+            result.temporal = create_group(prime_shaders::restir_temporal_tree(), 0)?;
         }
         result.resolve = create_group(
             if reconstruction {
@@ -280,7 +264,12 @@ impl Scratch {
                 16,
                 vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS
                     | vk::BufferUsageFlags::INDIRECT_BUFFER
-                    | vk::BufferUsageFlags::TRANSFER_DST,
+                    | vk::BufferUsageFlags::TRANSFER_DST
+                    | if cfg!(all(test, feature = "shader-tests")) {
+                        vk::BufferUsageFlags::TRANSFER_SRC
+                    } else {
+                        vk::BufferUsageFlags::empty()
+                    },
                 false,
             )?,
         })
@@ -351,6 +340,8 @@ pub(super) struct State {
     pub dynamic_update_this_frame: bool,
     lighting_changed: bool,
     ignore_global_history_resets: bool,
+    #[cfg(all(test, feature = "shader-tests"))]
+    next_test_jitter: Option<[f32; 2]>,
 }
 impl State {
     pub fn new(context: &Arc<Context>) -> Result<Self, String> {
@@ -390,6 +381,8 @@ impl State {
             dynamic_update_this_frame: false,
             lighting_changed: false,
             ignore_global_history_resets: false,
+            #[cfg(all(test, feature = "shader-tests"))]
+            next_test_jitter: None,
         })
     }
     pub fn set_history_reset_policy(&mut self, ignore: bool) {
@@ -449,6 +442,8 @@ impl State {
         anchor: [f64; 3],
         identity: crate::geometry::HistoryIdentityInput,
     ) -> Result<(), String> {
+        #[cfg(all(test, feature = "shader-tests"))]
+        let jitter = self.next_test_jitter.take().unwrap_or(jitter);
         if self
             .scratch
             .as_ref()
@@ -479,6 +474,7 @@ impl State {
         event.count("revision", u64::from(identity.revision));
         event.count("accepted", u64::from(self.history.revision));
         let mut bytes = [0_u8; UNIFORM_BYTES as usize];
+        bytes[440..448].copy_from_slice(&identity.quad_address.to_le_bytes());
         bytes[..128].copy_from_slice(&frame);
         bytes[128..256].copy_from_slice(if self.temporal_this_frame {
             &previous
@@ -595,6 +591,11 @@ impl State {
     #[cfg(all(test, feature = "shader-tests"))]
     pub(super) fn uniform_for_test(&self, slot: usize) -> &Buffer {
         &self.uniforms[slot]
+    }
+    /// Override one real prepare/dispatch/commit cycle; accepted previous jitter is untouched.
+    #[cfg(all(test, feature = "shader-tests"))]
+    pub(super) fn override_next_jitter_for_test(&mut self, jitter: [f32; 2]) {
+        self.next_test_jitter = Some(jitter);
     }
     #[cfg(all(test, feature = "shader-tests"))]
     pub(super) fn history_for_test(&self) -> (&Buffer, u64, u32) {

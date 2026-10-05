@@ -6,34 +6,16 @@ mod reference;
 use reference::{cross, dot, inverse, normalized, sub, transform};
 
 #[test]
-#[ignore = "windowless execution of production sphere proposal, finite selectors and PDF replay"]
-fn gpu_sphere_tree_integer_support_forward_reverse_and_geometry_boundaries() {
-    for extreme_power in [false, true] {
-        tree_integer_support_forward_reverse_and_geometry_boundaries(
-            prime_scene::settings::LightSampling::TreeSphere,
-            extreme_power,
-        );
-    }
-}
-
-#[test]
 #[ignore = "windowless execution of production distance proposal, finite selectors and PDF replay"]
 fn gpu_distance_tree_integer_support_forward_reverse_and_geometry_boundaries() {
     for extreme_power in [false, true] {
-        tree_integer_support_forward_reverse_and_geometry_boundaries(
-            prime_scene::settings::LightSampling::Tree,
-            extreme_power,
-        );
+        tree_integer_support_forward_reverse_and_geometry_boundaries(extreme_power);
     }
 }
 
-fn tree_integer_support_forward_reverse_and_geometry_boundaries(
-    sampler: prime_scene::settings::LightSampling,
-    extreme_power: bool,
-) {
+fn tree_integer_support_forward_reverse_and_geometry_boundaries(extreme_power: bool) {
     use prime_scene::{
         geometry::CompiledQuad,
-        settings::LightSampling,
         surface::{Emission, SurfaceFace, SurfaceMesh},
     };
     let context = Context::new().unwrap();
@@ -54,6 +36,9 @@ fn tree_integer_support_forward_reverse_and_geometry_boundaries(
                 }
                 if key == 2 && id == 1 {
                     positions[3] = positions[2];
+                }
+                if key == 3 {
+                    positions[1] = positions[0];
                 }
                 let quad = CompiledQuad {
                     positions,
@@ -80,7 +65,7 @@ fn tree_integer_support_forward_reverse_and_geometry_boundaries(
             })
             .collect();
         let mesh = SurfaceMesh::from_resolved(key, faces).unwrap();
-        let page = crate::surface::upload_lights(&context, &mesh, &textures, key, sampler)
+        let page = crate::surface::upload_lights(&context, &mesh, &textures, key)
             .unwrap()
             .unwrap();
         pages.push(page);
@@ -91,7 +76,7 @@ fn tree_integer_support_forward_reverse_and_geometry_boundaries(
         .collect();
     let mut uploads = crate::arena::Arena::new(&context, true);
     let mut tree = crate::light_tree::LightTree::new(&context);
-    tree.update(&context, [0.; 3], &sources, &mut uploads, sampler)
+    tree.update(&context, [0.; 3], &sources, &mut uploads)
         .unwrap();
     let address = tree.header_address();
     let receivers = [
@@ -122,11 +107,7 @@ fn tree_integer_support_forward_reverse_and_geometry_boundaries(
     }
     let output = run(
         &context,
-        if sampler == LightSampling::Tree {
-            prime_shader_tests::light_tree()
-        } else {
-            prime_shader_tests::sphere_tree()
-        },
+        prime_shader_tests::light_tree(),
         &input,
         input.len() / 12 * 8,
         [0, (input.len() / 12) as u32],
@@ -169,7 +150,7 @@ fn tree_integer_support_forward_reverse_and_geometry_boundaries(
             assert!((total - 1.0).abs() < 2e-7, "actual PMF sum {total}");
         }
     }
-    if sampler == LightSampling::Tree {
+    {
         let case_words = lights.len() * 2 * 8;
         let at = |case| &output[case * case_words..(case + 1) * case_words];
         assert_eq!(

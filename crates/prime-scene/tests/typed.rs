@@ -328,7 +328,7 @@ fn named_frame_and_settings_validate_semantics_without_a_wire_roundtrip() {
         latitude_degrees: 30,
         solar_longitude_degrees: 0,
         opacity_micromap: 1,
-        ray_reconstruction: 1,
+        native_noisy_output: 0,
         reconstruction_quality: 3,
         terrain_batches_per_frame: 8,
         stars: 1.0,
@@ -352,7 +352,7 @@ fn named_frame_and_settings_validate_semantics_without_a_wire_roundtrip() {
     settings.light_sampling = 2;
     assert_eq!(
         RenderSettings::from_abi(&settings).unwrap().light_sampling,
-        prime_scene::settings::LightSampling::TreeSphere
+        prime_scene::settings::LightSampling::Tree
     );
     settings.light_sampling = 3;
     assert!(RenderSettings::from_abi(&settings).is_err());
@@ -382,7 +382,13 @@ fn named_frame_and_settings_validate_semantics_without_a_wire_roundtrip() {
     settings.terrain_batches_per_frame = 128;
     let changed = RenderSettings::from_abi(&settings).unwrap();
     assert!(changed.transport_matches(RenderSettings::default()));
-    settings.ray_reconstruction = 2;
+    settings.native_noisy_output = 1;
+    assert!(
+        RenderSettings::from_abi(&settings)
+            .unwrap()
+            .native_noisy_output
+    );
+    settings.native_noisy_output = 2;
     assert!(RenderSettings::from_abi(&settings).is_err());
 }
 

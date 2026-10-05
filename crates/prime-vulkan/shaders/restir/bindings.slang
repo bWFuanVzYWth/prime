@@ -1,4 +1,4 @@
-// Entry-point bindings share the existing self-contained scene and atmospheric resources.
+// RA-001, docs/restir-adaptations.md: entry bindings share Prime scene/atmosphere resources.
 import "restir/parameters.slang";
 import "trace/closest.slang";
 import "restir/scene.slang";
@@ -24,10 +24,11 @@ RestirScene restirScene(bool previous = false) {
     result.environment = atmosphereEnvironment();
     result.energy = {transmissionEnergy};
     result.frame = previous ? parameters.previousFrame : parameters.frame;
-    // Both temporal directions use the current scene's illumination. Only camera,
-    // sampling identity and accepted jitter come from the previous frame.
+    // RA-011, docs/restir-adaptations.md: both directions use current-scene illumination;
+    // camera, sampling identity and accepted jitter come from the previous frame.
     result.frame.right.w = parameters.frame.right.w;
     result.frame.up.w = parameters.frame.up.w;
+    // RA-010, docs/restir-adaptations.md: offline per-sample offset enters here once.
     if (!previous)
         result.frame.target.y += pass.sampleOffset;
     result.tlasInstances = parameters.tlasInstances;
@@ -36,6 +37,7 @@ RestirScene restirScene(bool previous = false) {
     result.historyStatic = parameters.historyStatic;
     result.historyDynamic = parameters.historyDynamic;
     result.historyEmitters = parameters.historyEmitters;
+    result.historyStaticQuads = parameters.historyStaticQuads;
     result.identityControl = parameters.identityControl;
     return result;
 }

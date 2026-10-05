@@ -18,8 +18,7 @@
 | `pbr/delta.slang` | 整闭包 delta 判定、普通离散采样、首纯 delta 透明条件 pair，以及独立的几何 guide 方向；无 LUT/NEE |
 | `pbr/guide_albedo.slang` | 独立方向能量与清洗；不导入通用 PBR 分派或完整 closure |
 | `pbr.slang` | 生产 Full opaque/dielectric 源适配、thick-SSS Lite 扩展与历史 Lite 材质参考 API；重导出窄顶点/guide 接口 |
-| `tree_sampling.slang`、`light_distance.slang` | 可选双层功率距离树、24-bit 支持保留及同接收点路径重放 PDF；窄距离数学模块，无资源绑定 |
-| `sphere_tree_sampling.slang`、`light_direction.slang` | 可选球界方向树、接收/发光方向摘要、24-bit 支持保留与同源路径重放 PDF，无资源绑定 |
+| `tree_sampling.slang`、`light_distance.slang` | 双层功率距离树、24-bit支持保留及同接收点路径重放PDF；窄距离数学模块，无资源绑定 |
 | `light_sampling.slang` | 显式采样实验保留的 32B 功率树节点与选择，无资源绑定 |
 | `display/prime_drt.slang` | 当前可替换的显示策略；显式显示变换与艺术调整，只依赖颜色数学库 |
 | `display/exposure.slang`、`display/hdr.slang` | 曝光/适应、extended-sRGB EOTF、source-over界面合成与coverage数学；无资源绑定 |
@@ -66,7 +65,7 @@ ReSTIR 的 `restir/parameters.slang` 只声明 uniform/pass 布局；线性地�
 
 SDR世界仍写宿主 `RGBA8_UNORM`，已编码sRGB；启用HDR或实际FG时alpha=0以记录后续手部/HUD coverage，否则alpha=1。HDR保留FP16 extended-sRGB world与独立SDR baseline，宿主选择和Windows P/W标定成功后，在界面完成时做EOTF与W/80 scRGB呈现。需要曝光/HDR/FG或RR星图时使用显式线性display入口，关闭这些功能时保留原直接显示；诊断视图不走曝光/星图/FG。自动曝光、HDR、星图合成、buffer/image读取与成本详见[显示契约](display.md)，游戏内设置与FFM控制见[渲染模式](renderers.md)。NaN/Inf辐射亮度输入置黑；负颜色在旧算法规定的位置处理。
 
-光源采样在创建或帧边界切换时选择独立编译产物：Offline、Realtime K2及RR K2各提供Tree/TreeSphere变体，K1与post共用。`PRIME_LIGHT_TREE`、`PRIME_LIGHT_TREE_SPHERE`仅为编译宏，不是push或specialization参数；未选中的采样代码与资源访问不会进入SPIR-V。每个renderer只使用所选变体的pipeline，场景特性选择和每次dispatch不检查采样方式；切换与资源完成契约见[渲染模式](renderers.md)。
+Offline、Realtime K2及RR K2均编译唯一Tree采样路径，K1与post保持原阶段边界。生产无采样器变体选择或运行时分派，不构建另一套灯表。布局与发布失败/完成证明见[PT设计](pt-state-design.md#光源采样与发布成本)。
 
 ## 采样域
 
@@ -74,19 +73,13 @@ Z-Sobol 配置为 `R≤16`、`S≤20`、`2R+S≤52`，像素坐标 `<2^R`、样�
 
 生产 `R=ceil(log2(max(width,height)))`，`S=8`（原生 1080p 的 Morton 索引共 30 位，使用单字快路径）。相机 jitter 使用 domain 0；每个反弹从 `1+4*bounce` 起依次分配表面 coverage、阴影 coverage、BSDF 二维样本、roulette。分支不会推进共享 RNG。超过 256 个样本时切换全局 scramble，开始新的完整样本集；不声称它是无限延长的同一个 Sobol net。完整样本集/对齐像素邻域的均匀性不等于早期任意前缀的质量保证。
 
-[表面编译](surface-compiler.md)的显式灯使用 `sample2D(512+4*bounce)` 分配局部/全局路由及局部 alias 样本，`sample2D(768+bounce)` 分配全局页及页内灯样本。两个二维域各复用一次 index permutation，不串接同一 24-bit 标量的条件残差。前一域加 1 仍用于 quad 面积加权半面及三角形二维采样，加 2/3 分别用于采样点 coverage 和有限阴影 coverage。64 次反弹内这些域互不重叠；`sample1D(d)` 与 `sample2D(d).x` 是同一值，不能视为额外随机维度。静态灯 NEE 与发光命中使用同版本、同一前一着色点的完整混合 PDF 做 MIS；太阳圆盘方向使用独立的 `1024+bounce` domain。
+[表面编译](surface-compiler.md)的显式灯使用 `sample2D(768+bounce)` 的两个24-bit样本分别选择世界页与页内灯，不串接同一标量的条件残差。`domain=512+4*bounce`：加1用于quad面积加权半面及三角形二维采样，加2/3分别用于采样点coverage和有限阴影coverage；不再消费局部网格路由域。64次反弹内这些域互不重叠；`sample1D(d)` 与 `sample2D(d).x` 是同一值，不能视为额外随机维度。静态灯NEE与发光命中在同版本、同一前驱物理接收点使用世界PMF×页内PMF×面积倒数做MIS；太阳圆盘方向使用独立的 `1024+bounce` domain。
 
 BSDF事件选择使用 `sample1D(1280+bounce)`。仅实时相机第一可见表面为纯delta optical时，额外使用独立domain1536，在有效reflection-only/transmission-only候选之间固定0.5抽选；候选保留物理response和条件PDF=1，双有效时未来beta乘2，单有效乘1。首面发光/guide albedo不补偿，连续MIS PDF仍为0。粗糙首面、后续透明及Offline保持普通采样；照明roulette与guide几何方向均不复用该随机域。
 
-Tree保留历史空间median拓扑，以两份独立24-bit样本分别选择光页与页内灯。分支proposal使用功率与接收点距离平方，不考虑接收/发光方向。节点为24B：中心与功率、child和后代叶数。世界层中心为AABB中点；页内内部节点为按quad两半面积质心与灯功率加权、在节点AABB中10-bit量化的位置。页内终端使用接收点到实际四角AABB的距离，距离为零时依次退到量化质心与quad两条边的平方长度之和，沿用TreeSphere距离语义。空间median保留的是拓扑；TreeSphere仍另用方向SAOH构建树。
+Tree使用空间median拓扑，以两份独立24-bit样本分别选择光页与页内灯。分支proposal使用功率与接收点距离平方，不考虑接收/发光方向。节点为24B：中心与功率、child和后代叶数。世界层中心为AABB中点；页内内部节点为按quad两半面积质心与灯功率加权、在节点AABB中10-bit量化的位置。页内终端使用接收点到实际四角AABB的距离，距离为零时依次退到量化质心与quad两条边的平方长度之和。
 
-Tree前向选择与反向PDF都从每层`2^24`个整数输入开始，按同一接收点的功率距离评分划分count，每个子树至少分配其后代叶数的输入。每棵树最多`2^24`叶、路径深度最多27；页与灯引用存储32-bit重放路径，实际PMF为所选叶count除以`2^24`。发光命中MIS和ReSTIR的端点PDF在原前驱接收点重放两层划分，再乘总面积倒数；不能保存或使用固定页/灯概率。Tree不增加跨射线查询的法线状态。整数支持修正只改变proposal，不改真实发光、面积、coverage与可见性，也不证明不同多维采样域完全独立。TreeSphere还包含接收/发射方向评分，两者均在选灯后按实际BSDF、发光和可见性计算贡献。
-
-TreeSphere使用相同quad发光面和两个24-bit选择域，CPU按功率、空间与方向摘要构建双层树。节点为32B：中心与功率、压缩方向、child、后代叶数和保守半径。世界层中心为已表示AABB的中点，半径按该f32中心到AABB角点的最大距离向上取整；世界叶直接保存页界，不再借页内根的功率质心作为球中心。页内内部节点保留量化功率质心距离与方向评分，终端quad按实际两半面积权重计算方向和接收余弦界，零面积半面不归一化。方向表示轴/圆锥或六个5-bit轴向功率瓣；世界球界估计接收与发光角度，在球内取宽界。评分含`1/256`角度下限，均为选光proposal近似，不改变发光、coverage、面积或真实遮挡。
-
-TreeSphere的分支评分依接收点与proposal法线变化，实际PDF不能保存为固定页概率。GPU从每层`2^24`个整数输入开始按评分划分count，并为左右后代各保留至少其叶数的输入，保证容量内每叶在该一维格点上有正支持；每棵树最多`2^24`叶，路径深度最多27。前向返回叶区间count的实际PMF，反向用页/灯路径和同一前驱接收点、proposal法线重放相同整数划分，乘世界PMF、页内PMF与总面积倒数。K2和Offline仅在该变体保存`previousLightNormal`供发光命中MIS；dielectric使用零法线关闭接收半球估计。该支持保证不证明两个有限采样域完全独立，也不继承小样板连续PMF的方差或性能结论。
-
-alias 的 PDF 对应单表实际 f32 运算及 24-bit 输入格点，上传后仍有 f32 存储舍入。CPU 将每列阈值下限设为该列首个实际残差的下一个 f32 值，并至少为最小正规数，防止极小功率区间不可达或 GPU 将次正规阈值冲零；之后按修正后的表计算 PDF。修正只改变提议概率，不改发光，生产继续渲染并按累计修正表数的倍增输出 `Warning PT-010`，包含表项数及最大单表概率转移量。不同采样域避免已知的单标量残差支持损失，但单表边际校验不证明有限多维序列的完全独立或任意有限前缀已收敛。实际支持、PDF 接线、正常 Z-Sobol 的逐灯统计和完整图像分别验证。
+Tree前向选择与反向PDF都从每层`2^24`个整数输入开始，按同一接收点的功率距离评分划分count，每个子树至少分配其后代叶数的输入。每棵树最多`2^24`叶、路径深度最多27；页与灯引用存储32-bit重放路径，实际PMF为所选叶count除以`2^24`。发光命中MIS和ReSTIR端点PDF在原前驱接收点重放两层划分，再乘总面积倒数；不能保存或使用固定页/灯概率。Tree不增加跨射线查询的法线状态。整数支持修正只改变proposal，不改真实发光、面积、coverage与可见性；贡献仍按实际BSDF、发光和可见性求值。单表支持也不证明不同多维采样域完全独立。
 
 实现复用 domain hash，以固定双字移位代替通用 64 位移位分支，将 Sobol Y 变换移到反向位序，抵消紧邻的 Sobol/Owen bit reverse。没有额外采样纹理或跨帧随机状态。上述是运算路径变化，不代表已经测得整帧提速。
 

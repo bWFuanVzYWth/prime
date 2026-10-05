@@ -77,7 +77,27 @@ public PrecomputedShiftData restirShift(RestirScene scene, RestirPrimary primary
         distanceSquared = dot(displacement, displacement);
         if (!(distanceSquared > 0))
             return result;
+        bool queryMeasure = !(emitter && nee);
+        bool physicalPositive = false;
+        if (queryMeasure) {
+            // RA-003, docs/restir-adaptations.md: finite BSDF arrivals use the safe query
+            // origin's solid-angle chart; terminal NEE uses the physical receiver.
+            float physicalSide = dot(previous.surface.normal, displacement);
+            physicalPositive = physicalSide >= 0;
+            bool physicalTransmission =
+                    physicalSide * dot(previous.surface.normal, previousView) < 0;
+            if (physicalTransmission != reservoir.pathFlags.decodeIsTransmissionEvent(true))
+                return result;
+            displacement = target.position - spawnRay(previous.surface, displacement);
+            distanceSquared = dot(displacement, displacement);
+            if (!(distanceSquared > 0))
+                return result;
+        }
         connection = displacement * rsqrt(distanceSquared);
+        // RA-003, docs/restir-adaptations.md: event equality alone is ambiguous at a tangent.
+        // Match spawnRay's >=0 convention so its late call uses the same safe origin.
+        if (queryMeasure && (dot(previous.surface.normal, connection) >= 0) != physicalPositive)
+            return result;
     }
     bool transmission =
             dot(previous.surface.normal, connection) * dot(previous.surface.normal, previousView) <
@@ -88,7 +108,8 @@ public PrecomputedShiftData restirShift(RestirScene scene, RestirPrimary primary
         return result;
     float4 medium = previous.optical && !previous.thin && transmission ? previous.transmitted
                                                                        : replay.medium;
-    BsdfEvaluation first = restirEvaluate(scene, previous, previousView, connection, replay.medium);
+    BsdfEvaluation first = restirEvaluate(scene, previous, previousView, connection, replay.medium,
+                                          !(emitter && nee));
     if (all(first.response == 0) || !(first.pdf > 0))
         return result;
     float geometry = finite ? abs(dot(target.normal, -connection)) / distanceSquared : 1;
@@ -114,16 +135,19 @@ public PrecomputedShiftData restirShift(RestirScene scene, RestirPrimary primary
         SurfaceHit rcHit = restirLoadHit(scene, reservoir.reconnectionHit, -connection,
                                          reservoir.initRandomSeed);
         if (emitter) {
-            // All configured local proposals may depend on the receiver. Re-evaluate their
-            // exact selection PDF instead of applying Falcor's position-independent shortcut.
-            PrimePbrVertex previousMaterial = restirMaterial(previous, previousView);
-            float3 proposalNormal = previous.optical ? float3(0) : previousMaterial.normal;
-            float lightPdf =
-                    restirEmitterPdf(scene, rcHit, previous.surface.position, proposalNormal);
+            // RA-005/007, docs/restir-adaptations.md: re-evaluate receiver-dependent TREE
+            // PMF wherever a competitor exists, replacing the upstream sampler-specific shortcut.
+            float competingPdf =
+                    restirDirectCompetitionPdf(previous.optical, transmission, first.pdf);
+            float lightPdf = 0;
+            if (nee || competingPdf > 0) {
+                lightPdf = restirEmitterPdf(scene, rcHit, previous.surface.position);
+            }
             bool continuation = !nee || pathLength + 1 < asuint(scene.frame.displayExtra.z);
-            float mis = continuation ? (nee ? primePowerHeuristicValue(lightPdf, first.pdf)
-                                            : primePowerHeuristicValue(first.pdf, lightPdf))
-                                     : 1;
+            float mis = continuation && (nee || competingPdf > 0)
+                                ? (nee ? primePowerHeuristicValue(lightPdf, first.pdf)
+                                       : primePowerHeuristicValue(competingPdf, lightPdf))
+                                : 1;
             emitterRadiance = rcHit.emission;
             emitterMis = mis;
             if (updateSuffix) {
@@ -131,21 +155,27 @@ public PrecomputedShiftData restirShift(RestirScene scene, RestirPrimary primary
                 reservoir.lightPdf = lightPdf * geometry;
             }
         } else {
-            if (neeAtRc && !restirNeeMayReconnectAtSurface(rcHit))
-                return result;
+            // RA-011/012, docs/restir-adaptations.md: TREE's fixed-RC PMF has no
+            // view-normal dependency; retain upstream static cached-suffix behavior.
             if (updateSuffix && !restirUpdateSuffix(scene, rcHit, -connection, medium, reservoir))
                 return result;
             integrand = reservoir.reconnectionIncidentRadiance * first.response;
-            BsdfEvaluation second =
-                    restirEvaluate(scene, rcHit, -connection, reservoir.reconnectionWi, medium);
+            BsdfEvaluation second = restirEvaluate(scene, rcHit, -connection,
+                                                   reservoir.reconnectionWi, medium, !neeAtRc);
             secondPdf = second.pdf;
             integrand *= second.response;
             if (rcLength == pathLength) {
                 bool continuation = !nee || pathLength + 1 < asuint(scene.frame.displayExtra.z);
+                bool secondTransmission =
+                        dot(rcHit.surface.normal, -connection) *
+                                dot(rcHit.surface.normal, reservoir.reconnectionWi) <
+                        0;
+                float competingPdf =
+                        restirDirectCompetitionPdf(rcHit.optical, secondTransmission, secondPdf);
                 float mis =
-                        continuation
+                        continuation && (neeAtRc || competingPdf > 0)
                                 ? (neeAtRc ? primePowerHeuristicValue(reservoir.lightPdf, secondPdf)
-                                           : primePowerHeuristicValue(secondPdf,
+                                           : primePowerHeuristicValue(competingPdf,
                                                                       reservoir.lightPdf))
                                 : 1;
                 integrand *= mis;
@@ -160,22 +190,29 @@ public PrecomputedShiftData restirShift(RestirScene scene, RestirPrimary primary
         }
         integrand = reservoir.reconnectionIncidentRadiance * first.response;
         bool continuation = !nee || pathLength + 1 < asuint(scene.frame.displayExtra.z);
-        float mis = continuation ? (nee ? primePowerHeuristicValue(lightPdf, first.pdf)
-                                        : primePowerHeuristicValue(first.pdf, lightPdf))
-                                 : 1;
+        float competingPdf = restirDirectCompetitionPdf(previous.optical, transmission, first.pdf);
+        float mis = continuation && (nee || competingPdf > 0)
+                            ? (nee ? primePowerHeuristicValue(lightPdf, first.pdf)
+                                   : primePowerHeuristicValue(competingPdf, lightPdf))
+                            : 1;
         integrand *= mis;
     }
     // PDF-based roughness is Falcor's custom-material route; emissive BSDF-hit endpoints
     // skip that test and use the diffuse pseudo-PDF for the reverse footprint, as upstream.
     if (!(emitter && nee)) {
+        // RA-004, docs/restir-adaptations.md: area measure uses geometric ng, as in source
+        // generate/replay; a mapped BSDF normal must not reject its own source connection.
         float inverseGeometry =
-                finite ? distanceSquared / abs(dot(previous.shadingNormal, -connection)) : 0;
+                finite ? distanceSquared / abs(dot(previous.surface.normal, -connection)) : 0;
         if (violateRoughness || violateDistance ||
             !(emitter && !finite) &&
                     inverseGeometry / (emitter && !nee ? RESTIR_DIFFUSE_PSEUDO_PDF : secondPdf) <
                             threshold)
             return result;
     }
+    // RA-003/011, docs/restir-adaptations.md: compute late, without retaining begin
+    // across suffix queries. Visibility keeps Prime's straight transmittance approximation.
+    // The source-event checks above ensure the query and physical spawn sides agree.
     float3 begin = spawnRay(previous.surface, connection);
     float3 visibility;
     if (finite) {
@@ -190,8 +227,8 @@ public PrecomputedShiftData restirShift(RestirScene scene, RestirPrimary primary
         visibility = traceTransmittance(scene.resources, begin, connection,
                                         reservoir.initRandomSeed, 100000, medium);
     }
-    // Match Prime's existing local-emitter transport order. RGB transmittance and
-    // the non-diagonal Rec.709->working conversion cannot be interchanged.
+    // RA-013, docs/restir-adaptations.md: preserve local-emitter source transport order;
+    // RGB transmittance and the non-diagonal color conversion cannot be interchanged.
     if (finite && emitter) {
         float3 visibleLe = nee ? linear709ToWorking(emitterRadiance * visibility)
                                : linear709ToWorking(emitterRadiance) * visibility;

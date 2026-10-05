@@ -1,14 +1,21 @@
 //! Current scene-slot identities for accepted ReSTIR history. Only semantic slot edits
 //! advance the watermark; acceleration relocation and camera-relative rebasing do not.
+//! Prime identity/support adaptation: RA-009 in docs/restir-adaptations.md.
+use super::static_history::QuadState;
+use crate::plan::Slots;
 use crate::{Buffer, Context, arena::Arena};
 use ash::vk;
-use std::{collections::BTreeSet, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct HistoryIdentityInput {
     pub addresses: [u64; 3],
     pub counts: [u32; 3],
     pub revision: u32,
+    pub quad_address: u64,
 }
 
 #[derive(Default)]
@@ -110,11 +117,33 @@ impl Table {
     }
 }
 
-#[derive(Default)]
 pub(super) struct HistoryIdentity {
     revision: u32,
     tables: [Table; 3],
     emitter_keys: Vec<Option<u64>>,
+    quad_records: Table,
+    quad_slots: Slots,
+    quad_pages: BTreeMap<u32, (u32, u32)>,
+}
+
+impl Default for HistoryIdentity {
+    fn default() -> Self {
+        Self {
+            revision: 0,
+            tables: Default::default(),
+            emitter_keys: Vec::new(),
+            quad_records: Table::default(),
+            quad_slots: Slots::with_limit(0x8000_0000),
+            quad_pages: BTreeMap::new(),
+        }
+    }
+}
+
+// Update-local certificate. It is restored only after the caller proves that
+// the source and canonical primitive mapping survived a derived rebuild.
+pub(super) struct StaticHistory {
+    first: u32,
+    records: Vec<[u32; 2]>,
 }
 
 impl HistoryIdentity {
@@ -146,7 +175,134 @@ impl HistoryIdentity {
     }
 
     pub fn remove_static(&mut self, first: u32, count: u32) {
+        for index in first..first + count {
+            if let Some((offset, count)) = self.quad_pages.remove(&index) {
+                self.quad_slots.release(offset, count);
+            }
+        }
+        self.suspend_static(first, count);
+    }
+
+    pub fn suspend_static(&mut self, first: u32, count: u32) {
         self.static_range(first, std::iter::repeat_n(0, count as usize));
+    }
+
+    pub fn static_quads(
+        &mut self,
+        page: u32,
+        states: &[QuadState],
+        retain: bool,
+    ) -> Result<(), String> {
+        let count =
+            u32::try_from(states.len()).map_err(|_| "Static quad identity count overflow")?;
+        let previous = self.quad_pages.get(&page).copied();
+        let old = previous.filter(|_| retain).map(|(first, count)| {
+            self.quad_records.records[first as usize..(first + count) as usize].to_vec()
+        });
+        let offset = if let Some((first, old_count)) =
+            previous.filter(|(_, old_count)| *old_count == count)
+        {
+            let _ = old_count;
+            first
+        } else {
+            if let Some((first, count)) = previous {
+                self.quad_slots.release(first, count);
+            }
+            let offset = self.quad_slots.allocate(count)?;
+            self.quad_pages.insert(page, (offset, count));
+            offset
+        };
+        for (index, state) in states.iter().enumerate() {
+            let revision = if !state.changed {
+                old.as_ref()
+                    .and_then(|records| records.get(index))
+                    .filter(|old| old[1] == state.live)
+                    .map_or(self.revision, |old| old[0])
+            } else {
+                self.revision
+            };
+            self.quad_records
+                .set(offset as usize + index, state.live, revision);
+        }
+        self.tables[0].set(page as usize, count * 2 | 0x8000_0000, offset);
+        Ok(())
+    }
+
+    pub fn invalidate_static_quads(&mut self, page: u32, quads: impl IntoIterator<Item = usize>) {
+        let Some(&(offset, count)) = self.quad_pages.get(&page) else {
+            return;
+        };
+        for quad in quads {
+            if quad < count as usize {
+                let at = offset as usize + quad;
+                self.quad_records
+                    .set(at, self.quad_records.records[at][1], self.revision);
+            }
+        }
+    }
+    pub fn relocate_static_quads(
+        &mut self,
+        previous: u32,
+        next: u32,
+        count: u32,
+    ) -> Result<(), String> {
+        for index in 0..count {
+            if self.quad_pages.contains_key(&(next + index)) {
+                return Err("Static quad identity alias overlaps another live page".into());
+            }
+        }
+        for index in 0..count {
+            if let Some(range) = self.quad_pages.remove(&(previous + index)) {
+                self.quad_pages.insert(next + index, range);
+            }
+        }
+        Ok(())
+    }
+    pub fn alias_static(&mut self, previous: u32, next: u32, count: u32, current_count: u32) {
+        for index in 0..count {
+            let record = if index < current_count {
+                self.tables[0]
+                    .records
+                    .get((next + index) as usize)
+                    .copied()
+                    .unwrap_or([0; 2])
+            } else {
+                [0; 2]
+            };
+            self.tables[0].set((previous + index) as usize, record[1], record[0]);
+        }
+    }
+
+    pub fn snapshot_static(&self, first: u32, count: u32) -> Option<StaticHistory> {
+        Some(StaticHistory {
+            first,
+            records: self.tables[0]
+                .records
+                .get(first as usize..first as usize + count as usize)?
+                .to_vec(),
+        })
+    }
+
+    pub fn restore_static(
+        &mut self,
+        first: u32,
+        counts: impl ExactSizeIterator<Item = u32>,
+        saved: &StaticHistory,
+    ) -> bool {
+        if saved.first != first
+            || saved.records.len() != counts.len()
+            || saved
+                .records
+                .iter()
+                .zip(counts)
+                .any(|(old, count)| old[1] != count)
+        {
+            return false;
+        }
+        for (i, &[revision, count]) in saved.records.iter().enumerate() {
+            self.tables[0].set(first as usize + i, count, revision);
+        }
+        true
     }
 
     pub fn dynamic_slot(&mut self, index: usize, primitive_count: u32) {
@@ -191,6 +347,11 @@ impl HistoryIdentity {
         std::array::from_fn(|index| self.tables[index].gpu.as_ref().unwrap())
     }
 
+    #[cfg(all(test, feature = "shader-tests"))]
+    pub fn quad_buffer_for_test(&self) -> Option<&Buffer> {
+        self.quad_records.gpu.as_ref()
+    }
+
     pub fn input(
         &mut self,
         context: &Arc<Context>,
@@ -216,10 +377,17 @@ impl HistoryIdentity {
             *count = u32::try_from(table.records.len())
                 .map_err(|_| "History identity count overflow")?;
         }
+        self.quad_records.truncate(self.quad_slots.end as usize);
+        let quad_address = if self.quad_records.records.is_empty() {
+            0
+        } else {
+            self.quad_records.upload(context, uploads)?
+        };
         Ok(HistoryIdentityInput {
             addresses,
             counts,
             revision: self.revision,
+            quad_address,
         })
     }
 }
@@ -281,6 +449,92 @@ mod tests {
         assert!(!valid(&identity.tables[1], 1, 0, accepted));
         assert!(valid(&identity.tables[1], 0, 17, identity.revision));
         assert!(!valid(&identity.tables[1], 0, 0, 0));
+    }
+
+    #[test]
+    fn derived_rebuild_restores_only_the_same_range_and_current_support_stamps() {
+        let mut identity = HistoryIdentity::after(0).unwrap();
+        identity.static_range(2, [4, 6]);
+        let accepted = identity.revision();
+        identity.advance().unwrap();
+        // A genuine alpha edit precedes the derived rebuild. Its fresh stamp
+        // must survive restoration, while the neighboring page remains usable.
+        identity.static_range(3, [6]);
+        let saved = identity.snapshot_static(2, 2).unwrap();
+        identity.remove_static(2, 2);
+        assert!(!valid(&identity.tables[0], 2, 0, accepted));
+        assert!(!identity.restore_static(1, [4, 6].into_iter(), &saved));
+        assert!(!identity.restore_static(2, [4, 8].into_iter(), &saved));
+        assert!(!identity.restore_static(2, [4].into_iter(), &saved));
+        assert!(!valid(&identity.tables[0], 2, 0, accepted));
+        assert!(identity.restore_static(2, [4, 6].into_iter(), &saved));
+        assert!(valid(&identity.tables[0], 2, 3, accepted));
+        assert!(!valid(&identity.tables[0], 3, 0, accepted));
+        assert!(valid(&identity.tables[0], 3, 5, identity.revision()));
+        assert!(identity.snapshot_static(2, 3).is_none());
+    }
+
+    #[test]
+    fn quad_edits_and_page_alias_growth_keep_unmodified_endpoints_and_shared_storage() {
+        let state = |live, changed| QuadState { live, changed };
+        let mut identity = HistoryIdentity::after(0).unwrap();
+        identity
+            .static_quads(1, &[state(3, true), state(3, true), state(1, true)], false)
+            .unwrap();
+        let accepted = identity.revision();
+        let old_offset = identity.quad_pages[&1].0;
+        identity.advance().unwrap();
+        identity.invalidate_static_quads(1, [2]);
+        identity.suspend_static(1, 1);
+        assert!(!valid(&identity.tables[0], 1, 0, accepted));
+        identity
+            .static_quads(1, &[state(3, false), state(0, true), state(1, false)], true)
+            .unwrap();
+        assert_eq!(
+            identity.quad_records.records[old_offset as usize],
+            [accepted, 3]
+        );
+        assert_eq!(
+            identity.quad_records.records[old_offset as usize + 1],
+            [identity.revision(), 0]
+        );
+        assert_eq!(
+            identity.quad_records.records[old_offset as usize + 2],
+            [identity.revision(), 1]
+        );
+        identity.relocate_static_quads(1, 20, 1).unwrap();
+        identity
+            .static_quads(
+                20,
+                &[state(3, false), state(3, true), state(1, false)],
+                true,
+            )
+            .unwrap();
+        identity.alias_static(1, 20, 1, 1);
+        assert_eq!(
+            identity.tables[0].records[1],
+            identity.tables[0].records[20]
+        );
+        assert_eq!(identity.quad_pages[&20].0, old_offset);
+        assert!(!identity.quad_pages.contains_key(&1));
+        assert_eq!(
+            identity.quad_slots.end, 3,
+            "aliases must not duplicate quad identity storage"
+        );
+        assert_eq!(
+            identity.quad_records.records[old_offset as usize],
+            [accepted, 3]
+        );
+        assert_eq!(
+            identity.quad_records.records[old_offset as usize + 1],
+            [identity.revision(), 3]
+        );
+        identity.remove_static(1, 1);
+        assert_eq!(identity.quad_slots.end, 3);
+        identity.remove_static(20, 1);
+        assert_eq!(identity.quad_slots.end, 0);
+        assert!(!valid(&identity.tables[0], 1, 0, identity.revision()));
+        assert!(!valid(&identity.tables[0], 20, 0, identity.revision()));
     }
 
     #[test]

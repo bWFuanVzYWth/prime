@@ -143,7 +143,7 @@ fn gpu_realtime_raw_split_cost_ab_ba() {
         bounces: 12,
         offline_samples: 1,
         seed: 0x1357_2468,
-        ray_reconstruction: false,
+        native_noisy_output: true,
         opacity_micromap: false,
         ..Default::default()
     };

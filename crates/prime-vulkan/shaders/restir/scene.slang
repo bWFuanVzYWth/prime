@@ -20,11 +20,7 @@ import "restir/reservoir.slang";
 import "restir/rng.slang";
 import "restir/identity.slang";
 __exported import "restir/types.slang";
-#if defined(PRIME_LIGHT_TREE_SPHERE)
-import "sphere_tree_sampling.slang";
-#else
 import "tree_sampling.slang";
-#endif
 
 public static const uint RESTIR_LIGHT_SKY = 0;
 public static const uint RESTIR_LIGHT_EMISSIVE = 1;
@@ -36,6 +32,8 @@ public static const float RESTIR_DISTANCE_THRESHOLD = 0.0002;
 public static const float RESTIR_DISTANCE_SIGMA = 0.2;
 public static const float RESTIR_ROUGHNESS_THRESHOLD = 0.2;
 
+// RA-001, docs/restir-adaptations.md: Prime owns scene/material resources; upstream
+// reservoir and replay math consume this narrow adapter without host callbacks.
 public struct RestirScene {
     public TraceScene resources;
     public AtmEnvironment environment;
@@ -47,12 +45,14 @@ public struct RestirScene {
     public uint2 *historyStatic;
     public uint2 *historyDynamic;
     public uint2 *historyEmitters;
+    public uint2 *historyStaticQuads;
     public uint4 identityControl;
 };
 
 public bool restirHistoryHitValid(RestirScene scene, HitInfo hit) {
     return restirHistoryHitValid(hit, scene.historyStatic, scene.historyDynamic,
-                                 scene.historyEmitters, scene.identityControl);
+                                 scene.historyEmitters, scene.identityControl,
+                                 scene.historyStaticQuads);
 }
 
 #if !defined(PRIME_RESTIR_MATERIAL_ONLY)
@@ -68,6 +68,7 @@ public struct RestirHitIdentity : IClosestHitIdentity {
 #endif
 
 public float3 restirPrimaryDirection(Frame frame, uint2 pixel, float2 jitter = float2(0)) {
+    // RA-002, docs/restir-adaptations.md: top-left pixel center plus input-pixel jitter.
     float2 screen = ((float2(pixel) + 0.5 + jitter) / float2(frame.dimensions.xy)) * 2.0 - 1.0;
     return normalize(frame.forward.xyz +
                      frame.right.xyz * (screen.x * frame.forward.w * frame.position.w) -
@@ -92,8 +93,8 @@ float3x4 restirDynamicTransform(RestirScene scene, uint instance) {
                     asfloat(uint4(words[8], words[9], words[10], words[11])));
 }
 
-// NEE emitter identities address the immutable emitter directory, rather than searching
-// terrain for a matching source quad. Only terminal emitters use this identity category.
+// RA-009, docs/restir-adaptations.md: terminal NEE identities address the immutable
+// emitter directory directly, without searching terrain for a matching source quad.
 public SurfaceHit restirLoadEmitter(RestirScene scene, HitInfo identity, float3 view,
                                     uint coverageSeed) {
     uint pageIndex = identity.pageID() & 0x00ffffffu;
@@ -129,6 +130,8 @@ public SurfaceHit restirLoadEmitter(RestirScene scene, HitInfo identity, float3 
 
 public SurfaceHit restirLoadHit(RestirScene scene, HitInfo identity, float3 view,
                                 uint coverageSeed = 0, float footprint = 0) {
+    // RA-009/010, docs/restir-adaptations.md: keep the actual selected coating and
+    // upstream explicit LOD 0; closest-hit remains the shared material producer.
     if (!identity.isValid()) {
         SurfaceHit empty = {};
         return empty;
@@ -206,16 +209,6 @@ public float restirPrimaryFootprint(RestirScene scene, SurfaceHit hit, float3 vi
 public bool restirSampleRough(float samplePdf, float roughnessThreshold) {
     return samplePdf <= 1.0 / (roughnessThreshold * roughnessThreshold);
 }
-public bool restirNeeMayReconnectAtSurface(SurfaceHit hit) {
-#if defined(PRIME_LIGHT_TREE_SPHERE)
-    // The sphere proposal depends on the view-adjusted shading normal. Keep
-    // such a terminal NEE sample as its emitter endpoint, whose PMF is re-evaluated.
-    return hit.optical || (hit.materialFlags & 1u) == 0;
-#else
-    // TREE depends on the preserved RC position, not its changed incident view.
-    return true;
-#endif
-}
 public void restirSampleThresholds(inout SampleGenerator sg, out float distanceThreshold,
                                    out float roughnessThreshold) {
     distanceThreshold =
@@ -224,6 +217,8 @@ public void restirSampleThresholds(inout SampleGenerator sg, out float distanceT
 }
 
 public float4 restirIncident(SurfaceHit hit, float4 medium) {
+    // RA-011, docs/restir-adaptations.md: thick interfaces use physical side media;
+    // opaque/physical-thin vertices retain the source transport's incoming medium.
     return hit.optical && !hit.thin ? hit.incident : medium;
 }
 public float4 restirTransmitted(SurfaceHit hit) {
@@ -231,16 +226,39 @@ public float4 restirTransmitted(SurfaceHit hit) {
                     : hit.transmitted;
 }
 #if !defined(PRIME_RESTIR_MATERIAL_ONLY)
+public bool restirDirectLightSupported(SurfaceHit hit, float3 view, float3 direction) {
+    if (hit.optical)
+        return true;
+    // RA-008, docs/restir-adaptations.md: ordinary PT faces its SurfacePoint toward view.
+    // ReSTIR preserves stored ng; use its local shadowReceiver's facing convention.
+    float cosine = dot(hit.surface.normal, direction);
+    return dot(hit.surface.normal, view) < 0 ? cosine < 0 : cosine > 0;
+}
+
 public BsdfEvaluation restirEvaluate(RestirScene scene, SurfaceHit hit, float3 view,
-                                     float3 direction, float4 medium) {
+                                     float3 direction, float4 medium, bool continuation = false) {
+    // RA-007/008, docs/restir-adaptations.md: continuation includes authored SSS;
+    // direct NEE keeps the source opaque front-side support.
+    if (!continuation && !restirDirectLightSupported(hit, view, direction))
+        return primeInvalidBsdfEvaluation();
     PrimePbrVertex material = restirMaterial(hit, view);
     BsdfEvaluation evaluated =
             primeEvaluatePbrVertex(scene.energy, material, view, direction,
                                    restirIncident(hit, medium), restirTransmitted(hit));
     if (!primeGeometricEvaluationSupport(primePbrVertexHasNormal(material), hit.surface.normal,
-                                         material.normal, view, direction, hit.optical))
+                                         material.normal, view, direction,
+                                         hit.optical || continuation))
         return primeInvalidBsdfEvaluation();
     return evaluated;
+}
+
+// RA-007, docs/restir-adaptations.md: continuation can use either sampled event,
+// including opaque authored thin SSS.
+// Its mapped geometric/shading sides must still agree. Direct NEE keeps the default
+// reflection-only opaque support above. Shift excludes discrete source events, so
+// this is the evaluated-event equivalent of primeDirectLightingMisPdf.
+public float restirDirectCompetitionPdf(bool optical, bool transmission, float scatterPdf) {
+    return !optical && transmission ? 0 : scatterPdf;
 }
 
 public PrimePbrSample restirScatter(RestirScene scene, SurfaceHit hit, float3 view, float4 medium,
@@ -258,12 +276,14 @@ public PrimePbrSample restirScatter(RestirScene scene, SurfaceHit hit, float3 vi
 public float restirLocalSelectionProbability(RestirScene scene) {
     return lightFeatures != 0 && hasLocalLights(scene.resources) ? 0.5 : 0.0;
 }
-public float restirEmitterPdf(RestirScene scene, SurfaceHit emitter, float3 receiver,
-                              float3 proposalNormal) {
+public float restirEmitterPdf(RestirScene scene, SurfaceHit emitter, float3 receiver) {
+    // RA-005, docs/restir-adaptations.md: TREE forward/reverse PMFs use the same
+    // physical receiver position; view/normal is outside this proposal's domain.
     return restirLocalSelectionProbability(scene) *
-           emissiveHitPdf(scene.resources, emitter, receiver, proposalNormal);
+           emissiveHitPdf(scene.resources, emitter, receiver);
 }
 public float restirEnvironmentPdf(RestirScene scene, uint type, float3 direction) {
+    // RA-006, docs/restir-adaptations.md: sky has no direct-light competitor; sun does.
     return type == RESTIR_LIGHT_SUN && atmSunContains(scene.environment, direction)
                    ? (1.0 - restirLocalSelectionProbability(scene)) * atmSunPdf()
                    : 0.0;
@@ -286,8 +306,8 @@ public struct RestirLightSample {
     public uint type;
 };
 
-// Fixed 1 + 4 + 2 dimensions even for rejected/no-NEE proposals. Coverage is a
-// separate position-hashed source field keyed by the path seed, with no variable RNG use.
+// RA-010, docs/restir-adaptations.md: fixed 1 + 4 + 2 dimensions for every proposal.
+// Coverage is a separate position-hashed source field keyed by the path seed.
 public void restirSkipLightSample(inout SampleGenerator sg) {
     sampleNext1D(sg);
     sampleNext4D(sg);
@@ -303,10 +323,8 @@ public RestirLightSample restirSampleLight(RestirScene scene, SurfaceHit receive
     result.hit = HitInfo();
     float localProbability = restirLocalSelectionProbability(scene);
     if (selector < localProbability) {
-        PrimePbrVertex material = restirMaterial(receiver, view);
-        float3 proposalNormal = receiver.optical ? float3(0) : material.normal;
         LightSample light = sampleLocalLight(scene.resources, selectors, sample, coverageSeed,
-                                             receiver.surface.position, proposalNormal);
+                                             receiver.surface.position);
         if (!light.valid)
             return result;
         float3 delta = light.surface.position - receiver.surface.position;
@@ -336,7 +354,8 @@ public RestirLightSample restirSampleLight(RestirScene scene, SurfaceHit receive
                        result.Le.z > 0 ? linear709ToWorking(attenuated).z / result.Le.z : 1);
         result.pdf = pdf * localProbability;
         result.type = RESTIR_LIGHT_EMISSIVE;
-        // Recreate the selected triangle's barycentric sample exactly as sampleLocalLight.
+        // RA-009, docs/restir-adaptations.md: preserve the actual sampled half/barycentrics
+        // and stable material quad slot, without reinterpreting a lamp ordinal as geometry.
         LightTree tree = *((LightTree *)scene.resources.staticTrianglePages[0].lightGrid);
         TreePage page = tree.pages[light.page];
         uint words = page.format == 3 ? 108 : (page.format == 2 ? 68 : 60);
@@ -344,7 +363,10 @@ public RestirLightSample restirSampleLight(RestirScene scene, SurfaceHit receive
         bool first = fraction == 1.0 || sample.x < fraction;
         float u = first ? sample.x / fraction : (sample.x - fraction) / (1.0 - fraction);
         float root = sqrt(u);
-        result.hit = HitInfo(RESTIR_EMITTER_PAGE | light.page, 2 * light.emitter + uint(!first),
+        uint hitPage = page.reserved != 0u ? page.reserved - 1u : RESTIR_EMITTER_PAGE | light.page;
+        uint hitQuad =
+                page.reserved != 0u ? page.emitters[light.emitter * words + 7u] : light.emitter;
+        result.hit = HitInfo(hitPage, 2 * hitQuad + uint(!first),
                              float2(root * (1.0 - sample.y), root * sample.y));
         uint selectedMaterial;
         SurfaceRecord record =
@@ -355,6 +377,10 @@ public RestirLightSample restirSampleLight(RestirScene scene, SurfaceHit receive
         result.hit.data.x |= selectedMaterial << 24;
     } else {
         result.direction = atmSampleSun(scene.environment, sample);
+        // RA-008/010, docs/restir-adaptations.md: reject unsupported sun NEE before
+        // its shadow query, after consuming the same seven source dimensions.
+        if (!restirDirectLightSupported(receiver, view, result.direction))
+            return result;
         result.Le = atmSunRadiance(scene.environment, result.direction) * scene.frame.right.w;
         result.pdf = (1.0 - localProbability) * atmSunPdf();
         result.geometry = 1;

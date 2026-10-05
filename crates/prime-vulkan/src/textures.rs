@@ -15,8 +15,9 @@ use std::{
 
 pub(super) struct Textures {
     pub(crate) source: BTreeMap<u32, Texture>,
-    // Proven constant alpha over every validated immutable sprite-family window.
-    constant_alpha: BTreeMap<u32, u8>,
+    // Positive proofs only. A missing entry is a cached negative while the
+    // validated immutable family is unchanged; animation ticks never rescan it.
+    family_alpha: BTreeMap<u32, history_support::FamilyAlpha>,
     pub(crate) coverage_changed: BTreeSet<u32>,
     pub(crate) history_support_changed: BTreeSet<u32>,
     pub(crate) occlusion_changed: bool,
@@ -202,7 +203,7 @@ impl Textures {
         slots.allocate(1)?;
         let mut result = Self {
             source: BTreeMap::new(),
-            constant_alpha: BTreeMap::new(),
+            family_alpha: BTreeMap::new(),
             coverage_changed: BTreeSet::new(),
             history_support_changed: BTreeSet::new(),
             occlusion_changed: false,
@@ -221,7 +222,7 @@ impl Textures {
     }
 
     fn remove(&mut self, id: u32) {
-        self.constant_alpha.remove(&id);
+        self.family_alpha.remove(&id);
         if let Some(old) = self.source.remove(&id) {
             self.coverage_changed.insert(id);
             self.history_support_changed.insert(id);
@@ -360,22 +361,28 @@ impl Textures {
             if !same_family {
                 self.coverage_changed.insert(*id);
             }
-            let previous_alpha = self.constant_alpha.get(id).copied();
-            let constant_alpha = if same_family {
+            let previous_alpha = self.family_alpha.get(id).copied().unwrap_or_default();
+            let family_alpha = if same_family {
                 previous_alpha
             } else {
-                history_support::constant_family_alpha(texture)
+                history_support::family_alpha(texture)
             };
             if self.source.get(id).is_none_or(|old| {
-                !history_support::base_support_same(old, texture, previous_alpha, constant_alpha)
+                !history_support::family_support_same(
+                    old,
+                    texture,
+                    previous_alpha,
+                    family_alpha,
+                    same_family,
+                )
             }) {
                 self.history_support_changed.insert(*id);
             }
             if !same_family {
-                if let Some(alpha) = constant_alpha {
-                    self.constant_alpha.insert(*id, alpha);
+                if family_alpha != history_support::FamilyAlpha::Unknown {
+                    self.family_alpha.insert(*id, family_alpha);
                 } else {
-                    self.constant_alpha.remove(id);
+                    self.family_alpha.remove(id);
                 }
             }
             let index = if let Some(&index) = self.indices.get(id) {

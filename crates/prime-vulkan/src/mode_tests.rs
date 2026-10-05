@@ -29,7 +29,7 @@ fn gpu_resource_prepare_world_reset_and_quality_reuse() {
     let workers = Arc::new(CpuWorkers::new(1).unwrap());
     let settings = RenderSettings {
         mode: RenderMode::Realtime,
-        ray_reconstruction: false,
+        native_noisy_output: true,
         reconstruction_quality: ReconstructionQuality::Quality,
         view: DiagnosticView::LinearDepth,
         ..Default::default()
@@ -217,8 +217,8 @@ fn gpu_resource_prepare_world_reset_and_quality_reuse() {
 }
 
 #[test]
-#[ignore = "windowless real host submissions; light sampler switching, retained geometry and frozen history"]
-fn gpu_light_sampling_switch_reuses_geometry_and_restarts_offline_history() {
+#[ignore = "windowless real host submissions; budget changes, retained light geometry and frozen history"]
+fn gpu_budget_changes_reuse_light_geometry_and_restart_offline_history() {
     use prime_scene::{
         geometry::{CompiledQuad, MeshGeometry},
         settings::LightSampling,
@@ -246,7 +246,7 @@ fn gpu_light_sampling_switch_reuses_geometry_and_restarts_offline_history() {
     let settings = RenderSettings {
         mode: RenderMode::Realtime,
         light_sampling: LightSampling::Tree,
-        ray_reconstruction: false,
+        native_noisy_output: true,
         view: DiagnosticView::LinearDepth,
         depth_range: 4.0,
         stars: 0.0,
@@ -438,36 +438,33 @@ fn gpu_light_sampling_switch_reuses_geometry_and_restarts_offline_history() {
     let retained = geometry.light_sampling_snapshot();
     assert_eq!(retained.pages.len(), 2);
     assert!(retained.pages.iter().all(|page| page.2.emitters.len() == 1));
-    let assert_retained = |renderer: &Renderer, method| {
+    let assert_retained = |renderer: &Renderer| {
         let geometry = renderer.geometry.as_ref().unwrap();
-        assert_eq!(geometry.top.handle(), top, "Sampler switch rebuilt TLAS");
+        assert_eq!(geometry.top.handle(), top, "Budget change rebuilt TLAS");
         let actual = geometry.light_sampling_snapshot();
-        assert_eq!(actual.blas, retained.blas, "Sampler switch rebuilt BLAS");
-        assert_eq!(actual.method, method);
-        assert!(!actual.dirty);
+        assert_eq!(actual.blas, retained.blas, "Budget change rebuilt BLAS");
         assert!(actual.has_lights);
         assert_eq!(actual.pages.len(), retained.pages.len());
         for (actual, previous) in actual.pages.iter().zip(&retained.pages) {
             assert_eq!(actual.0, previous.0);
             assert!(
                 Arc::ptr_eq(&actual.1, &previous.1),
-                "Sampler switch reuploaded emitter records"
+                "Budget change reuploaded emitter records"
             );
             assert!(
                 Arc::ptr_eq(&actual.2, &previous.2),
-                "Sampler switch recompiled source lights"
+                "Budget change recompiled source lights"
             );
-            assert_eq!(actual.3, method);
         }
     };
-    for method in [LightSampling::TreeSphere, LightSampling::Tree] {
+    for budget in [2, 3] {
         let selected = RenderSettings {
-            light_sampling: method,
+            bounces: budget,
             ..settings
         };
         renderer.configure(selected).unwrap();
         assert_eq!(frame(&mut renderer), expected);
-        assert_retained(&renderer, method);
+        assert_retained(&renderer);
         let uploaded = renderer.context.cpu_upload_bytes();
         let pipeline = renderer.pipeline.as_ref().unwrap().pipelines;
         renderer.configure(selected).unwrap();
@@ -492,7 +489,7 @@ fn gpu_light_sampling_switch_reuses_geometry_and_restarts_offline_history() {
                 .any(|rgba| rgba[..3] != [0; 3]),
             "Emissive fixture rendered black"
         );
-        assert_retained(&renderer, method);
+        assert_retained(&renderer);
         renderer.configure(selected).unwrap();
     }
     let offline = RenderSettings {
@@ -506,15 +503,15 @@ fn gpu_light_sampling_switch_reuses_geometry_and_restarts_offline_history() {
     frame(&mut renderer);
     frame(&mut renderer);
     assert_eq!(renderer.samples, 2);
-    for method in [LightSampling::TreeSphere, LightSampling::Tree] {
+    for budget in [2, 3] {
         let selected = RenderSettings {
-            light_sampling: method,
+            bounces: budget,
             ..offline
         };
         renderer.configure(selected).unwrap();
         assert_eq!(
             renderer.samples, 0,
-            "Sampler switch retained old accumulation"
+            "Budget change retained old accumulation"
         );
         assert_eq!(renderer.camera, Some(camera));
         assert!(renderer.scene_frozen);
@@ -527,7 +524,7 @@ fn gpu_light_sampling_switch_reuses_geometry_and_restarts_offline_history() {
             "Frozen emissive fixture rendered black"
         );
         assert_eq!(renderer.samples, 1);
-        assert_retained(&renderer, method);
+        assert_retained(&renderer);
         let uploaded = renderer.context.cpu_upload_bytes();
         assert!(
             frame(&mut renderer)
@@ -608,7 +605,7 @@ fn gpu_realtime_views_match_primary_visibility_and_have_no_history() {
     let settings = RenderSettings {
         stars: 0.0,
         auto_exposure_compensation: 0.0,
-        ray_reconstruction: false,
+        native_noisy_output: true,
         ..Default::default()
     };
     renderer.configure(settings).unwrap();
@@ -699,7 +696,7 @@ fn gpu_realtime_matches_offline_single_sample_on_surface_paths() {
     let settings = RenderSettings {
         stars: 0.0,
         auto_exposure_compensation: 0.0,
-        ray_reconstruction: false,
+        native_noisy_output: true,
         ..Default::default()
     };
     realtime.configure(settings).unwrap();
@@ -734,7 +731,7 @@ fn gpu_mode_switch_preserves_scene_and_offline_batching_matches_sequential_sampl
     let settings = RenderSettings {
         stars: 0.0,
         auto_exposure_compensation: 0.0,
-        ray_reconstruction: false,
+        native_noisy_output: true,
         ..Default::default()
     };
     renderer.configure(settings).unwrap();

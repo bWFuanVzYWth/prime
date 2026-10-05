@@ -44,7 +44,7 @@ public uint2 treeCpuInterval(TreeNode *nodes, TreePage page, uint path, bool wor
     return uint2(first, count);
 }
 
-// Same fixture input/output contract as sphere_tree; normals are deliberately unused.
+// The distance proposal depends on the receiver position; normals are deliberately unused.
 struct TestInput {
     LightTree *tree;
     uint light;

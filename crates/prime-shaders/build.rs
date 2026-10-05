@@ -45,12 +45,6 @@ fn main() {
             &format!("{stage}_tree"),
             &["PRIME_LIGHT_TREE=1"],
         );
-        build_support::add(
-            &mut shaders,
-            &format!("shaders/{stage}.slang"),
-            &format!("{stage}_tree_sphere"),
-            &["PRIME_LIGHT_TREE=1", "PRIME_LIGHT_TREE_SPHERE=1"],
-        );
     }
     for stage in [
         "realtime_primary",

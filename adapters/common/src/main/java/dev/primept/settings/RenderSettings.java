@@ -8,7 +8,7 @@ import java.util.Arrays;
 
 /** Immutable client settings. Version adapters own widgets; native consumes the validated wire. */
 public final class RenderSettings {
-    public static final int VERSION = 9;
+    public static final int VERSION = 10;
     public static final int WIRE_BYTES = (int)PrimeSettings.SIZE;
     public enum Control {
         BOUNCES("render.bounces", 1, 64, 12),
@@ -44,17 +44,15 @@ public final class RenderSettings {
     public enum View { OUTPUT, NOISY_COLOR, LINEAR_DEPTH, NORMAL }
     public enum DlssQuality { DLAA, QUALITY, BALANCED, PERFORMANCE, ULTRA_PERFORMANCE }
     public enum LightSampling {
-        TREE(1),
-        TREE_SPHERE(2);
+        TREE(1);
         public final int wireId;
         LightSampling(int wireId) {
             this.wireId = wireId;
         }
         public static LightSampling fromKey(String key) {
-            // Retire the old choice without resetting unrelated saved settings.
+            // Retired samplers migrate without resetting unrelated saved settings.
             return switch (key) {
-                case "GRID", "TREE" -> TREE;
-                case "TREE_SPHERE" -> TREE_SPHERE;
+                case "GRID", "TREE_SPHERE", "TREE" -> TREE;
                 default -> throw new IllegalArgumentException("Unknown light sampling: " + key);
             };
         }
@@ -78,18 +76,18 @@ public final class RenderSettings {
     }
     private final Renderer renderer;
     private final boolean opacityMicromap;
-    private final boolean rayReconstruction;
+    private final boolean nativeNoisyOutput;
     private final DlssQuality dlssQuality;
     private final LightSampling lightSampling;
     private final boolean ignoreGlobalHistoryResets;
     private final int[] values;
 
-    private RenderSettings(Renderer renderer, boolean opacityMicromap, boolean rayReconstruction,
+    private RenderSettings(Renderer renderer, boolean opacityMicromap, boolean nativeNoisyOutput,
                            DlssQuality dlssQuality, LightSampling lightSampling,
                            boolean ignoreGlobalHistoryResets, int[] values) {
         this.renderer = renderer;
         this.opacityMicromap = opacityMicromap;
-        this.rayReconstruction = rayReconstruction;
+        this.nativeNoisyOutput = nativeNoisyOutput;
         this.dlssQuality = dlssQuality;
         this.lightSampling = lightSampling;
         this.ignoreGlobalHistoryResets = ignoreGlobalHistoryResets;
@@ -97,8 +95,8 @@ public final class RenderSettings {
     }
     public static RenderSettings defaults() {
         return new RenderSettings(
-                Renderer.PATH_TRACE, true, true, DlssQuality.PERFORMANCE, LightSampling.TREE, false,
-                Arrays.stream(Control.values()).mapToInt(c -> c.initial).toArray());
+                Renderer.PATH_TRACE, true, false, DlssQuality.PERFORMANCE, LightSampling.TREE,
+                false, Arrays.stream(Control.values()).mapToInt(c -> c.initial).toArray());
     }
     public boolean pathTracing() {
         return renderer != Renderer.VANILLA;
@@ -109,8 +107,8 @@ public final class RenderSettings {
     public boolean opacityMicromap() {
         return opacityMicromap;
     }
-    public boolean rayReconstruction() {
-        return rayReconstruction;
+    public boolean nativeNoisyOutput() {
+        return nativeNoisyOutput;
     }
     public DlssQuality dlssQuality() {
         return dlssQuality;
@@ -138,19 +136,19 @@ public final class RenderSettings {
         java.util.Objects.requireNonNull(value);
         if (value == renderer)
             return this;
-        return new RenderSettings(value, opacityMicromap, rayReconstruction, dlssQuality,
+        return new RenderSettings(value, opacityMicromap, nativeNoisyOutput, dlssQuality,
                                   lightSampling, ignoreGlobalHistoryResets, values);
     }
     public RenderSettings withOpacityMicromap(boolean value) {
-        return new RenderSettings(renderer, value, rayReconstruction, dlssQuality, lightSampling,
+        return new RenderSettings(renderer, value, nativeNoisyOutput, dlssQuality, lightSampling,
                                   ignoreGlobalHistoryResets, values);
     }
-    public RenderSettings withRayReconstruction(boolean value) {
+    public RenderSettings withNativeNoisyOutput(boolean value) {
         return new RenderSettings(renderer, opacityMicromap, value, dlssQuality, lightSampling,
                                   ignoreGlobalHistoryResets, values);
     }
     public RenderSettings withDlssQuality(DlssQuality value) {
-        return new RenderSettings(renderer, opacityMicromap, rayReconstruction,
+        return new RenderSettings(renderer, opacityMicromap, nativeNoisyOutput,
                                   java.util.Objects.requireNonNull(value), lightSampling,
                                   ignoreGlobalHistoryResets, values);
     }
@@ -158,20 +156,20 @@ public final class RenderSettings {
         java.util.Objects.requireNonNull(value);
         if (value == lightSampling)
             return this;
-        return new RenderSettings(renderer, opacityMicromap, rayReconstruction, dlssQuality, value,
+        return new RenderSettings(renderer, opacityMicromap, nativeNoisyOutput, dlssQuality, value,
                                   ignoreGlobalHistoryResets, values);
     }
     public RenderSettings withIgnoreGlobalHistoryResets(boolean value) {
         if (value == ignoreGlobalHistoryResets)
             return this;
-        return new RenderSettings(renderer, opacityMicromap, rayReconstruction, dlssQuality,
+        return new RenderSettings(renderer, opacityMicromap, nativeNoisyOutput, dlssQuality,
                                   lightSampling, value, values);
     }
     public RenderSettings with(Control control, int value) {
         control.validate(value);
         int[] next = values.clone();
         next[control.ordinal()] = value;
-        return new RenderSettings(renderer, opacityMicromap, rayReconstruction, dlssQuality,
+        return new RenderSettings(renderer, opacityMicromap, nativeNoisyOutput, dlssQuality,
                                   lightSampling, ignoreGlobalHistoryResets, next);
     }
     /** Named C structure, borrowed only for prime_configure; offline and view are session controls. */
@@ -195,7 +193,7 @@ public final class RenderSettings {
         PrimeSettings.latitude_degrees(s, value(Control.LATITUDE));
         PrimeSettings.solar_longitude_degrees(s, value(Control.SOLAR_LONGITUDE));
         PrimeSettings.opacity_micromap(s, opacityMicromap ? 1 : 0);
-        PrimeSettings.ray_reconstruction(s, rayReconstruction ? 1 : 0);
+        PrimeSettings.native_noisy_output(s, nativeNoisyOutput ? 1 : 0);
         PrimeSettings.reconstruction_quality(s, dlssQuality.ordinal());
         PrimeSettings.terrain_batches_per_frame(s, value(Control.TERRAIN_BATCHES_PER_FRAME));
         PrimeSettings.stars(s, value(Control.STARS) / 100.0f);
@@ -216,7 +214,7 @@ public final class RenderSettings {
     public boolean equals(Object other) {
         return other instanceof RenderSettings settings && renderer == settings.renderer &&
                 opacityMicromap == settings.opacityMicromap &&
-                rayReconstruction == settings.rayReconstruction &&
+                nativeNoisyOutput == settings.nativeNoisyOutput &&
                 dlssQuality == settings.dlssQuality && lightSampling == settings.lightSampling &&
                 ignoreGlobalHistoryResets == settings.ignoreGlobalHistoryResets &&
                 Arrays.equals(values, settings.values);
@@ -225,7 +223,7 @@ public final class RenderSettings {
     public int hashCode() {
         return 31 * (31 * (31 * (31 * (31 * (31 * renderer.hashCode() +
                                              Boolean.hashCode(opacityMicromap)) +
-                                       Boolean.hashCode(rayReconstruction)) +
+                                       Boolean.hashCode(nativeNoisyOutput)) +
                                  dlssQuality.hashCode()) +
                            lightSampling.hashCode()) +
                      Boolean.hashCode(ignoreGlobalHistoryResets)) +

@@ -5,7 +5,7 @@
 | 文档 | 内容 |
 | --- | --- |
 | [整体架构与所有权](architecture.md) | 源数据到场景和 GPU 的数据流、增量更新、线程与资源生命周期 |
-| [自定义表面编译](surface-compiler.md) | 源关系与局部接触、部分矩形合并、直接 GPU 记录、介质、sprite 与局部灯网格 |
+| [自定义表面编译](surface-compiler.md) | 源关系与局部接触、部分矩形合并、直接 GPU 记录、介质、sprite 与功率距离灯树 |
 | [LabPBR 与 OpenPBR 支持子域](materials.md) | 源声明、规范通道、数值清洗、法线分布过滤、动画、完整模型的支持边界、保留的 LitePBR 近似与发光 |
 | [镂空表面 OMM](opacity-micromaps.md) | 二值优先的有限资源模板、共享资源代次与运行时绑定、未知退路、Vulkan 能力和完成证明 |
 | [大气资产与缓存](atmosphere.md) | 固定物理场、天空/太阳/空气透视、GPU 遮挡列与更新依赖 |
@@ -17,6 +17,7 @@
 | [全局空间网格与几何合批](spatial-batching.md) | 4×4×4 区块段对齐、翻译层归属、静态/动态分离及光源采样归属边界 |
 | [设置与渲染模式](renderers.md) | 当前配置版本、冻结快照、互斥资源、实时噪声与深度/法线诊断 |
 | [ReSTIR PT Enhanced](restir-pt.md) | 独立积分器、上游默认配置、重放与双向 MIS、状态成本及支持边界 |
+| [ReSTIR 适配登记](restir-adaptations.md) | 相对 Falcor 的必要接口适配、数学修复、身份与历史策略及撤回项 |
 | [Streamline、DLSS RR与帧生成](reconstruction.md) | preset F、超分档位、动态前态、重建与插帧输入、Present及完成证明 |
 | [FFM ABI](abi.md) | 生成的 C/FFM 结构、批量数组、输入验证与借用、宿主 Vulkan 接口 |
 | [宿主 Vulkan 流水线](pipeline.md) | 设备协商、直接输出、命令提交、同步、手部与 HUD 合成 |

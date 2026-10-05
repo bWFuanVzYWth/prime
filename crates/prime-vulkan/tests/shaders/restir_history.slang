@@ -7,11 +7,70 @@ import "restir/shift.slang";
 import "restir/types.slang";
 import "restir/reservoir.slang";
 import "math/ray_offset.slang";
+import "restir/rng.slang";
+import "math/color.slang";
+
+void stableQuadProbe(RestirScene resources, uint index) {
+    float4 *output = parameters.accumulation + index * 8;
+    if (pass.reserved0 == 2) {
+        HitInfo old = HitInfo(pass.sampleOffset, pass.reserved1 + (index & 1u), float2(0.25));
+        bool valid = restirHistoryHitValid(resources, old);
+        SurfaceHit loaded = {};
+        if (valid)
+            loaded = restirLoadHit(resources, old, float3(0, 0, -1), index);
+        output[0] = float4(asfloat(old.data));
+        output[1] = float4(loaded.surface.position, float(valid));
+        output[2] = float4(linear709ToWorking(loaded.emission), asfloat(loaded.light));
+        [unroll] for (uint row = 3; row < 8; ++row) output[row] = float4(0);
+        return;
+    }
+    uint half = index & 1u;
+    float2 uv = half == 0u ? float2(0.75, 0.25) : float2(0.25, 0.75);
+    float x = pass.reserved0 == 3u ? 6.0 : ((index & 2u) != 0u ? 12.0 : 2.0);
+    HitInfo traced;
+    SurfaceHit direct = restirTrace(resources, float3(x + 2 * uv.x, 8 + 2 * uv.y, 1),
+                                    float3(0, 0, 1), index, traced);
+    output[0] = float4(asfloat(traced.data));
+    output[1] = float4(linear709ToWorking(direct.emission), float(direct.found));
+    if (pass.reserved0 == 3u) {
+        [unroll] for (uint row = 2; row < 8; ++row) output[row] = float4(0);
+        return;
+    }
+    HitInfo receiverIdentity;
+    SurfaceHit receiver =
+            restirTrace(resources, float3(8, 8, 1), float3(0, 0, -1), index, receiverIdentity);
+    SampleGenerator sg = SampleGenerator(uint2(index, 0), 0);
+    RestirLightSample light =
+            restirSampleLight(resources, receiver, float3(0, 0, 1), float4(1, 0, 0, 0), index, sg);
+    output[2] = float4(asfloat(light.hit.data));
+    output[3] = float4(light.Le, light.pdf);
+    SurfaceHit loaded = {};
+    float inversePdf = 0;
+    float error = 0;
+    if (light.hit.isValid()) {
+        loaded = restirLoadHit(resources, light.hit, -light.direction, index);
+        inversePdf = restirEmitterPdf(resources, loaded, receiver.surface.position);
+        // Both fixture emitters lie on z=3. Recover the actually sampled point
+        // from its direction, independently of the stored HitInfo reconstruction.
+        float distance = (3.0 - receiver.surface.position.z) / light.direction.z;
+        float3 sampled = receiver.surface.position + light.direction * distance;
+        error = length(sampled - loaded.surface.position);
+    }
+    output[4] = float4(loaded.surface.position, error);
+    output[5] = float4(linear709ToWorking(loaded.emission), inversePdf);
+    output[6] = float4(light.visibility, asfloat(light.type));
+    // Preserve the actual proposal direction for an independent FP64 point oracle.
+    output[7] = float4(light.direction, asfloat(receiverIdentity.data.x));
+}
 
 [numthreads(64, 1, 1)] void main(uint3 id : SV_DispatchThreadID) {
     if (id.x >= pass.phase)
         return;
     RestirScene resources = restirScene();
+    if (pass.reserved0 != 0u) {
+        stableQuadProbe(resources, id.x);
+        return;
+    }
     resources.sampleJitter = float2(0);
     uint2 pixel = resources.frame.dimensions.xy >> 1;
     float3 wo = -restirPrimaryDirection(resources.frame, pixel);

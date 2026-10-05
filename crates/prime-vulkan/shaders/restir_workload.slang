@@ -52,8 +52,12 @@ int2 previousPixel(RestirScene resources, RestirPrimary primary, SurfaceHit hit)
     float2 screen =
             float2(dot(delta, previous.right.xyz) / (z * previous.forward.w * previous.position.w),
                    -dot(delta, previous.up.xyz) / (z * previous.position.w));
+    // RA-002, docs/restir-adaptations.md: Falcor selects donors with no-jitter motion,
+    // pixel+.5+previousProjection-currentProjection. The actual pinhole hit projects
+    // to pixel+.5+currentJitter, so subtract current jitter here. Accepted previous
+    // jitter still belongs to source-ray replay; subtracting it here advects noise.
     float2 location =
-            (screen * 0.5 + 0.5) * float2(previous.dimensions.xy) - parameters.sampleJitter.zw;
+            (screen * 0.5 + 0.5) * float2(previous.dimensions.xy) - parameters.sampleJitter.xy;
     if (any(!isfinite(location)) || any(location < 0.0) ||
         any(location >= float2(previous.dimensions.xy)))
         return int2(-1);

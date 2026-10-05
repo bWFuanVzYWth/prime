@@ -7,7 +7,7 @@ import static java.lang.foreign.ValueLayout.*;
 
 public final class PrimeAbi {
     private PrimeAbi() {}
-    public static final int PRIME_ABI_VERSION = 13;
+    public static final int PRIME_ABI_VERSION = 14;
     public static final int PRIME_MAX_BATCH_BYTES = 268435456;
     public static final int PRIME_DIAGNOSTICS_ENABLED = 1;
     public static final int PRIME_DIAGNOSTICS_CAPTURE = 2;
@@ -284,7 +284,7 @@ public final class PrimeAbi {
                                 JAVA_INT.withName("latitude_degrees"),
                                 JAVA_INT.withName("solar_longitude_degrees"),
                                 JAVA_INT.withName("opacity_micromap"),
-                                JAVA_INT.withName("ray_reconstruction"),
+                                JAVA_INT.withName("native_noisy_output"),
                                 JAVA_INT.withName("reconstruction_quality"),
                                 JAVA_INT.withName("terrain_batches_per_frame"),
                                 JAVA_FLOAT.withName("stars"),
@@ -330,9 +330,9 @@ public final class PrimeAbi {
                         "PrimeSettings.solar_longitude_degrees offset");
             if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("opacity_micromap")) != 60)
                 throw new ExceptionInInitializerError("PrimeSettings.opacity_micromap offset");
-            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("ray_reconstruction")) !=
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("native_noisy_output")) !=
                 64)
-                throw new ExceptionInInitializerError("PrimeSettings.ray_reconstruction offset");
+                throw new ExceptionInInitializerError("PrimeSettings.native_noisy_output offset");
             if (LAYOUT.byteOffset(
                         MemoryLayout.PathElement.groupElement("reconstruction_quality")) != 68)
                 throw new ExceptionInInitializerError(
@@ -450,10 +450,10 @@ public final class PrimeAbi {
         public static void opacity_micromap(MemorySegment value, int field) {
             value.set(JAVA_INT, 60L, field);
         }
-        public static int ray_reconstruction(MemorySegment value) {
+        public static int native_noisy_output(MemorySegment value) {
             return value.get(JAVA_INT, 64L);
         }
-        public static void ray_reconstruction(MemorySegment value, int field) {
+        public static void native_noisy_output(MemorySegment value, int field) {
             value.set(JAVA_INT, 64L, field);
         }
         public static int reconstruction_quality(MemorySegment value) {

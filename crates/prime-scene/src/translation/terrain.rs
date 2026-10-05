@@ -23,6 +23,9 @@ pub struct TerrainMember {
 
 pub struct TerrainUpdate {
     pub key: Cell,
+    /// This Cell's immutable source signature changed, rather than only a
+    /// renderer-derived resource requiring reconstruction.
+    pub content_changed: bool,
     pub geometries: Vec<TerrainGeometry>,
 }
 
@@ -445,7 +448,7 @@ impl TerrainPlanner {
                     });
                 }
             }
-            replacements.push((key, signatures, geometries));
+            replacements.push((key, signatures, geometries, !same_signature));
         }
         if records > u64::from(self.limits.geometry_records) {
             return Err("Too many static geometry metadata records".into());
@@ -475,7 +478,7 @@ impl TerrainPlanner {
         if let Some(&last) = selected.last() {
             self.build_cursor = Some(last);
         }
-        for (key, signature, geometries) in replacements {
+        for (key, signature, geometries, content_changed) in replacements {
             if signature.is_empty() {
                 self.signatures.remove(&key);
                 if !reset {
@@ -484,7 +487,11 @@ impl TerrainPlanner {
                 membership_changed = true;
             } else {
                 membership_changed |= self.signatures.insert(key, signature).is_none();
-                plan.geometry.push(TerrainUpdate { key, geometries });
+                plan.geometry.push(TerrainUpdate {
+                    key,
+                    content_changed,
+                    geometries,
+                });
             }
         }
         plan.placements_changed = rebase || !plan.geometry.is_empty() || !plan.removed.is_empty();
@@ -602,6 +609,39 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         assert_eq!(placements(left), placements(right));
+    }
+
+    #[test]
+    fn mixed_source_edit_and_derived_rebuild_keep_per_cell_content_certificate() {
+        let (mut scene, mut index, keys) = indexed_cells(2);
+        let mut planner = planner(32);
+        let initial = bounded(&mut planner, &scene, &index, 2);
+        assert!(initial.geometry.iter().all(|update| update.content_changed));
+        planner.recycle(initial);
+        planner.invalidate_cells([keys[0]]);
+        scene.meshes.get_mut(&(1, 0)).unwrap().revision += 1;
+        scene.revision += 1;
+        publish(&mut index, [keys[1]]);
+        let mixed = bounded(&mut planner, &scene, &index, 2);
+        assert!(mixed.content_changed);
+        assert_eq!(mixed.geometry.len(), 2);
+        assert!(
+            !mixed
+                .geometry
+                .iter()
+                .find(|u| u.key == keys[0])
+                .unwrap()
+                .content_changed
+        );
+        assert!(
+            mixed
+                .geometry
+                .iter()
+                .find(|u| u.key == keys[1])
+                .unwrap()
+                .content_changed
+        );
+        assert!(!planner.has_pending());
     }
 
     #[test]

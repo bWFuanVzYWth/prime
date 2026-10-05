@@ -10,14 +10,15 @@ use realtime_tests::{camera, face, texture};
 
 const EXTENT: [u32; 2] = [31, 17];
 
-struct Snapshot {
-    identities: [Vec<[u32; 2]>; 3],
-    watermark: u32,
-    reservoirs: Vec<f32>,
-    rgb: Vec<[f32; 3]>,
+pub(super) struct Snapshot {
+    pub(super) identities: [Vec<[u32; 2]>; 3],
+    pub(super) quads: Vec<[u32; 2]>,
+    pub(super) watermark: u32,
+    pub(super) reservoirs: Vec<f32>,
+    pub(super) rgb: Vec<[f32; 3]>,
 }
 impl Snapshot {
-    fn mean(&self, right: bool) -> (f64, [f64; 3]) {
+    pub(super) fn mean(&self, right: bool) -> (f64, [f64; 3]) {
         let mut count = 0usize;
         let mut m = 0.0;
         let mut rgb = [0.0; 3];
@@ -35,7 +36,7 @@ impl Snapshot {
     }
 }
 
-fn snapshot(renderer: &Renderer) -> Snapshot {
+pub(super) fn snapshot(renderer: &Renderer) -> Snapshot {
     let context = &renderer.context;
     let state = renderer.restir.as_ref().unwrap();
     let uniform = state
@@ -67,12 +68,27 @@ fn snapshot(renderer: &Renderer) -> Snapshot {
             "read the exact production identity table"
         );
     }
+    let quad_address = u64::from_le_bytes(uniform[440..448].try_into().unwrap());
+    let quad_table = renderer
+        .geometry
+        .as_ref()
+        .unwrap()
+        .history_quad_buffer_for_test()
+        .filter(|_| quad_address != 0);
+    assert_eq!(
+        quad_address,
+        quad_table.map_or(0, Buffer::address),
+        "read the exact production per-quad identity table"
+    );
     let mut offsets = [0u64; 3];
     let mut bytes = 0u64;
     for (offset, count) in offsets.iter_mut().zip(counts) {
         *offset = bytes;
         bytes += u64::from(count) * 8;
     }
+    let quad_offset = bytes;
+    let quad_bytes = quad_table.map_or(0, |table| table.size);
+    bytes += quad_bytes;
     bytes = bytes.next_multiple_of(16);
     let reservoir_offset = bytes;
     let (storage, source_offset, padded) = state.history_for_test();
@@ -106,6 +122,16 @@ fn snapshot(renderer: &Renderer) -> Snapshot {
                             .size(u64::from(count) * 8)],
                     );
                 }
+            }
+            if let Some(table) = quad_table {
+                context.device.cmd_copy_buffer(
+                    command,
+                    table.buffer,
+                    readback.buffer,
+                    &[vk::BufferCopy::default()
+                        .dst_offset(quad_offset)
+                        .size(quad_bytes)],
+                );
             }
             context.device.cmd_copy_buffer(
                 command,
@@ -154,7 +180,7 @@ fn snapshot(renderer: &Renderer) -> Snapshot {
         })
         .unwrap();
     let bytes = readback.read(bytes as usize).unwrap();
-    let identities = std::array::from_fn(|index| {
+    let identities: [Vec<[u32; 2]>; 3] = std::array::from_fn(|index| {
         bytes[offsets[index] as usize..][..counts[index] as usize * 8]
             .as_chunks::<8>()
             .0
@@ -167,6 +193,26 @@ fn snapshot(renderer: &Renderer) -> Snapshot {
             })
             .collect()
     });
+    // Buffer capacity may contain uninitialized spare bytes. Interpret only the
+    // complete range addressed by live static headers copied from the device.
+    let quad_count = identities[0]
+        .iter()
+        .filter(|header| header[1] & 0x8000_0000 != 0)
+        .map(|header| header[0] as usize + (header[1] & 0x7fff_ffff) as usize / 2)
+        .max()
+        .unwrap_or(0);
+    assert!(quad_count as u64 * 8 <= quad_bytes);
+    let quads = bytes[quad_offset as usize..][..quad_count * 8]
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .map(|row| {
+            [
+                u32::from_le_bytes(row[..4].try_into().unwrap()),
+                u32::from_le_bytes(row[4..].try_into().unwrap()),
+            ]
+        })
+        .collect();
     let mut reservoirs = Vec::new();
     for y in 0..EXTENT[1] {
         for x in 0..EXTENT[0] {
@@ -199,6 +245,7 @@ fn snapshot(renderer: &Renderer) -> Snapshot {
         .collect();
     Snapshot {
         identities,
+        quads,
         watermark,
         reservoirs,
         rgb,
@@ -307,9 +354,22 @@ fn render(
     sequence: &mut u32,
 ) {
     *sequence += 1;
+    eprintln!(
+        "support render begin: sequence={} revision={} sampler={:?}",
+        *sequence, scene.revision, renderer.settings.light_sampling
+    );
     renderer
         .render_with_instances(scene, instances, camera, EXTENT[0], EXTENT[1], *sequence)
         .unwrap();
+    let state = renderer.restir.as_ref().unwrap();
+    eprintln!(
+        "support render end: sequence={} revision={} sampler={:?} temporal={} update={}",
+        *sequence,
+        scene.revision,
+        renderer.settings.light_sampling,
+        state.temporal_this_frame,
+        state.dynamic_update_this_frame
+    );
 }
 
 fn changed(before: &Snapshot, after: &Snapshot, domain: usize) -> (usize, usize) {
@@ -317,12 +377,19 @@ fn changed(before: &Snapshot, after: &Snapshot, domain: usize) -> (usize, usize)
         before.identities[domain].len(),
         after.identities[domain].len()
     );
+    let (old_records, new_records) = if domain == 0 {
+        assert_eq!(
+            before.identities[0], after.identities[0],
+            "coverage edit must not rewrite physical page ranges or alias headers"
+        );
+        assert_eq!(before.quads.len(), after.quads.len());
+        (&before.quads, &after.quads)
+    } else {
+        (&before.identities[domain], &after.identities[domain])
+    };
     let mut changed = 0;
     let mut preserved = 0;
-    for (old, new) in before.identities[domain]
-        .iter()
-        .zip(&after.identities[domain])
-    {
+    for (old, new) in old_records.iter().zip(new_records) {
         assert_eq!(
             old[1], new[1],
             "coverage support changes retain physical primitive count"
@@ -347,9 +414,13 @@ fn assert_support_event(renderer: &Renderer, before: &Snapshot, label: &str, rep
     let static_rows = changed(before, &after, 0);
     let dynamic_rows = changed(before, &after, 1);
     let emitter_rows = changed(before, &after, 2);
+    assert_eq!(
+        static_rows.0, 1,
+        "only the red covered lamp uses texture7; its same-Cell floor must retain support"
+    );
     assert!(
-        static_rows.0 > 0 && static_rows.1 > 0,
-        "stamp the affected cell only"
+        static_rows.1 > 0,
+        "unaffected actual static quad records remain valid"
     );
     assert_eq!(
         dynamic_rows,
@@ -357,8 +428,8 @@ fn assert_support_event(renderer: &Renderer, before: &Snapshot, label: &str, rep
         "INHERIT consumes texture7; override9 preserves support"
     );
     assert!(
-        emitter_rows.0 > 0 && emitter_rows.1 > 0,
-        "old covered emitter rejects; green emitter preserves"
+        emitter_rows.0 == 0 && emitter_rows.1 > 0,
+        "stable static NEE endpoints use the changed quad guard, not a compact emitter page stamp"
     );
     let (before_m, before_rgb) = before.mean(true);
     let (after_m, green) = after.mean(true);
@@ -397,15 +468,20 @@ fn assert_support_event(renderer: &Renderer, before: &Snapshot, label: &str, rep
 #[test]
 #[ignore = "windowless production support identities, covered emitters, sprite phases and dynamic overrides"]
 fn gpu_restir_support_changes_reject_only_affected_endpoints_without_ghosts() {
+    support_fixture();
+}
+
+fn support_fixture() {
     let settings = RenderSettings {
         integrator: Integrator::RestirPt,
         mode: RenderMode::Realtime,
+        light_sampling: prime_scene::settings::LightSampling::Tree,
         bounces: 1,
         sun: 1. / 256.,
         sky: 1. / 256.,
         stars: 0.,
         auto_exposure_compensation: 0.1,
-        ray_reconstruction: false,
+        native_noisy_output: true,
         opacity_micromap: false,
         ..Default::default()
     };
@@ -467,11 +543,68 @@ fn gpu_restir_support_changes_reject_only_affected_endpoints_without_ghosts() {
         constant_before.identities, constant_after.identities,
         "constant-alpha RGB animation incorrectly stamped static/dynamic/emitter support"
     );
+    assert_eq!(
+        constant_before.quads, constant_after.quads,
+        "constant-alpha RGB phase changed per-quad support"
+    );
     assert!(
         constant_after.mean(true).0 > 4.,
         "actual history lost on RGB-only animation"
     );
     eprintln!("ReSTIR constant-alpha RGB phase retained all three device identity domains");
+    // The same spatially varying mask exists in every immutable sprite frame.
+    // Publish once, then change phase/blend through the actual texture cache.
+    let invariant = Texture {
+        width: 4,
+        height: 1,
+        pixels: Arc::from([
+            255, 32, 16, 255, 16, 32, 255, 0, 32, 255, 64, 255, 255, 64, 32, 0,
+        ]),
+        region: Some([0, 0, 2, 1]),
+        sampling: Some(Arc::new(TextureSampling {
+            levels: vec![],
+            next: [0, 0],
+            blend: 0.,
+            coverage_frames: Arc::from([[0, 0], [2, 0]]),
+        })),
+        material: None,
+    };
+    invariant.validate().unwrap();
+    scene.textures.insert(7, invariant.clone());
+    scene.revision += 1;
+    for _ in 0..8 {
+        render(&mut renderer, &scene, &instances, &camera, &mut sequence);
+    }
+    let invariant_before = snapshot(&renderer);
+    let mut phase = invariant;
+    phase.region = Some([2, 0, 2, 1]);
+    let sampling = Arc::make_mut(phase.sampling.as_mut().unwrap());
+    sampling.next = [0, 0];
+    sampling.blend = 0.75;
+    phase.validate().unwrap();
+    scene.textures.insert(7, phase);
+    scene.revision += 1;
+    render(&mut renderer, &scene, &instances, &camera, &mut sequence);
+    let state = renderer.restir.as_ref().unwrap();
+    assert!(state.temporal_this_frame && state.dynamic_update_this_frame);
+    let invariant_after = snapshot(&renderer);
+    assert_eq!(
+        invariant_before.identities, invariant_after.identities,
+        "invariant nonuniform alpha phase changed a legacy device support domain"
+    );
+    assert_eq!(
+        invariant_before.quads, invariant_after.quads,
+        "invariant nonuniform alpha phase changed actual per-quad support"
+    );
+    assert!(
+        invariant_after.mean(true).0 > 4.,
+        "invariant nonuniform alpha phase lost actual GPU temporal reuse"
+    );
+    eprintln!(
+        "ReSTIR invariant nonuniform alpha phase/blend retained device support: neighborM={:.3}->{:.3}",
+        invariant_before.mean(true).0,
+        invariant_after.mean(true).0
+    );
     let before = snapshot(&renderer);
     assert!(
         before.mean(false).1[0] > 0.1,

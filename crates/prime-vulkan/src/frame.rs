@@ -318,7 +318,8 @@ impl Renderer {
         settings.validate()?;
         let cpu_profile = CpuProfile::default();
         let mut reconstruction_error = None;
-        let reconstruction = (settings.mode == RenderMode::Realtime && settings.ray_reconstruction)
+        let reconstruction = (settings.mode == RenderMode::Realtime
+            && !settings.native_noisy_output)
             .then(|| reconstruction::Reconstruction::new(&context, &mut reconstruction_error))
             .flatten();
         let energy_lut = openpbr::EnergyLut::new(&context)?;
@@ -641,10 +642,9 @@ impl Renderer {
     /// Shared geometry survives; exclusive old pipelines/images retire before the new pipeline is created.
     pub fn configure(&mut self, settings: RenderSettings) -> Result<(), String> {
         settings.validate()?;
-        let sampler_changed = settings.light_sampling != self.settings.light_sampling;
         let mode_changed = settings.mode != self.settings.mode;
         let integrator_changed = settings.integrator != self.settings.integrator;
-        let rr_changed = settings.ray_reconstruction != self.settings.ray_reconstruction;
+        let rr_changed = settings.native_noisy_output != self.settings.native_noisy_output;
         let transport_changed = !settings.transport_matches(self.settings);
         let lighting_changed = settings.astronomy != self.settings.astronomy
             || settings.sun != self.settings.sun
@@ -669,7 +669,6 @@ impl Renderer {
             self.fg_prepared = false;
         }
         if integrator_changed
-            || sampler_changed
             || mode_changed
             || settings.mode == RenderMode::Realtime && rr_changed
             || settings.frame_generation != self.settings.frame_generation
@@ -698,7 +697,7 @@ impl Renderer {
             self.context.completed_serial()?; // Drain the retired images/buffers using completed host work.
             if self.reconstruction.is_none()
                 && settings.mode == RenderMode::Realtime
-                && settings.ray_reconstruction
+                && !settings.native_noisy_output
             {
                 self.reconstruction_error = None;
                 self.reconstruction = reconstruction::Reconstruction::new(
@@ -732,15 +731,13 @@ impl Renderer {
             self.samples = 0;
         }
         if let Some(geometry) = &mut self.geometry {
-            if sampler_changed {
-                geometry.set_light_sampling(settings.light_sampling);
-            }
             geometry.set_omm(settings.opacity_micromap && self.context.opacity_micromap.is_some());
+            geometry.set_stable_history(settings.integrator == Integrator::RestirPt);
             if mode_changed {
                 geometry.objects.reset_motion();
             }
         }
-        if (lighting_changed || sampler_changed || settings.bounces != self.settings.bounces)
+        if (lighting_changed || settings.bounces != self.settings.bounces)
             && let Some(restir) = &mut self.restir
         {
             restir.lighting_changed();
@@ -900,7 +897,7 @@ impl Renderer {
                 .map_or(0, |a| a.transmittance_updates),
             self.atmosphere.as_ref().map_or(0, |a| a.aerial_updates),
             self.atmosphere.as_ref().map_or(0, |a| a.aerial_t_updates),
-            self.settings.ray_reconstruction && self.settings.mode == RenderMode::Realtime,
+            !self.settings.native_noisy_output && self.settings.mode == RenderMode::Realtime,
             self.context.streamline_capable,
             self.reconstruction.as_ref().is_some_and(|rr| !rr.failed()),
             rr_evaluated,
@@ -1106,6 +1103,7 @@ impl Renderer {
                         self.settings.terrain_batches_per_frame as usize,
                         self.scene_resources.as_ref().unwrap().clone(),
                         self.settings.light_sampling,
+                        self.settings.integrator == Integrator::RestirPt,
                     )?);
                     true
                 };

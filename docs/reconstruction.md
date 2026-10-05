@@ -6,6 +6,8 @@
 
 默认请求开启 RR，默认 Performance：输入宽高各为输出的一半，例如 960×540 → 1920×1080。可在设置中选择 DLAA、Quality、Balanced、Performance、Ultra Performance，尺寸以 `slDLSSDGetOptimalSettings` 的实际结果为准。RR 不参与离线累积。无兼容设备能力或 SDK 初始化失败时使用原生分辨率原始输出，并记录原因；设置开关不是实际启用证明。
 
+独立诊断 `native_noisy_output`（Java `nativeNoisyOutput`）默认false。开启时禁用降噪，主射线和输出都采用原生分辨率；关闭时允许上述 RR 配置。`DiagnosticView::NoisyColor` / `View.NOISY_COLOR` 只预览实际内部含噪输入，不改变主射线尺寸或降噪请求，Performance 下仍是半宽半高输入。两者不能复用同一布尔字段；旧设置中的 `ray_reconstruction` 仅在磁盘迁移入口解释并取反。
+
 Java 仅负责两版宿主逻辑设备能力、同目录 runtime 提取、真实 Present 路由和设置字段。Rust 负责尺寸、抖动、相机历史、GPU 输入/输出、调度、描述符与完成证明。`native/streamline` 的 C++ 静态桥接封装 SDK C++ 类型，以固定 C POD ABI 接收借用句柄和常量；指针只在调用期间有效，图像对象保留到 GPU 完成。
 
 Vulkan 1.2 宿主还须启用 `shaderStorageImageWriteWithoutFormat`：Streamline 自带的 clear shader 声明了该能力。仅启用 Prime guide 格式需要的 `shaderStorageImageExtendedFormats` 不足以运行 SDK。`shaderStorageImageReadWithoutFormat` 不属于此处已核实的要求。

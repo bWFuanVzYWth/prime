@@ -1,20 +1,17 @@
 //! One tree sampler owner. Updates only occur during light publications.
 use crate::{arena::Arena, light_tree::LightTree, resources::Context, surface::LightPage};
-use prime_scene::settings::LightSampling;
 use std::{collections::BTreeMap, sync::Arc};
 
 pub(crate) struct LightSampler {
     tree: LightTree,
-    method: LightSampling,
     /// Read directly by steady-state scene specialization.
     pub has_lights: bool,
 }
 
 impl LightSampler {
-    pub fn new(context: &Context, method: LightSampling) -> Self {
+    pub fn new(context: &Context) -> Self {
         Self {
             tree: LightTree::new(context),
-            method,
             has_lights: false,
         }
     }
@@ -27,8 +24,7 @@ impl LightSampler {
         uploads: &mut Arena,
     ) -> Result<(), String> {
         // Geometry owns the upload Arena; table Buffer drops use Context completion retirement.
-        self.tree
-            .update(context, anchor, sources, uploads, self.method)?;
+        self.tree.update(context, anchor, sources, uploads)?;
         self.has_lights = self.tree.has_lights();
         Ok(())
     }

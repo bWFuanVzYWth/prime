@@ -11,8 +11,6 @@ pub fn samplers(shaders: &mut Vec<ShaderSpec>, source: &str, name: &str, common:
     let mut defines = common.to_vec();
     defines.push("PRIME_LIGHT_TREE=1");
     add(shaders, source, &format!("{name}_tree"), &defines);
-    defines.push("PRIME_LIGHT_TREE_SPHERE=1");
-    add(shaders, source, &format!("{name}_tree_sphere"), &defines);
 }
 
 pub fn build(shaders: &[ShaderSpec]) {

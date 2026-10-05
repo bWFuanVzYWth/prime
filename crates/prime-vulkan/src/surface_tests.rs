@@ -1115,7 +1115,7 @@ fn gpu_surface_emitters_preserve_half_area_sampling_and_scene_replacement() {
     let mut renderer = Renderer::new().unwrap();
     renderer
         .configure(RenderSettings {
-            ray_reconstruction: false,
+            native_noisy_output: true,
             ..Default::default()
         })
         .unwrap();
@@ -1533,7 +1533,7 @@ fn compound_emitters_sample_the_visible_layer_without_leaking_hidden_emission() 
     let mut renderer = Renderer::new().unwrap();
     renderer
         .configure(RenderSettings {
-            ray_reconstruction: false,
+            native_noisy_output: true,
             ..Default::default()
         })
         .unwrap();

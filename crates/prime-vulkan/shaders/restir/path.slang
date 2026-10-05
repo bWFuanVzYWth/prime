@@ -49,6 +49,8 @@ struct RestirSegment {
 
 RestirSegment restirSegment(SurfaceHit hit, float3 origin, float3 direction, float3 previousNormal,
                             float scatterPdf, uint flags, bool rough, float footprintThreshold) {
+    // RA-003/004, docs/restir-adaptations.md: preserve source query-origin geometry
+    // and geometric predecessor ng, including the reverse footprint's area measure.
     float3 displacement = hit.surface.position - origin;
     float distanceSquared = dot(displacement, displacement);
     RestirSegment segment;
@@ -68,6 +70,8 @@ bool restirCanReconnect(SurfaceHit hit, float3 view) {
 
 void restirForcedNeeVertex(inout PathRISState ris, RestirLightSample light, SurfaceHit receiver,
                            float3 view, uint length) {
+    // RA-005, docs/restir-adaptations.md: terminal NEE keeps the sampled emitter's
+    // physical receiver chart; it is distinct from BSDF arrivals at an RC.
     ris.reconnectionJacobian = light.geometry;
     ris.integrand *= light.pdf;
     ris.reconnectionIncidentRadiance = light.Le;
@@ -87,8 +91,8 @@ void restirAddEnvironment(inout PathRISState ris, PathReconnectionInfo rc, float
                           float sourcePdf, float previousPdf, float lastScatterPdf, uint flags,
                           bool rough, uint bounce, float3 direction, RestirScene scene,
                           inout SampleGenerator sg) {
-    // Prime's sky and finite sun have separate source semantics: only the sun has an NEE
-    // competitor. Splitting them preserves that contract without misweighting sky radiance.
+    // RA-006, docs/restir-adaptations.md: only finite sun has an NEE competitor.
+    // Keep separate RIS domains to preserve Prime's sky/sun source contract.
     for (uint type = 0; type < 2; ++type) {
         uint lightType = type == 0 ? RESTIR_LIGHT_SKY : RESTIR_LIGHT_SUN;
         float u = sampleNext1D(sg);
@@ -140,7 +144,6 @@ public PathReservoir restirGenerate<T : IRestirPrimaryObserver>(RestirScene scen
     float3 origin = scene.frame.position.xyz;
     float3 direction = restirPrimaryDirection(scene.frame, pixel, scene.sampleJitter);
     float3 previousPosition = origin, previousNormal = -direction;
-    float3 previousLightNormal = float3(0);
     float previousPdf = 0, scatterPdf = 1, lastScatterPdf = 1;
     uint previousFlags = 0;
     bool previousRough = false;
@@ -186,13 +189,7 @@ public PathReservoir restirGenerate<T : IRestirPrimaryObserver>(RestirScene scen
         if (bounce == 0) {
             residual += throughput * Le;
         } else if (any(Le > 0)) {
-            float3 proposalNormal = float3(0);
-#if defined(PRIME_LIGHT_TREE_SPHERE)
-            proposalNormal = previousLightNormal;
-#endif
-            float lightPdf =
-                    previousPdf > 0 ? restirEmitterPdf(scene, hit, previousPosition, proposalNormal)
-                                    : 0;
+            float lightPdf = previousPdf > 0 ? restirEmitterPdf(scene, hit, previousPosition) : 0;
             float mis = lightPdf > 0 ? primePowerHeuristicValue(previousPdf, lightPdf) : 1.0;
             bool selected = ris.addBSDFHitCandidate(uBsdf, rc, bounce - 1, throughput * Le * mis,
                                                     direction, attenuation * Le, Le * mis,
@@ -218,8 +215,7 @@ public PathReservoir restirGenerate<T : IRestirPrimaryObserver>(RestirScene scen
             bool canConnect =
                     bounce > 0 && rc.pathFlags.rcVertexLength() == RESTIR_MAX_RC_LENGTH &&
                     segment.previous.isLastVertexRough() &&
-                    min(segment.footprint, segment.inverseGeometry / evaluated.pdf) >= threshold &&
-                    restirNeeMayReconnectAtSurface(hit);
+                    min(segment.footprint, segment.inverseGeometry / evaluated.pdf) >= threshold;
             bool selected = ris.addNEECandidate(uNee, rc, canConnect, bounce, throughput * Lr,
                                                 light.direction, visibleLe, Lr, sourcePdf,
                                                 light.pdf, light.type);
@@ -236,8 +232,8 @@ public PathReservoir restirGenerate<T : IRestirPrimaryObserver>(RestirScene scen
         }
         if (bounce + 1 >= budget)
             break;
-        // Roulette affects proposal probability, not the mixed-measure integrand. Replay
-        // skips the decision and its probability/reweighting, as in Falcor's hybrid shift.
+        // RA-010, docs/restir-adaptations.md: retain upstream roulette draw/order and
+        // proposal probability; hybrid replay skips the decision and probability reweighting.
         float roulette = sampleNext1D(sg);
         float survival = min(1.0, max(0.0, workingLuminance(throughput)));
         if (!(survival > 0) || roulette >= survival)
@@ -278,7 +274,8 @@ public PathReservoir restirGenerate<T : IRestirPrimaryObserver>(RestirScene scen
         medium = sampled.medium;
         previousPosition = hit.surface.position;
         previousNormal = hit.surface.normal;
-        previousLightNormal = hit.optical ? float3(0) : restirMaterial(hit, view).normal;
+        // RA-007, docs/restir-adaptations.md: actual PDF stays in geometry; opaque
+        // SSS transmission has zero direct-light competition.
         previousPdf = primeDirectLightingMisPdf(hit.optical, scatter);
         scatterPdf = samplePdf;
         lastScatterPdf = sampleLastPdf;
@@ -299,8 +296,8 @@ public PathReservoir restirGenerate(RestirScene scene, uint2 pixel, uint sequenc
     return restirGenerate(scene, pixel, sequence, primary, residual, observer);
 }
 
-// Falcor TraceTemporalUpdate: replay only the cached portion after the RC. The RC's
-// first scatter response is evaluated by reconnection, so it is excluded here.
+// RA-011, docs/restir-adaptations.md: Falcor TraceTemporalUpdate replays the current-scene
+// suffix. Reconnection evaluates the RC's first scatter response, so exclude it here.
 public bool restirUpdateSuffix(RestirScene scene, SurfaceHit rcHit, float3 rcView,
                                float4 incomingMedium, inout PathReservoir reservoir) {
     reservoir.reconnectionIncidentRadiance = float3(0);
@@ -309,8 +306,6 @@ public bool restirUpdateSuffix(RestirScene scene, SurfaceHit rcHit, float3 rcVie
     bool nee = reservoir.pathFlags.lastVertexNEE();
     SampleGenerator sg = SampleGenerator(reservoir.rcNextVertexBounceSeed);
     if (nee && rcLength == pathLength) {
-        if (!restirNeeMayReconnectAtSurface(rcHit))
-            return false;
         RestirLightSample light = restirSampleLight(scene, rcHit, rcView, incomingMedium,
                                                     reservoir.initRandomSeed, sg);
         if (!(light.pdf > 0) || all(light.Le == 0) || all(light.visibility == 0))
@@ -330,7 +325,8 @@ public bool restirUpdateSuffix(RestirScene scene, SurfaceHit rcHit, float3 rcVie
             dot(rcHit.surface.normal, rcView) * dot(rcHit.surface.normal, direction) < 0;
     if (transmission != reservoir.pathFlags.decodeIsTransmissionEvent(false))
         return false;
-    BsdfEvaluation evaluated = restirEvaluate(scene, rcHit, rcView, direction, incomingMedium);
+    BsdfEvaluation evaluated =
+            restirEvaluate(scene, rcHit, rcView, direction, incomingMedium, true);
     if (!(evaluated.pdf > 0) || all(evaluated.response == 0))
         return false;
     float4 medium = rcHit.optical && !rcHit.thin && transmission
@@ -338,11 +334,7 @@ public bool restirUpdateSuffix(RestirScene scene, SurfaceHit rcHit, float3 rcVie
                             : restirIncident(rcHit, incomingMedium);
     float3 origin = spawnRay(rcHit.surface, direction);
     float3 previousPosition = rcHit.surface.position;
-    float3 previousLightNormal = float3(0);
-#if defined(PRIME_LIGHT_TREE_SPHERE)
-    previousLightNormal = rcHit.optical ? float3(0) : restirMaterial(rcHit, rcView).normal;
-#endif
-    float previousPdf = !rcHit.optical && transmission ? 0 : evaluated.pdf;
+    float previousPdf = restirDirectCompetitionPdf(rcHit.optical, transmission, evaluated.pdf);
     float3 throughput = float3(1);
     uint lightType = reservoir.pathFlags.lightType();
     uint budget = min(asuint(scene.frame.displayExtra.z), 254u);
@@ -371,9 +363,7 @@ public bool restirUpdateSuffix(RestirScene scene, SurfaceHit rcHit, float3 rcVie
             // Prime's split sky/sun RIS domains cannot be exchanged with finite endpoints.
             if (lightType != RESTIR_LIGHT_EMISSIVE)
                 return false;
-            float lightPdf = previousPdf > 0 ? restirEmitterPdf(scene, hit, previousPosition,
-                                                                previousLightNormal)
-                                             : 0;
+            float lightPdf = previousPdf > 0 ? restirEmitterPdf(scene, hit, previousPosition) : 0;
             float mis = lightPdf > 0 ? primePowerHeuristicValue(previousPdf, lightPdf) : 1;
             reservoir.reconnectionIncidentRadiance = throughput * linear709ToWorking(hit.emission) *
                                                      (pathLength == rcLength ? 1 : mis);
@@ -405,9 +395,6 @@ public bool restirUpdateSuffix(RestirScene scene, SurfaceHit rcHit, float3 rcVie
             return false;
         medium = sampled.medium;
         previousPosition = hit.surface.position;
-#if defined(PRIME_LIGHT_TREE_SPHERE)
-        previousLightNormal = hit.optical ? float3(0) : restirMaterial(hit, view).normal;
-#endif
         previousPdf = primeDirectLightingMisPdf(hit.optical, scatter);
         direction = scatter.direction;
         origin = spawnRay(hit.surface, direction);
@@ -442,7 +429,6 @@ public RestirReplayData restirReplay(RestirScene scene, RestirPrimary primary, f
     SurfaceHit hit = restirLoadHit(scene, primary.hit, primaryWo, primary.coverageSeed);
     float3 throughput = float3(1), origin = scene.frame.position.xyz, direction = -primaryWo;
     float3 previousPosition = origin, previousNormal = primaryWo;
-    float3 previousLightNormal = float3(0);
     uint previousFlags = 0;
     float previousPdf = 0, scatterPdf = 1;
     bool previousRough = false;
@@ -486,11 +472,8 @@ public RestirReplayData restirReplay(RestirScene scene, RestirPrimary primary, f
         if (bounce == rcLength - 1 && shouldConnect) {
             if (!restirCanReconnect(hit, view))
                 return result;
-            bool forcedNee = reservoir.pathFlags.lastVertexNEE() && rcLength == pathLength + 1;
-            float factor = !previousRough || segment.footprint < threshold ||
-                                           (forcedNee && !restirNeeMayReconnectAtSurface(hit))
-                                   ? -1
-                                   : segment.inverseGeometry;
+            float factor =
+                    !previousRough || segment.footprint < threshold ? -1 : segment.inverseGeometry;
             result.data = ReconnectionData(identity, view, throughput, factor);
             result.medium = medium;
             return result;
@@ -500,9 +483,7 @@ public RestirReplayData restirReplay(RestirScene scene, RestirPrimary primary, f
                 min(segment.footprint, segment.inverseGeometry / RESTIR_DIFFUSE_PSEUDO_PDF) >=
                         threshold)
                 return result;
-            float lightPdf = previousPdf > 0 ? restirEmitterPdf(scene, hit, previousPosition,
-                                                                previousLightNormal)
-                                             : 0;
+            float lightPdf = previousPdf > 0 ? restirEmitterPdf(scene, hit, previousPosition) : 0;
             float mis = lightPdf > 0 ? primePowerHeuristicValue(previousPdf, lightPdf) : 1;
             result.data.pathThroughput = throughput * linear709ToWorking(hit.emission) * mis;
             result.medium = medium;
@@ -527,7 +508,6 @@ public RestirReplayData restirReplay(RestirScene scene, RestirPrimary primary, f
         medium = sampled.medium;
         previousPosition = hit.surface.position;
         previousNormal = hit.surface.normal;
-        previousLightNormal = hit.optical ? float3(0) : restirMaterial(hit, view).normal;
         previousPdf = primeDirectLightingMisPdf(hit.optical, scatter);
         scatterPdf = samplePdf;
         previousFlags = scatter.eventFlags;

@@ -1,7 +1,7 @@
 #ifndef PRIME_PT_H
 #define PRIME_PT_H
 #include <stdint.h>
-#define PRIME_ABI_VERSION 13
+#define PRIME_ABI_VERSION 14
 #define PRIME_MAX_BATCH_BYTES 268435456
 #define PRIME_DIAGNOSTICS_ENABLED 1
 #define PRIME_DIAGNOSTICS_CAPTURE 2
@@ -74,7 +74,9 @@ typedef struct PrimeSettings {
     int32_t latitude_degrees;
     uint32_t solar_longitude_degrees;
     uint32_t opacity_micromap;
-    uint32_t ray_reconstruction;
+    /* Diagnostic only, default 0: bypass denoising and use native-resolution noisy output.
+       Independent of view=1, which displays the actual internal noisy input. */
+    uint32_t native_noisy_output;
     uint32_t reconstruction_quality;
     uint32_t terrain_batches_per_frame;
     float stars;
@@ -82,8 +84,8 @@ typedef struct PrimeSettings {
     uint32_t hdr;
     uint32_t hdr_reference_white;
     uint32_t frame_generation;
-    /* Frame-boundary choice: 1 = power-distance tree (default), 2 = bounds-sphere tree.
-       Retired value 0 is accepted as 1; no grid sampler is created. */
+    /* Power-distance tree only (1). Retired values 0 and 2 are accepted as 1
+       for old callers; neither grid nor sphere sampler is created. */
     uint32_t light_sampling;
     /* Independent integrator: 0 = path trace, 1 = ReSTIR PT Enhanced. */
     uint32_t integrator;

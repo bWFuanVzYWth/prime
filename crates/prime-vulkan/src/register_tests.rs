@@ -11,6 +11,8 @@ use prime_scene::surface::{Emission, SurfaceFace, SurfaceMesh};
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, fs::File, io::Write, path::PathBuf};
 
+mod final_summary;
+
 fn distribution_values<const N: usize>(line: &str) -> [f64; N] {
     let mut fields = line.split(',');
     let values = std::array::from_fn(|_| {
@@ -195,7 +197,6 @@ impl RegisterOptions {
             light_sampling: match method.as_deref() {
                 None => RenderSettings::default().light_sampling,
                 Some("tree") => LightSampling::Tree,
-                Some("sphere") => LightSampling::TreeSphere,
                 Some(other) => panic!("Unknown PRIME_REGISTER_LIGHT_SAMPLING: {other}"),
             },
             explicit_raw: method.is_some()
@@ -219,7 +220,7 @@ impl RegisterOptions {
             ..Default::default()
         };
         if self.explicit_raw {
-            settings.ray_reconstruction = false;
+            settings.native_noisy_output = true;
             settings.reconstruction_quality = ReconstructionQuality::Native;
             settings.opacity_micromap = false;
             settings.stars = 0.0;
@@ -232,12 +233,6 @@ impl RegisterOptions {
         writeln!(output, "mode={mode:?} width={width} height={height}").unwrap();
         writeln!(output, "light_sampling={:?}", self.light_sampling).unwrap();
         writeln!(output, "integrator={:?}", self.integrator).unwrap();
-        writeln!(
-            output,
-            "sphere_tree_build={}",
-            crate::light_sphere_cpu::register_tree_build()
-        )
-        .unwrap();
         writeln!(
             output,
             "profile={} sdk=false",
@@ -323,10 +318,8 @@ fn dump_transport_equivalence() {
             }
             let (triangles, blas, pages, lamps, local_depths) = renderer.fixture_geometry_summary();
             writeln!(details, "preload_frames={preload} published_triangles={triangles} published_blas={blas} published_light_pages={pages} published_lights={lamps}").unwrap();
-            if options.light_sampling == LightSampling::TreeSphere {
-                assert_eq!(local_depths.iter().sum::<u64>(), lamps as u64);
-                writeln!(details, "local_leaf_depths={local_depths:?}").unwrap();
-            }
+            assert_eq!(local_depths.iter().sum::<u64>(), lamps as u64);
+            writeln!(details, "local_leaf_depths={local_depths:?}").unwrap();
         }
         for budget in [1, 2, 4, 7] {
             renderer
@@ -406,6 +399,17 @@ fn steady_transport_matrix() {
     let output = std::env::var_os("PRIME_REGISTER_CSV").expect("set PRIME_REGISTER_CSV");
     let mut csv = File::create(&output).unwrap();
     let mut details = File::create(PathBuf::from(&output).with_extension("txt")).unwrap();
+    let mut diagnostics = std::env::var_os("PRIME_REGISTER_DIAGNOSTICS").map(|path| {
+        writeln!(details, "diagnostics_path={}", PathBuf::from(&path).display()).unwrap();
+        writeln!(details, "diagnostics_scope=existing GPU stage timestamps; opt-in CPU recorder overhead; frame_id=sample+1").unwrap();
+        File::create(path).expect("benchmark diagnostics output")
+    });
+    let mut final_summary = std::env::var_os("PRIME_REGISTER_RESTIR_SUMMARY").map(|path| {
+        assert_eq!(options.integrator, Integrator::RestirPt);
+        writeln!(details, "restir_summary_path={}", PathBuf::from(&path).display()).unwrap();
+        writeln!(details, "restir_summary_scope=one accepted-final-frame readback after all measured drains; excluded from frame timing; only final spatial queue survives; not total rays or temporal jobs").unwrap();
+        File::create(path).expect("final ReSTIR summary output")
+    });
     options.write_metadata(&mut details, RenderMode::Realtime, 1920, 1080);
     writeln!(
         csv,
@@ -444,6 +448,9 @@ fn steady_transport_matrix() {
         |scene| vec![("LightDistribution".into(), scene)],
     );
     for (name, (scene, camera)) in cases {
+        let recorder = diagnostics
+            .as_ref()
+            .map(|_| prime_diagnostics::Recorder::new());
         let mut host = HostBenchmark::new(1920, 1080).unwrap();
         host.configure(options.settings(RenderMode::Realtime, 4))
             .unwrap();
@@ -470,12 +477,13 @@ fn steady_transport_matrix() {
             }
             let (triangles, blas, pages, lamps, local_depths) = host.fixture_geometry_summary();
             writeln!(details, "preload_frames={preload} published_triangles={triangles} published_blas={blas} published_light_pages={pages} published_lights={lamps}").unwrap();
-            if options.light_sampling == LightSampling::TreeSphere {
-                assert_eq!(local_depths.iter().sum::<u64>(), lamps as u64);
-                writeln!(details, "local_leaf_depths={local_depths:?}").unwrap();
-            }
+            assert_eq!(local_depths.iter().sum::<u64>(), lamps as u64);
+            writeln!(details, "local_leaf_depths={local_depths:?}").unwrap();
         }
         for sample in 0..warmup.checked_add(samples).unwrap() {
+            let _capture = recorder
+                .as_ref()
+                .map(|capture| capture.enter(u64::from(sample) + 1));
             let frame = host.enqueue(&scene, &camera, sample).unwrap();
             let done = host.drain().unwrap()[0];
             writeln!(
@@ -488,6 +496,27 @@ fn steady_transport_matrix() {
                 done.gpu_ns,
                 done.preparation_ns.unwrap_or(0),
                 done.render_ns.unwrap_or(0)
+            )
+            .unwrap();
+        }
+        if let (Some(output), Some(recorder)) = (diagnostics.as_mut(), recorder) {
+            writeln!(
+                output,
+                "{{\"case\":{name:?},\"sample_frame_offset\":1,\"trace\":{}}}",
+                recorder.drain_json().unwrap()
+            )
+            .unwrap();
+        }
+        if let Some(output) = final_summary.as_mut() {
+            let summary = final_summary::capture(&host, [1920, 1080]);
+            writeln!(
+                output,
+                "{}",
+                serde_json::json!({
+                    "case": name,
+                    "final_sample": warmup + samples - 1,
+                    "summary": summary,
+                })
             )
             .unwrap();
         }

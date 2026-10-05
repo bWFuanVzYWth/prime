@@ -1198,7 +1198,7 @@ impl Context {
                         );
                     }
                 }
-                completed.map_err(|e| error("Submit/wait Vulkan work", e))
+                completed.map_err(|e| format!("Submit/wait Vulkan work ({label}): {e:?}"))
             })();
             if self.can_destroy() {
                 self.device.free_command_buffers(self.pool, &[command]);
