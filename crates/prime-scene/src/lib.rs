@@ -8,6 +8,7 @@ pub mod geometry;
 pub mod incremental;
 pub mod instances;
 pub mod protocol;
+pub mod restir_settings;
 mod routing;
 pub mod scene;
 pub mod settings;

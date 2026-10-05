@@ -56,8 +56,17 @@ mod resources;
 mod restir;
 #[cfg(all(test, feature = "shader-tests"))]
 mod restir_adapter_tests;
+mod restir_aux;
+#[cfg(all(test, feature = "shader-tests"))]
+mod restir_config_tests;
+#[cfg(all(test, feature = "shader-tests"))]
+mod restir_default_tests;
 #[cfg(all(test, feature = "shader-tests"))]
 mod restir_history_tests;
+#[cfg(all(test, feature = "shader-tests"))]
+mod restir_options_tests;
+mod restir_pairing;
+mod restir_profiles;
 #[cfg(all(test, feature = "shader-tests"))]
 mod restir_reprojection_tests;
 #[cfg(all(test, feature = "shader-tests"))]

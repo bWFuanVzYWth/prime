@@ -47,3 +47,8 @@ pub fn atmosphere_rayleigh_source() -> &'static [u8] {
 pub fn paired_neighbors() -> &'static [u8] {
     include_bytes!("../../prime-vulkan/assets/restir/paired-neighbors-3-16.bytes")
 }
+
+#[inline(never)]
+pub fn paired_neighbor_bank() -> &'static [u8] {
+    include_bytes!("../../prime-vulkan/assets/restir/paired-neighbors.bank.bytes")
+}

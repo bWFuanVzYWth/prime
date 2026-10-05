@@ -34,6 +34,7 @@ import "restir/pairwise.slang";
 import "restir/reservoir.slang";
 import "restir/rng.slang";
 import "restir/paired_neighbors.slang";
+import "restir/config.slang";
 [[vk::binding(23, 0)]] ConstantBuffer<RestirParameters> parameters;
 [[vk::push_constant]] ConstantBuffer<RestirPass> pass;
 [numthreads(8, 8, 1)] void main(uint3 id : SV_DispatchThreadID) {
@@ -41,31 +42,47 @@ import "restir/paired_neighbors.slang";
     if (any(id.xy >= extent))
         return;
     uint offset = restirOffset(id.xy, extent);
-    PathReservoir canonical = parameters.current[offset];
+    PathReservoir *sources = restirCurrentForPass(parameters, pass);
+    PathReservoir *destination = restirDestinationForPass(parameters, pass);
+    PathReservoir canonical = sources[offset];
+    bool sourceProfiles = (parameters.config.queue.w & 8u) != 0u;
+    uint canonicalProfile =
+            sourceProfiles ? restirCurrentProfilesForPass(parameters, pass)[offset] : 0u;
+    uint selectedProfile = canonicalProfile;
+    bool decoupled =
+            parameters.config.features.z != 0u && pass.reserved1 + 1u == parameters.config.reuse.z;
     if (!parameters.primary[offset].hit.isValid()) {
-        parameters.history[offset] = canonical;
+        destination[offset] = canonical;
+        if (sourceProfiles)
+            restirDestinationProfilesForPass(parameters, pass)[offset] = canonicalProfile;
+        if (decoupled)
+            parameters.shadingSum[offset] = float4(canonical.integrand * canonical.weight, 0);
         return;
     }
     NeighborValidMask mask = parameters.valid[offset];
     PairwiseFactor factors = {mask.cSum, canonical.M};
     float canonicalWeight = spatialCanonicalInitialWeight(factors);
-    PairedNeighborTransform pairing = restirPairing(parameters, pass.sampleOffset);
+    PairedNeighborTransform pairing = restirPairing(parameters, pass.sampleOffset, pass.reserved1);
     SampleGenerator sg = TinyUniformSampleGenerator(
             id.xy,
-            4u * (parameters.frame.target.y + pass.sampleOffset + parameters.frame.target.w) + 3u);
+            restirStreamCount(parameters.config) * (parameters.frame.target.y + pass.sampleOffset +
+                                                    parameters.frame.target.w) +
+                    restirSpatialStream(parameters.config, pass.reserved1));
     // Match the original RNG consumption for the unused unpaired-neighbor start index.
     sampleNext1D(sg);
     PathReservoir result;
     result.init();
-    for (uint i = 0; i < 3; ++i) {
+    float3 color = float3(0);
+    uint stride = parameters.config.queue.y;
+    for (uint i = 0; i < parameters.config.reuse.y; ++i) {
         if (!mask.isValid(i))
             continue;
         uint2 neighbor = uint2(restirNeighbor(parameters, pairing, id.xy, i));
         uint neighborOffset = restirOffset(neighbor, extent);
-        PathReservoir source = parameters.current[neighborOffset];
+        PathReservoir source = sources[neighborOffset];
         // Reciprocal pairing reuses the other pixel's already computed reverse shift.
-        PrecomputedShiftData inverse = parameters.shifts[3u * neighborOffset + i];
-        PrecomputedShiftData forward = parameters.shifts[3u * offset + i];
+        PrecomputedShiftData inverse = parameters.shifts[stride * neighborOffset + i];
+        PrecomputedShiftData forward = parameters.shifts[stride * offset + i];
         canonicalWeight += spatialCanonicalWeightTerm(
                 factors, source.M, PathRISState::toScalar(canonical.integrand),
                 PathRISState::toScalar(inverse.pathThroughput) * inverse.Jacobian);
@@ -73,10 +90,25 @@ import "restir/paired_neighbors.slang";
                 factors, source.M, PathRISState::toScalar(source.integrand),
                 PathRISState::toScalar(forward.pathThroughput) * forward.Jacobian);
         source.reconnectionJacobian = forward.reconnectionJacobian;
-        result.merge(forward.pathThroughput, forward.Jacobian, source, sg, neighborWeight);
+        if (decoupled)
+            color += forward.pathThroughput * forward.Jacobian * source.weight * neighborWeight;
+        bool selected =
+                result.merge(forward.pathThroughput, forward.Jacobian, source, sg, neighborWeight);
+        if (sourceProfiles && selected)
+            selectedProfile = restirCurrentProfilesForPass(parameters, pass)[neighborOffset];
     }
-    result.merge(canonical.integrand, 1.0, canonical, sg, canonicalWeight);
+    bool selectedCanonical = result.merge(canonical.integrand, 1.0, canonical, sg, canonicalWeight);
+    if (decoupled) {
+        // RA-015: Rao-Blackwellize the final color only; history keeps the same RIS winner.
+        color += canonical.integrand * canonical.weight * canonicalWeight;
+        parameters.shadingSum[offset] = float4(any(!isfinite(color)) ? float3(0) : color, 0);
+    }
     result.finalizeReservoirWeight();
     result.weight = isfinite(result.weight) ? max(0.0, result.weight) : 0.0;
-    parameters.history[offset] = result;
+    destination[offset] = result;
+    if (sourceProfiles)
+        restirDestinationProfilesForPass(parameters, pass)[offset] =
+                selectedCanonical ? canonicalProfile : selectedProfile;
+    if ((parameters.config.queue.w & 1u) != 0u && result.initRandomSeed != canonical.initRandomSeed)
+        parameters.currentAges[offset] = 0u;
 }

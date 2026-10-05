@@ -18,7 +18,7 @@ fn artifact_output() -> std::path::PathBuf {
         })
 }
 
-fn settings(mode: RenderMode) -> RenderSettings {
+pub(super) fn settings(mode: RenderMode) -> RenderSettings {
     RenderSettings {
         integrator: Integrator::RestirPt,
         mode,
@@ -34,7 +34,7 @@ fn settings(mode: RenderMode) -> RenderSettings {
     }
 }
 
-fn renderer(settings: RenderSettings) -> Renderer {
+pub(super) fn renderer(settings: RenderSettings) -> Renderer {
     Renderer::with_settings_and_workers(
         settings,
         Arc::new(prime_scene::workers::CpuWorkers::configured().unwrap()),
@@ -42,7 +42,7 @@ fn renderer(settings: RenderSettings) -> Renderer {
     .unwrap()
 }
 
-fn illuminated_scene(revision: u64) -> Scene {
+pub(super) fn illuminated_scene(revision: u64) -> Scene {
     let mut lamp = face(3.);
     lamp.geometry.positions = [[12., 8., 3.], [12., 10., 3.], [14., 10., 3.], [14., 8., 3.]];
     lamp.emission = Emission {
@@ -55,7 +55,7 @@ fn illuminated_scene(revision: u64) -> Scene {
     scene(revision, vec![face(0.), rear, lamp])
 }
 
-fn multiple_light_scene(revision: u64) -> Scene {
+pub(super) fn multiple_light_scene(revision: u64) -> Scene {
     let mut rear = face(6.);
     rear.geometry.positions.reverse();
     let mut warm = face(3.);
@@ -75,12 +75,12 @@ fn multiple_light_scene(revision: u64) -> Scene {
     scene(revision, vec![face(0.), rear, warm, cool])
 }
 
-fn complete_rgba(image: &[u8], width: u32, height: u32) {
+pub(super) fn complete_rgba(image: &[u8], width: u32, height: u32) {
     assert_eq!(image.len(), width as usize * height as usize * 4);
     assert!(image.as_chunks::<4>().0.iter().all(|pixel| pixel[3] == 255));
 }
 
-fn linear_history(renderer: &Renderer, width: u32, height: u32) -> Vec<f32> {
+pub(super) fn linear_history(renderer: &Renderer, width: u32, height: u32) -> Vec<f32> {
     let source = renderer.output.as_ref().unwrap().linear_buffer();
     let size = u64::from(width) * u64::from(height) * 16;
     let readback = Buffer::new_readback(&renderer.context, size).unwrap();
@@ -530,7 +530,7 @@ fn temporal_snapshot(renderer: &Renderer, width: u32, height: u32) -> (Vec<[f32;
     )
 }
 
-fn temporal_snapshot_words(
+pub(super) fn temporal_snapshot_words(
     renderer: &Renderer,
     width: u32,
     height: u32,

@@ -39,5 +39,6 @@ RestirScene restirScene(bool previous = false) {
     result.historyEmitters = parameters.historyEmitters;
     result.historyStaticQuads = parameters.historyStaticQuads;
     result.identityControl = parameters.identityControl;
+    result.config = parameters.config;
     return result;
 }

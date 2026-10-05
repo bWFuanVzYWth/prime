@@ -184,6 +184,81 @@ impl Engine {
             "restir_spatial_only",
             u64::from(self.settings.restir_spatial_only),
         );
+        // RA-015/016: snapshot once at capture/configuration boundaries. Float bits
+        // preserve the actual GPU settings without per-frame scans or formatting.
+        let restir = self.settings.restir;
+        for (name, value) in [
+            ("restir_history_length", restir.history_length),
+            ("restir_spatial_reuse", u32::from(restir.spatial_reuse)),
+            ("restir_spatial_iterations", restir.spatial_iterations),
+            ("restir_spatial_neighbors", restir.spatial_neighbors),
+            ("restir_pairing_radius", restir.pairing_radius),
+            (
+                "restir_stochastic_reprojection",
+                u32::from(restir.stochastic_reprojection),
+            ),
+            ("restir_duplicate_map", u32::from(restir.duplicate_map)),
+            (
+                "restir_duplication_power_bits",
+                restir.duplication_power.to_bits(),
+            ),
+            (
+                "restir_decoupled_shading",
+                u32::from(restir.decoupled_shading),
+            ),
+            ("restir_initial_samples", restir.initial_samples),
+            (
+                "restir_distance_threshold_bits",
+                restir.distance_threshold.to_bits(),
+            ),
+            (
+                "restir_distance_sigma_bits",
+                restir.distance_sigma.to_bits(),
+            ),
+            (
+                "restir_roughness_threshold_bits",
+                restir.roughness_threshold.to_bits(),
+            ),
+            (
+                "restir_roughness_sigma_bits",
+                restir.roughness_sigma.to_bits(),
+            ),
+            (
+                "restir_normal_threshold_bits",
+                restir.normal_threshold.to_bits(),
+            ),
+            (
+                "restir_depth_threshold_bits",
+                restir.depth_threshold.to_bits(),
+            ),
+            ("restir_debug_view", restir.debug_view),
+            (
+                "restir_rr_decorrelation",
+                u32::from(restir.rr_decorrelation),
+            ),
+            ("restir_rr_mode", restir.rr_mode as u32),
+            ("restir_rr_factor_bits", restir.rr_factor.to_bits()),
+            (
+                "restir_rr_stagnancy_exponent_bits",
+                restir.rr_stagnancy_exponent.to_bits(),
+            ),
+            ("restir_rr_ema_bits", restir.rr_ema.to_bits()),
+            (
+                "restir_rr_firefly_strength_bits",
+                restir.rr_firefly_strength.to_bits(),
+            ),
+            (
+                "restir_rr_multiply_bound_bits",
+                restir.rr_multiply_bound.to_bits(),
+            ),
+            (
+                "restir_rr_bias_reduction",
+                u32::from(restir.rr_bias_reduction),
+            ),
+            ("restir_rr_firefly", u32::from(restir.rr_firefly)),
+        ] {
+            span.count(name, u64::from(value));
+        }
         span.count(
             "terrain_budget",
             u64::from(self.settings.terrain_batches_per_frame),

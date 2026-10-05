@@ -16,6 +16,9 @@ final class SettingsTest {
     private static String legacyFile(RenderSettings settings, int version) {
         String result = SettingsFile.encode(settings).replace("version=" + RenderSettings.VERSION,
                                                               "version=" + version);
+        result = result.replaceAll("(?m)^restir_pt\\.[^\\n]*\\n", "");
+        if (version == 11)
+            result += "diagnostics.restir_spatial_only=" + settings.restirSpatialOnly() + "\n";
         if (version <= 10)
             result = result.replace(
                     "diagnostics.restir_spatial_only=" + settings.restirSpatialOnly() + "\n", "");
@@ -81,10 +84,10 @@ final class SettingsTest {
                 RenderSettings.Control.BOUNCES, 12);
         String valid = SettingsFile.encode(changed);
         for (String broken : new String[] {
-                     valid.replace("version=11", "version=0"),
-                     valid.replace("version=11", "version=7"),
-                     valid.replace("version=11", "version=12"),
-                     valid.replace("version=11", ""),
+                     valid.replace("version=12", "version=0"),
+                     valid.replace("version=12", "version=7"),
+                     valid.replace("version=12", "version=13"),
+                     valid.replace("version=12", ""),
                      valid.replace("render.bounces=12", ""),
                      valid.replace("render.bounces=12", "render.bounces=65"),
                      valid.replace("terrain.batches_per_frame=8", ""),
@@ -154,7 +157,7 @@ final class SettingsTest {
         assertEquals(1, PrimeSettings.light_sampling(view(bytes)));
         assertEquals(0, PrimeSettings.integrator(view(bytes)));
         assertEquals(0, PrimeSettings.ignore_global_history_resets(view(bytes)));
-        assertEquals(112, PrimeSettings.SIZE);
+        assertEquals(216, PrimeSettings.SIZE);
         assertEquals(0, PrimeSettings.restir_spatial_only(view(bytes)));
     }
     @Test
@@ -162,7 +165,7 @@ final class SettingsTest {
             throws Exception {
         var control = RenderSettings.Control.SATURATION;
         var defaults = RenderSettings.defaults();
-        assertEquals(11, RenderSettings.VERSION);
+        assertEquals(12, RenderSettings.VERSION);
         assertEquals(20, defaults.value(control));
         Path file = dir.resolve("primept.properties");
         assertEquals(20, SettingsFile.load(file).settings().value(control));
@@ -363,7 +366,7 @@ final class SettingsTest {
                 assertEquals("", migrated.resetReason());
                 assertEquals(expected, migrated.settings());
                 String canonical = SettingsFile.encode(migrated.settings());
-                assertTrue(canonical.contains("version=11\n"));
+                assertTrue(canonical.contains("version=12\n"));
                 assertTrue(canonical.contains(
                         "diagnostics.native_noisy_output=" + !oldReconstruction + "\n"));
                 assertFalse(canonical.contains("ray_reconstruction"));
@@ -435,7 +438,7 @@ final class SettingsTest {
                 assertEquals(1, PrimeSettings.light_sampling(view(wire)));
                 SettingsFile.save(file, loaded.settings());
                 String canonical = Files.readString(file);
-                assertTrue(canonical.contains("version=11\n"));
+                assertTrue(canonical.contains("version=12\n"));
                 assertTrue(canonical.contains("render.light_sampling=TREE\n"));
                 assertFalse(canonical.contains(retired));
                 assertEquals(expected, SettingsFile.load(file).settings());
@@ -526,12 +529,10 @@ final class SettingsTest {
         assertEquals(copied.hashCode(), loaded.settings().hashCode());
         assertFalse(copied.withRestirSpatialOnly(false).restirSpatialOnly());
         String current = SettingsFile.encode(copied);
-        for (String invalid :
-             new String[] {current.replace("diagnostics.restir_spatial_only=true\n", ""),
-                           current.replace("diagnostics.restir_spatial_only=true",
-                                           "diagnostics.restir_spatial_only=maybe"),
-                           current.replace("diagnostics.restir_spatial_only=true",
-                                           "diagnostics.restir_spatial_only=1")}) {
+        for (String invalid : new String[] {
+                     current.replace("restir_pt.spatial_only=true\n", ""),
+                     current.replace("restir_pt.spatial_only=true", "restir_pt.spatial_only=maybe"),
+                     current.replace("restir_pt.spatial_only=true", "restir_pt.spatial_only=1")}) {
             var rejected = SettingsFile.decode(invalid);
             assertEquals(defaults, rejected.settings());
             assertFalse(rejected.resetReason().isEmpty());
@@ -552,8 +553,8 @@ final class SettingsTest {
             assertEquals(expected, loaded.settings());
             assertFalse(loaded.settings().restirSpatialOnly());
             String saved = SettingsFile.encode(loaded.settings());
-            assertTrue(saved.contains("version=11\n"));
-            assertTrue(saved.contains("diagnostics.restir_spatial_only=false\n"));
+            assertTrue(saved.contains("version=12\n"));
+            assertTrue(saved.contains("restir_pt.spatial_only=false\n"));
             assertEquals(expected, SettingsFile.decode(saved).settings());
         }
     }

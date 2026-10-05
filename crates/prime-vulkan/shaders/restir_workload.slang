@@ -34,9 +34,12 @@ import "restir/paired_neighbors.slang";
 import "restir/types.slang";
 import "restir/reservoir.slang";
 import "restir/history_support.slang";
+import "restir/config.slang";
+import "restir/rng.slang";
 import "frame.slang";
 
-int2 previousPixel(RestirScene resources, RestirPrimary primary, SurfaceHit hit) {
+int2 previousPixel(RestirScene resources, RestirPrimary primary, SurfaceHit hit,
+                   inout SampleGenerator sg) {
     if (!hit.found || parameters.control.y == 0u)
         return int2(-1);
     Frame previous = parameters.previousFrame;
@@ -58,6 +61,8 @@ int2 previousPixel(RestirScene resources, RestirPrimary primary, SurfaceHit hit)
     // jitter still belongs to source-ray replay; subtracting it here advects noise.
     float2 location =
             (screen * 0.5 + 0.5) * float2(previous.dimensions.xy) - parameters.sampleJitter.xy;
+    // RA-015: stochastic donor uses the first two draws of the temporal merge stream.
+    location = restirStochasticLocation(location, parameters.config, sg);
     if (any(!isfinite(location)) || any(location < 0.0) ||
         any(location >= float2(previous.dimensions.xy)))
         return int2(-1);
@@ -75,11 +80,18 @@ int2 previousPixel(RestirScene resources, RestirPrimary primary, SurfaceHit hit)
         RestirPrimary primary = parameters.primary[offset];
         float3 wo = -restirPrimaryDirection(resources.frame, id.xy, resources.sampleJitter);
         SurfaceHit hit = restirLoadHit(resources, primary.hit, wo, primary.coverageSeed, 0.0);
-        NeighborValidMask mask = {0u, parameters.current[offset].M};
-        for (uint i = 0; i < 3; ++i)
-            parameters.retraceOffsets[3u * offset + i] = 0xffffffffu;
+        PathReservoir *sources = restirCurrentForPass(parameters, pass);
+        uint stride = parameters.config.queue.y;
+        NeighborValidMask mask = {0u, sources[offset].M};
+        for (uint i = 0; i < stride; ++i)
+            parameters.retraceOffsets[stride * offset + i] = 0xffffffffu;
         if (pass.phase == 0u) {
-            int2 pixel = previousPixel(resources, primary, hit);
+            SampleGenerator sg =
+                    SampleGenerator(id.xy, (parameters.frame.target.y + pass.sampleOffset +
+                                            parameters.frame.target.w) *
+                                                           restirStreamCount(parameters.config) +
+                                                   restirTemporalStream(parameters.config));
+            int2 pixel = previousPixel(resources, primary, hit, sg);
             parameters.reprojection[offset] = pixel;
             if (primary.hit.isValid() && restirInBounds(pixel, extent)) {
                 uint previousOffset = restirOffset(uint2(pixel), extent);
@@ -98,10 +110,11 @@ int2 previousPixel(RestirScene resources, RestirPrimary primary, SurfaceHit hit)
                 }
             }
         } else if (primary.hit.isValid()) {
-            PairedNeighborTransform pairing = restirPairing(parameters, pass.sampleOffset);
+            PairedNeighborTransform pairing =
+                    restirPairing(parameters, pass.sampleOffset, pass.reserved1);
             float distanceToCamera = length(hit.surface.position - resources.frame.position.xyz);
             float3 normal = restirMaterial(hit, wo).normal;
-            for (uint i = 0; i < 3; ++i) {
+            for (uint i = 0; i < parameters.config.reuse.y; ++i) {
                 int2 pixel = restirNeighbor(parameters, pairing, id.xy, i);
                 if (!restirInBounds(pixel, extent))
                     continue;
@@ -116,15 +129,15 @@ int2 previousPixel(RestirScene resources, RestirPrimary primary, SurfaceHit hit)
                 float neighborDistance =
                         length(neighborHit.surface.position - resources.frame.position.xyz);
                 // Original paired-neighbor geometry rejection is symmetric.
-                if (dot(normal, restirMaterial(neighborHit, neighborWo).normal) < 0.5 ||
+                if (dot(normal, restirMaterial(neighborHit, neighborWo).normal) <
+                            parameters.config.validation.x ||
                     abs(distanceToCamera - neighborDistance) >=
-                            0.1 * max(distanceToCamera, neighborDistance))
+                            parameters.config.validation.y *
+                                    max(distanceToCamera, neighborDistance))
                     continue;
                 mask.setValid(i, true);
-                mask.cSum += parameters.current[neighborOffset].M;
-                candidateMask |=
-                        uint(parameters.current[neighborOffset].pathFlags.rcVertexLength() > 1)
-                        << i;
+                mask.cSum += sources[neighborOffset].M;
+                candidateMask |= uint(sources[neighborOffset].pathFlags.rcVertexLength() > 1) << i;
             }
         }
         parameters.valid[offset] = mask;
@@ -137,10 +150,10 @@ int2 previousPixel(RestirScene resources, RestirPrimary primary, SurfaceHit hit)
         InterlockedAdd(parameters.queueControl[0], waveCount, base);
     base = WaveReadLaneFirst(base) + WavePrefixSum(count);
     uint item = 0u;
-    for (uint i = 0; i < 3; ++i) {
+    for (uint i = 0; i < parameters.config.queue.y; ++i) {
         if ((candidateMask & (1u << i)) != 0u) {
             parameters.workItems[base + item] = uint2(id.y * extent.x + id.x, i);
-            parameters.retraceOffsets[3u * offset + i] = base + item;
+            parameters.retraceOffsets[parameters.config.queue.y * offset + i] = base + item;
             ++item;
         }
     }

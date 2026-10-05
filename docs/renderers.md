@@ -2,7 +2,7 @@
 
 ## 控制与配置边界
 
-`restir_pt` 独立选择 ReSTIR PT Enhanced；它与 `path_trace` 共享源场景、RR 和显示契约，拥有独立积分管线与历史资源。固定配置、guide 生成与历史更新规则见 [ReSTIR PT](restir-pt.md)。后文的 K1/K2 调度属于 `path_trace`，RR 的图像、PSR、SDK 与完成证明合同适用于两个 Prime 后端。
+`restir_pt` 独立选择 ReSTIR PT Enhanced；它与 `path_trace` 共享源场景、RR 和显示契约，拥有独立积分管线与历史资源。默认配置、专用参数、guide 生成与历史更新规则见 [ReSTIR PT](restir-pt.md)。后文的 K1/K2 调度属于 `path_trace`，RR 的图像、PSR、SDK 与完成证明合同适用于两个 Prime 后端。
 
 两版适配器在原版“选项 → 视频设置”列表顶部加入 Prime 控件，游戏暂停和标题画面共用。四组标题均以“Prime PT ·”开头，按渲染、光照、显示、诊断分组；RR 和 OMM 开关位于诊断组，DLSS 质量与帧生成位于渲染组，原版视频选项在之后保留。控件使用该版本的 `OptionInstance`；公共 Java 层仅持有不可变值、当前配置编解码和设置封包。Minecraft 类型和按键回调不进入 Rust。共享语言资产在两个适配器的 `processResources` 中合并，开发运行的 Fabric 模组资源根与发行 JAR 包含同一套资源。
 

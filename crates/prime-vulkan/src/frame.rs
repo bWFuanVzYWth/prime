@@ -537,7 +537,7 @@ impl Renderer {
     }
 
     fn needs_linear_display(&self) -> bool {
-        self.settings.view == prime_scene::settings::DiagnosticView::Output
+        self.effective_view() == prime_scene::settings::DiagnosticView::Output
             && (self.settings.auto_exposure_compensation > 0.0
                 || self.hdr_calibration.is_some()
                 || self.frame_generation_active()
@@ -546,11 +546,20 @@ impl Renderer {
 
     fn frame_generation_active(&self) -> bool {
         self.settings.frame_generation
-            && self.settings.view == prime_scene::settings::DiagnosticView::Output
+            && self.effective_view() == prime_scene::settings::DiagnosticView::Output
             && self
                 .reconstruction
                 .as_ref()
                 .is_some_and(|rr| rr.frame_generation_supported())
+    }
+
+    fn effective_view(&self) -> prime_scene::settings::DiagnosticView {
+        if self.settings.integrator == Integrator::RestirPt && self.settings.restir.debug_view != 0
+        {
+            prime_scene::settings::DiagnosticView::NoisyColor
+        } else {
+            self.settings.view
+        }
     }
 
     pub fn display_output(&mut self, active: bool, peak: f32, white: f32) -> Result<(), String> {
@@ -1420,10 +1429,18 @@ impl Renderer {
             accumulation,
             self.settings.mode == RenderMode::Realtime,
             self.settings.restir_spatial_only,
+            self.settings.restir,
+            self.reconstruction.is_some(),
             linear,
             jitter,
             anchor,
             identity,
+        )?;
+        let pipeline = self.pipeline.as_mut().unwrap();
+        pipeline.restir.as_mut().unwrap().ensure_optional(
+            pipeline.layout,
+            self.settings.restir,
+            self.restir.as_ref().unwrap().rr_statistics_this_frame,
         )
     }
 
@@ -1487,7 +1504,8 @@ impl Renderer {
         }
         push[116..120].copy_from_slice(&self.settings.depth_range.to_le_bytes());
         push[120..124].copy_from_slice(&self.settings.bounces.to_le_bytes());
-        let view_flags = self.settings.view as u32 | (u32::from(self.needs_linear_display()) << 31);
+        let view_flags =
+            self.effective_view() as u32 | (u32::from(self.needs_linear_display()) << 31);
         push[124..128].copy_from_slice(&view_flags.to_le_bytes());
         push
     }
@@ -1657,7 +1675,7 @@ impl Renderer {
                 ],
                 &[],
             );
-            let bind = |selected, phase: u32, sample: u32| {
+            let bind = |selected, phase: u32, sample: u32, round: u32| {
                 self.context.device.cmd_bind_pipeline(
                     command,
                     vk::PipelineBindPoint::COMPUTE,
@@ -1667,7 +1685,7 @@ impl Renderer {
                     phase,
                     sample,
                     u32::from(phase == 0 && state.dynamic_update_this_frame),
-                    0,
+                    round,
                 ]
                 .map(u32::to_le_bytes);
                 self.context.device.cmd_push_constants(
@@ -1678,13 +1696,13 @@ impl Renderer {
                     push.as_flattened(),
                 );
             };
-            let dispatch = |selected, phase, sample| {
-                bind(selected, phase, sample);
+            let dispatch = |selected, phase, sample, round| {
+                bind(selected, phase, sample, round);
                 self.context
                     .device
                     .cmd_dispatch(command, groups[0], groups[1], 1);
             };
-            let workload = |phase, sample| {
+            let workload = |phase, sample, round| {
                 // Last indirect and shader consumers finish before resetting the shared GPU counter.
                 self.context.device.cmd_pipeline_barrier(
                     command,
@@ -1717,9 +1735,9 @@ impl Renderer {
                     &[],
                     &[],
                 );
-                dispatch(passes.workload[variant], phase, sample);
+                dispatch(passes.workload[variant], phase, sample, round);
                 self.realtime_barrier(command);
-                bind(passes.indirect, phase, sample);
+                bind(passes.indirect, phase, sample, round);
                 self.context.device.cmd_dispatch(command, 1, 1, 1);
                 self.context.device.cmd_pipeline_barrier(
                     command,
@@ -1736,11 +1754,11 @@ impl Renderer {
                     &[],
                     &[],
                 );
-                bind(passes.retrace[variant], phase, sample);
+                bind(passes.retrace[variant], phase, sample, round);
                 self.context.device.cmd_dispatch_indirect(command, queue, 4);
                 self.realtime_barrier(command);
                 if phase == 1 {
-                    dispatch(passes.shift[variant], phase, sample);
+                    dispatch(passes.shift[variant], phase, sample, round);
                     self.realtime_barrier(command);
                 }
             };
@@ -1750,7 +1768,7 @@ impl Renderer {
                 if realtime {
                     self.stage_timestamp(command, slot, GpuStage::Primary, false);
                 }
-                dispatch(passes.generate[variant], 0, sample);
+                dispatch(passes.generate[variant], 0, sample, 0);
                 if realtime {
                     self.stage_timestamp(command, slot, GpuStage::Primary, true);
                 }
@@ -1759,12 +1777,44 @@ impl Renderer {
                     self.stage_timestamp(command, slot, GpuStage::Transport, false);
                 }
                 if state.temporal_this_frame {
-                    workload(0, sample);
-                    dispatch(passes.temporal[variant], 0, sample);
+                    workload(0, sample, 0);
+                    dispatch(passes.temporal[variant], 0, sample, 0);
                     self.realtime_barrier(command);
                 }
-                workload(1, sample);
-                dispatch(passes.spatial, 1, sample);
+                let rounds = if state.settings.spatial_reuse {
+                    state.settings.spatial_iterations
+                } else {
+                    0
+                };
+                for round in 0..rounds {
+                    workload(1, sample, round);
+                    dispatch(passes.spatial, 1, sample, round);
+                    if round + 1 < rounds {
+                        self.realtime_barrier(command);
+                    }
+                }
+                if state.settings.duplicate_map || state.settings.debug_view == 1 {
+                    self.realtime_barrier(command);
+                    bind(passes.sample_ids, 1, sample, rounds);
+                    self.context.device.cmd_dispatch(
+                        command,
+                        extent[0].div_ceil(16),
+                        extent[1].div_ceil(16),
+                        1,
+                    );
+                    self.realtime_barrier(command);
+                    bind(passes.duplicate_map, 1, sample, rounds);
+                    self.context.device.cmd_dispatch(
+                        command,
+                        extent[0].div_ceil(16),
+                        extent[1].div_ceil(16),
+                        1,
+                    );
+                }
+                if state.rr_statistics_this_frame {
+                    self.realtime_barrier(command);
+                    dispatch(passes.rr_statistics, 1, sample, rounds);
+                }
                 if realtime {
                     self.stage_timestamp(command, slot, GpuStage::Transport, true);
                 }
@@ -1772,7 +1822,7 @@ impl Renderer {
                 if realtime {
                     self.stage_timestamp(command, slot, GpuStage::Post, false);
                 }
-                dispatch(passes.resolve[variant], 1, sample);
+                dispatch(passes.resolve[variant], 1, sample, rounds);
                 if realtime {
                     self.stage_timestamp(command, slot, GpuStage::Post, true);
                 }
@@ -1797,6 +1847,37 @@ impl Renderer {
                     .dst_access_mask(vk::AccessFlags::SHADER_READ | vk::AccessFlags::SHADER_WRITE)],
                 &[],
                 &[],
+            );
+        }
+    }
+
+    fn restir_debug_display(&self, command: vk::CommandBuffer, slot: usize) {
+        if self.settings.integrator != Integrator::RestirPt || self.settings.restir.debug_view == 0
+        {
+            return;
+        }
+        let pipeline = self.pipeline.as_ref().unwrap();
+        let output = self.output.as_ref().unwrap();
+        self.realtime_barrier(command);
+        unsafe {
+            self.context.device.cmd_bind_pipeline(
+                command,
+                vk::PipelineBindPoint::COMPUTE,
+                pipeline.restir.as_ref().unwrap().debug_display,
+            );
+            self.context.device.cmd_bind_descriptor_sets(
+                command,
+                vk::PipelineBindPoint::COMPUTE,
+                pipeline.layout,
+                0,
+                &[pipeline.descriptors[slot]],
+                &[],
+            );
+            self.context.device.cmd_dispatch(
+                command,
+                output.width.div_ceil(8),
+                output.height.div_ceil(8),
+                1,
             );
         }
     }
@@ -2177,6 +2258,7 @@ impl Renderer {
             .buffer;
         let context = self.context.clone();
         let mut recorded = Ok(());
+        let display_view = self.effective_view();
         context.submit_named("diagnostic_render", |command| unsafe {
             self.before_frame(command);
             self.dispatch(command, 0, false);
@@ -2187,13 +2269,14 @@ impl Renderer {
                     0,
                     0,
                     self.display,
-                    self.settings.view,
+                    display_view,
                     self.settings.depth_range,
                     false,
                     linear_output,
                 );
             }
             if recorded.is_ok() {
+                self.restir_debug_display(command, 0);
                 recorded = self.record_display(command, 0, view, false);
             }
             let barrier = [vk::ImageMemoryBarrier::default()
@@ -2436,6 +2519,7 @@ impl Renderer {
         // This boundary includes upload/AS dependencies, rather than shader-active cycles.
         self.timestamp(command, slot, 1, vk::PipelineStageFlags::BOTTOM_OF_PIPE);
         self.dispatch(command, slot, true);
+        let display_view = self.effective_view();
         if self.reconstruction.is_some() {
             self.stage_timestamp(command, slot, GpuStage::Reconstruction, false);
         }
@@ -2446,7 +2530,7 @@ impl Renderer {
                 slot,
                 serial,
                 self.display,
-                self.settings.view,
+                display_view,
                 self.settings.depth_range,
                 true,
                 linear_output,
@@ -2455,6 +2539,7 @@ impl Renderer {
         if self.reconstruction.is_some() {
             self.stage_timestamp(command, slot, GpuStage::Reconstruction, true);
         }
+        self.restir_debug_display(command, slot);
         self.record_display(command, slot, view, true)?;
         unsafe {
             let after = [vk::MemoryBarrier::default()

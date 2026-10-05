@@ -45,6 +45,7 @@ import "restir/reservoir.slang";
     RestirPrimary primary;
     PathReservoir reservoir;
     uint2 destination = pixel;
+    uint sourceOffset = offset;
     if (pass.phase == 0u) {
         // Workload validated previous primary and source RC before queueing; metadata is
         // immutable between workload and these retrace consumers.
@@ -58,12 +59,21 @@ import "restir/reservoir.slang";
         } else {
             primary = parameters.primary[offset];
             reservoir = parameters.history[previousOffset];
+            sourceOffset = previousOffset;
         }
     } else {
-        PairedNeighborTransform pairing = restirPairing(parameters, pass.sampleOffset);
+        PairedNeighborTransform pairing =
+                restirPairing(parameters, pass.sampleOffset, pass.reserved1);
         uint2 neighbor = uint2(restirNeighbor(parameters, pairing, pixel, item.y));
         primary = parameters.primary[offset];
-        reservoir = parameters.current[restirOffset(neighbor, extent)];
+        sourceOffset = restirOffset(neighbor, extent);
+        reservoir = restirCurrentForPass(parameters, pass)[sourceOffset];
+    }
+    if ((parameters.config.queue.w & 8u) != 0u) {
+        uint profile = pass.phase == 0u && item.y == 1u
+                               ? restirPreviousProfile(parameters, sourceOffset)
+                               : restirCurrentProfilesForPass(parameters, pass)[sourceOffset];
+        resources.config.shift = parameters.sourceThresholds[profile];
     }
     float3 wo = -restirPrimaryDirection(resources.frame, destination, resources.sampleJitter);
     parameters.retrace[id.x] = restirReplay(resources, primary, wo, reservoir);

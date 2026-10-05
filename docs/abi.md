@@ -1,6 +1,6 @@
-# FFM ABI v15
+# FFM ABI v16
 
-Java 适配器与 Rust 核心作为同一构建产物配套使用。公共 ABI 为14，Minecraft 源 schema 为7，设置文件 schema 为10；版本用于边界拒绝，不承诺不同发布之间的二进制兼容。两版适配器共享同次构建的核心，JAR 和引擎不能混用。
+Java 适配器与 Rust 核心作为同一构建产物配套使用。公共 ABI 为16，Minecraft 源 schema 为7，设置文件 schema 为12；版本用于边界拒绝，不承诺不同发布之间的二进制兼容。两版适配器共享同次构建的核心，JAR 和引擎不能混用。
 
 ## 唯一结构契约与生成
 
@@ -10,7 +10,7 @@ Java 适配器与 Rust 核心作为同一构建产物配套使用。公共 ABI �
 
 固定输入以 `PrimeHeader { struct_size, abi_version }` 开始，两者精确匹配当前根结构。MC 根输入以 `PrimeMcIdentity` 开始，前两字段相同，另外携带 source/game version、resource generation、world epoch 和 batch。自然 padding 不传递语义，不要求清零，也不参与内容比较；显式 reserved 字段须为零。
 
-`prime_create(14)` 返回非零 handle，普通 status=0 成功、-1 失败；`prime_last_error` 返回 UTF-8 完整长度（不含 NUL），容量允许时补 NUL。除不使用 session 的真实 Present 转发外，所有 handle 调用都在创建它的 OS 线程执行。库名仍为 `prime_engine`。
+`prime_create(16)` 返回非零 handle，普通 status=0 成功、-1 失败；`prime_last_error` 返回 UTF-8 完整长度（不含 NUL），容量允许时补 NUL。除不使用 session 的真实 Present 转发外，所有 handle 调用都在创建它的 OS 线程执行。库名仍为 `prime_engine`。
 
 ## 诊断控制与排空
 
@@ -36,7 +36,7 @@ Java 适配器与 Rust 核心作为同一构建产物配套使用。公共 ABI �
 | --- | --- | --- |
 | `PrimeReset` | 16 B | `prime_reset`；world epoch严格增加，清理世界几何/动态状态，保留当前常驻资源代和同一CPU池 |
 | `PrimeFrame` | 96 B | record/render；epoch、f64世界位置、forward/right/up、FOV、输出尺寸、sample index、实际太阳时角 |
-| `PrimeSettings` | 104 B | configure；具名渲染、调度、星图、自动曝光、HDR、帧生成与帧边界光源采样方式、积分器 |
+| `PrimeSettings` | 216 B | configure；具名渲染、调度、星图、显示、积分器及 ReSTIR PT 控制 |
 | `PrimeVulkanHost` | 56 B | attach；instance/physical device/device/queue/timeline/family/实际启用capabilities |
 | `PrimeRecordTarget` | 40 B | record；活动command、目标image/view、实际提交serial |
 | `PrimePrepareResources` | 24 B | prepare_resources；活动command与真实提交serial，仅准备设备/全局资源 |
@@ -171,7 +171,11 @@ flags 的 bit0 表示已在这台逻辑设备启用 `VK_EXT_opacity_micromap` �
 
 ## 设置结构与文件 schema
 
-`prime_configure(handle,&settings)` 借用112 B `PrimeSettings`，header使用公共ABI v15。`native_noisy_output` 位于64字节偏移，1为禁用降噪并使用原生分辨率含噪输出，0为默认允许RR；此字段与旧v13的RR布尔语义相反，因此拒绝旧ABI。`light_sampling` 位于96字节偏移，1为功率距离Tree，旧0/2均规范化到Tree，其他值拒绝；生产仅保留Tree，字段迁移不重建管线或重置历史。`integrator` 位于100字节偏移，0为PathTrace、1为RestirPt，其他值拒绝。`ignore_global_history_resets`位于104字节偏移，0为默认关闭、1为忽略显式全局历史重置的诊断，其他值拒绝。末字段`restir_spatial_only`位于108字节偏移，0为默认关闭、1为仅执行ReSTIR初始生成和空间重采样，其他值拒绝；不改变RR历史或离线累积。JAR与DLL须配套重建。磁盘`primept.properties`为schema v11，当前采样值为`TREE`，旧`GRID`/`TREE_SPHERE`在受支持版本中迁移到Tree；v8/v9定向迁移旧`render.ray_reconstruction`，取反写入`diagnostics.native_noisy_output`，v8缺少的忽略重置字段补false，其余合法字段保留。更旧版本或不完整字段仍按严格规则整份回退默认；受支持的v8/v9/v10迁移时新增的`diagnostics.restir_spatial_only`补false。内部配置包为v11/108B，不作为公共C ABI的替代。
+`prime_configure(handle,&settings)` 借用216 B `PrimeSettings`，header使用公共ABI v16，JAR与DLL须配套重建。原有字段位置保持：`native_noisy_output` 位于64字节偏移，1为禁用降噪并使用原生分辨率含噪输出，0为默认允许RR；此字段与旧v13的RR布尔语义相反。`light_sampling` 位于96字节偏移，1为功率距离Tree，旧0/2均规范化到Tree，其他值拒绝；生产仅保留Tree，字段迁移不重建管线或重置历史。`integrator` 位于100字节偏移，0为PathTrace、1为RestirPt，其他值拒绝。`ignore_global_history_resets`位于104字节偏移，0为默认关闭、1为忽略显式全局历史重置的诊断，其他值拒绝。`restir_spatial_only`位于108字节偏移，0为默认关闭、1为跳过ReSTIR全部时间重采样阶段，其他值拒绝；不改变空间控制、DLSS RR历史或离线累积。
+
+其后追加26个4字节ReSTIR控制字段，占用`[112,216)`，最后字段起始偏移为212。完整字段顺序及偏移以头文件、生成的Rust编译断言和Java具名访问器为准，不维护另一份偏移表。Rust边界核验布尔0/1、枚举、整数范围及有限浮点后保存为`RenderSettings.restir`；Java的独立`RestirSettings`在写入同一C结构前执行相同范围校验。历史M上限控制置信计数而非样本年龄；初始路径数、空间开关/邻居数/轮数和配对距离控制实际生成、复用工作及配对资产；随机重投影、重复度降权和解耦着色分别由对应GPU阶段消费。Footprint/roughness阈值与标准差参与路径分类及Hybrid移位，距离阈值保留界面单位、GPU使用值除以100；法线/深度门槛控制空间邻居支持。样本诊断选择输出、重复度或寿命；`restir_rr_*`仅在有实际DLSS RR消费者时控制最终含噪输出去相关，不改变复用reservoir，权重限制不保证严格无偏。默认值、具体范围及资源条件见[ReSTIR PT](restir-pt.md)。这些新控制不参与全局transport重置比较；seed继续遵守原有transport规则。
+
+磁盘`primept.properties`为schema v12，专栏控制使用`restir_pt.*`，仅空间开关保存为`restir_pt.spatial_only`。v8–v11按显式规则迁移：合法旧`diagnostics.restir_spatial_only`保留并换键，v8–v10缺失此项补false，新增ReSTIR字段使用默认值；v8/v9的`render.ray_reconstruction`取反写入`diagnostics.native_noisy_output`，v8缺少的忽略重置字段补false。采样值为`TREE`，旧`GRID`/`TREE_SPHERE`规范化到Tree，其余合法旧字段保留。更旧、未来或必需字段不完整/非法的配置整份回退默认。内部离线配置包为v12/212 B，不作为公共C ABI的替代。
 
 | 字段 | 范围/语义 |
 | --- | --- |
@@ -180,7 +184,7 @@ flags 的 bit0 表示已在这台逻辑设备启用 `VK_EXT_opacity_micromap` �
 | exposure / hue / saturation | `[1/4096,4096]` / `[0,1]` / `[0,0.5]` |
 | view | 0输出、1噪声色、2线性深度、3世界法线 |
 | sun / sky / depth_range | 光强各`[1/256,256]`，预览深度`[1,4096]` |
-| seed | Java固定`0x13572468` |
+| seed | 无符号32位，默认`0x13572468`；ReSTIR PT专栏可编辑，复用原C字段 |
 | latitude_degrees / solar_longitude_degrees | -90…90 / 0…359整数度 |
 | opacity_micromap | 0关、1请求启用，默认1 |
 | native_noisy_output | 0默认允许RR（固定preset F）；1禁用降噪并原生分辨率输出；与内部含噪颜色诊断视图独立 |

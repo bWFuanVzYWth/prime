@@ -4,9 +4,29 @@
 
 算法来源为 Falcor 9.0 的 `Source/Modules/ReSTIRPathTracing`，源提交 `759aad033ff610fb0d82c74f7e0a508d0096d5f2`。它包含 Enhanced 的双 footprint 判定、混合 PSS/立体角参数化和双向 pairwise MIS。来源及 BSD-3-Clause 许可见 [第三方声明](../THIRD_PARTY_NOTICES.md)。 相对上游的接口、数学与历史适配集中维护在[统一登记](restir-adaptations.md)，本文件维护生产管线与资源合同。
 
-## 固定配置与支持边界
+## 默认配置、设置与支持边界
 
-当前固定为上游默认的 point reservoir、Hybrid shift、Compact retrace、3 个互反配对邻居、标准差 16 的原邻域表、1 轮空间重采样、20 的时间历史 M 上限。保留原 TinyUniform RNG、path flags、初始 RIS 与 reservoir 合并归一化规则。场景或光照变化时启用上游 current-scene temporal suffix update；没有旧场景副本。未启用 area reservoir、DoF、splatting、robust temporal、压缩、decoupled shading 或 duplicate map。
+默认保持 point reservoir、Hybrid shift、Compact retrace、3 个互反配对邻居、标准差 16 的原邻域表、1 轮空间重采样、20 的时间历史 M 上限和每像素 1 条新路径。保留 TinyUniform RNG、path flags、初始 RIS 与 reservoir 合并归一化规则。场景或光照变化时启用上游 current-scene temporal suffix update；没有旧场景副本。支持范围仍不包含 area reservoir、DoF、splatting、MCMC、robust temporal 或压缩。
+
+视频设置的独立“Prime ReSTIR PT”栏保存下列参数；“仅空间复用”从诊断栏迁移到这里，旧配置自动保留。新增机制的主开关默认关闭，启用时使用参考实现的默认数值。
+
+| 参数 | 默认 / 范围 | 消费语义 |
+| --- | --- | --- |
+| 仅空间复用 | 关 | 跳过全部时间阶段，RR 历史继续推进 |
+| 初始路径数 | 1 / 1–16 | 多条新路径先 RIS 聚合，再将 M 归一为 1；共享真实 primary |
+| 时间历史 M 上限 | 20 / 0–100 | 有效候选数上限，不是实际独立样本数或寿命 |
+| 空间复用、轮数 | 开、1 / 0–8 | 零轮直接消费时间/初始结果；多轮复用两个 reservoir bank |
+| 配对邻居数、平均尺度 | 3、30 / 1–5、5–50（步长 5） | 选择原版完整互反 LUT；标准差为尺度乘 `sqrt(8/(9π))` |
+| 随机重投影 | 关 | 时间 donor 随机像素舍入；不改变源 ray 的 jitter |
+| 重复样本降权、指数 | 关、0.1 / 0–10 | 17×17 重复 seed 统计，将历史 cap 从 H 向 1 插值；指数越小，非零重复率的降权越强 |
+| 解耦着色 | 关 | 最后空间轮累计各候选的加权颜色，历史仍只保存被选中的路径 |
+| 距离阈值、相对随机幅度 | 0.02、0.2 / 0–10000、0–1 | UI 距离除以 100 后进入 footprint chart |
+| PDF roughness 阈值、相对随机幅度 | 0.2、0 / 0–1、0–1 | 以实际 BSDF PDF 分类，非单一材质粗糙度 |
+| 空间法线、相对深度门限 | 0.5、0.1 / −1–1、0–1 | 配对候选的对称几何筛选 |
+| 随机种子 | 0 / uint32 | 新路径随机域；不清空全局 ReSTIR/RR 历史 |
+| 统计视图 | 关 / 重复率、存活统计 | 仅覆盖显示；不写入 reservoir、离线物理均值或 RR 含噪输入 |
+
+可选 RR 输出去相关使用 Prime 独立实现，数学定义参考 [RTXDI ReSTIR PT 文档](https://github.com/NVIDIA-RTX/RTXDI/blob/a6efab966b7c3b272da0461578eb56ac61c7cbff/Doc/RestirPT.md)。主开关默认关闭；模式默认 Stagnancy，基础概率 0.4、停滞指数 0.5、EMA 0.2、亮点强度 0.7、新样本权重限制开启且倍数上限 15。Uniform 直接使用基础概率；Stagnancy 使用 `min(1, 4 × factor × smooth^exponent)`，亮点标记可强制概率为 1。它只在实时 RR 且存在时间复用时，用 Bernoulli 选择初始或重采样颜色，不改历史 reservoir。颜色相关的自适应选择与权重限制不保证严格无偏；Prime 使用 Falcor 的存活计数，不声称与另一引擎逐位等价，见 [RA-016](restir-adaptations.md)。
 
 材质适配使用 Prime 已接入的 OpenPBR/LabPBR、真实源色、发光、覆盖、介质与透射契约。自定义材质走上游不支持 BSDF component indexing 的 PDF roughness 判定；没有用单一粗糙度值代替混合 BSDF 的采样 PDF。上游默认的显式材质 LOD 0 保留，因此本渲染器没有采用普通 PT 的传播 ray-cone 纹理过滤。覆盖随机域使用固定的路径 seed 与位置哈希；重放不会再次执行宿主回调。命中身份保存实际复合表面的材质选择，避免重建浮点误差改变涂层来源。
 
@@ -20,9 +40,9 @@ BSDF 续接与直接光照具有不同支持域。非光学 authored 薄 SSS 可
 
 ## GPU 数据流
 
-每个实时帧依次执行生成、时间 workload/retrace/merge、空间 workload/retrace/shift/merge、resolve。无有效历史时跳过时间阶段。时间 merge 与原版一样内联顺序计算双向 shift，不增加全屏 shift 中间写读。workload 通过 wave prefix sum 在 GPU 上生成紧凑队列，GPU 写入 `DispatchIndirect` 参数；CPU 不读回队列长度。只有需要 replay prefix 的候选进入队列。空间反向 shift 使用配对邻居已生成的相反方向记录，不重复追踪；无效配对没有消费者，不清零其 shift 槽。
+每个实时帧依次执行生成、时间 workload/retrace/merge、配置轮数的空间 workload/retrace/shift/merge、可选统计、resolve。无有效历史时跳过时间阶段。时间 merge 与原版一样内联顺序计算双向 shift，不增加全屏 shift 中间写读。workload 通过 wave prefix sum 在 GPU 上生成紧凑队列，GPU 写入 `DispatchIndirect` 参数；CPU 不读回队列长度。只有需要 replay prefix 的候选进入队列。空间反向 shift 使用配对邻居已生成的相反方向记录，不重复追踪；无效配对没有消费者，不清零其 shift 槽。
 
-诊断设置“ReSTIR 仅空间复用”默认关闭。开启时宿主直接跳过整组时间阶段及其队列清零、indirect 调度和同步，仅保留初始生成、空间阶段与 resolve；空间输出使用现有独立 reservoir bank，不增加历史复制或 shader 变体。既有 scratch 和管线保持复用，身份表及接受提交的相机、jitter、primary bank、水位继续推进，关闭开关后可立即使用最近的真实空间结果恢复时间复用。不受“忽略所有全局重置”开关覆盖，不重置 DLSS RR 历史，也不改变原本仅空间复用的离线累积。内部适配见 [RA-014](restir-adaptations.md)。
+ReSTIR PT 设置“仅空间复用”默认关闭。开启时宿主直接跳过整组时间阶段及其队列清零、indirect 调度和同步，仅保留初始生成、空间阶段与 resolve；空间输出使用现有独立 reservoir bank，不增加历史复制或 shader 变体。既有 scratch 和管线保持复用，身份表及接受提交的相机、jitter、primary bank、水位继续推进，关闭开关后可立即使用最近的真实空间结果恢复时间复用。不受“忽略所有全局重置”开关覆盖，不重置 DLSS RR 历史，也不改变原本仅空间复用的离线累积。内部适配见 [RA-014](restir-adaptations.md)。
 
 现有 GPU 诊断的 primary、transport、post 区间分别覆盖完整初始生成、重采样和 resolve；不能把这些同名区间当作普通 PT 的 K1/K2 阶段直接比较。性能比较使用完整 GPU 帧区间，并按实际后端解释子阶段。
 
@@ -32,9 +52,9 @@ BSDF 续接与直接光照具有不同支持域。非光学 authored 薄 SSS 可
 
 仅重建命中材质的 workload/resolve 在编译时排除 AS 依赖；真正的追踪阶段使用 Ray Query。不要求 Ray Tracing Pipeline 或 shaderInt64 功能。
 
-屏幕 reservoir 使用 16×16 Morton tile，tile 间为行序；工作队列使用紧凑线性索引。自然 BDA 布局为 reservoir 80 B、primary 20 B、replay 60 B（含介质）、shift 20 B，要求 Vulkan 1.2 `scalarBlockLayout` 在逻辑设备创建时实际启用。宿主和无窗口设备均显式协商，物理设备支持查询不能代替启用证明。464 B frame uniform 含当前/前帧 Frame、抖动、屏幕与身份表地址和已接受修订水位，只有已完成的描述符 slot 能写它。布局通过实际 SPIR-V 验证，不依赖默认 SSBO 的填充规则。
+屏幕 reservoir 使用 16×16 Morton tile，tile 间为行序；工作队列使用紧凑线性索引。自然 BDA 布局为 reservoir 80 B、primary 20 B、replay 60 B（含介质）、shift 20 B，要求 Vulkan 1.2 `scalarBlockLayout` 在逻辑设备创建时实际启用。宿主和无窗口设备均显式协商，物理设备支持查询不能代替启用证明。720 B frame uniform 保留原 464 B 前缀，并追加运行时配置、按需辅助地址与源 chart 身份；只有已完成的描述符 slot 能写它。布局通过实际 SPIR-V 验证，不依赖默认 SSBO 的填充规则。
 
-屏幕 scratch 为每个 padded pixel 508 B，加 16 B indirect queue control；1920×1080 的 padded extent 为1920×1088，约1012 MiB，另有786432 B配对邻域表和共享场景/显示资源。该成本包含两份 reservoir、两份 primary 和最多3个候选的重放/shift/队列空间。没有为默认关闭的上游选项预留状态。实际帧时间和与 Falcor 的性能差距需要固定场景的原生1920×1080测量；布局与成本分析不构成性能相等的证明。
+屏幕 scratch 将持久状态和候选工作区分开：每 padded pixel `232 + 92 × max(2, N)` B，默认 N=3 时保持 508 B，加 16 B indirect queue control；1920×1080 的 padded extent 为1920×1088，约1012 MiB，另有786432 B配对邻域表和共享场景/显示资源。该成本包含两份 reservoir、两份 primary 和最多3个候选的重放/shift/队列空间。关闭的新增机制不预留屏幕状态或调度统计 pass。重复 ID/count 占 8 B/像素，存活计数双 bank 占 8 B/像素，解耦输出占 16 B/像素；RR 去相关额外 initial RGB/UCW 16 B、可选 EMA 双 bank 8 B 和亮点标记 4 B，并共享存活计数。关闭对应机制时资源按实际最后消费者退休，已创建的小型 pipeline 保留至后端销毁。实际帧时间和与 Falcor 的性能差距需要固定场景的原生1920×1080测量；布局与成本分析不构成性能相等的证明。
 
 ## 历史与完成证明
 
@@ -44,7 +64,7 @@ ReSTIR 静态地形在脏更新时按实际编码记录精确匹配面，哈希�
 
 这里的粒度是已编译 physical quad。表面编译器在64×64平面 tile 内合并矩形；挖掉一格可能重分割旧大面，原 primitive/bary 无法直接表达新多个三角，因此旧大面上的路径仍会失效。当前方案不提供未变子区域的点对应，也不将此边界认定为已解决的局部历史问题。动态原型/实例仍按原实例身份更新；真实 Cell 撤回和依赖纹理删除仍撤回相应几何域。
 
-静态页的8 B header 保存 quad 表起点和 primitive 容量，高位标记逐 quad 模式；每个 quad 另占8 B，保存修订和两半存活位。动态 placement 与回退 emitter 页继续用8 B页记录。NEE 的生产静态端点保存实际地形页/quad/半面身份，发光记录第二个顶点的 `w` padding 保存源 quad 序号，TreePage 的 byte44 标记对应静态页；不能把紧凑光源序号当作几何 quad 序号。这些字段不改变光页、发光记录或80 B reservoir 的 stride。464 B uniform 的 byte440 使用原 padding 保存 quad 表地址。
+静态页的8 B header 保存 quad 表起点和 primitive 容量，高位标记逐 quad 模式；每个 quad 另占8 B，保存修订和两半存活位。动态 placement 与回退 emitter 页继续用8 B页记录。NEE 的生产静态端点保存实际地形页/quad/半面身份，发光记录第二个顶点的 `w` padding 保存源 quad 序号，TreePage 的 byte44 标记对应静态页；不能把紧凑光源序号当作几何 quad 序号。这些字段不改变光页、发光记录或80 B reservoir 的 stride。uniform 的 byte440 保持 quad 表地址。
 
 身份表仅为 ReSTIR 延迟创建；首次构建扫描现有记录，之后消费真实变更范围，稳态不扫描或上传。一般更新合并脏范围上传，表容量增长全量上传对应表。目录别名共享同一 quad 表，不复制逐面身份；扩容保留旧目录范围增加CPU/GPU目录驻留和脏更新写入。旧几何、表和上传资源仍按最后消费者与完成证明退休，不保存旧 TLAS/材质/纹理副本。
 
@@ -60,7 +80,7 @@ ReSTIR 静态地形在脏更新时按实际编码记录精确匹配面，哈希�
 
 诊断组的“忽略所有全局重置”默认关闭；开启时忽略上述显式请求，继续执行局部支持拒绝、当前场景更新和提交接受合同。存储实际重建仍冷启动。保留跨世界 reservoir 时，新身份域从已接受修订水位后继开始，避免相同数值 ID 错配旧几何。`restir.history.frame` 的 `temporal/update/revision/accepted` 和 `restir.identity.frame` 的脏范围计数可区分全局重置、局部支持变化与正常后缀更新，不增加逐像素读回或等待。RR 的当前 guide、motion 和完成状态由其[重建合同](reconstruction.md)负责，图像转换见[坐标契约](coordinates.md)；保留历史不构成 SDK 内部逐像素拒绝的保证。显示参数只影响 resolve/display。
 
-前帧 reservoir 在本帧全部读取完成后才被空间 merge 覆写。primary 使用两个 bank，前帧相机和 bank 交换只在宿主接受提交后提交；取消录制不会推进历史。resize、后端切换和关闭沿用已有 GPU 完成或取消证明后回收的规则，不按经过的帧数猜测资源寿命。
+前帧 reservoir 在时间阶段完成读取后才被空间轮次覆写；接受时记录实际最终 reservoir bank，支持零轮与任意轮次奇偶。邻居数变化只重建临时候选区，保留持久 reservoir/primary；改变邻域 LUT 不清空历史。距离/PDF 阈值运行中变化后才按需附加两份 source-profile uint 平面（8 B/像素），旧 accepted bank 初次隐式使用 profile 0；每个被选中路径继承原 chart ID，双向重放/shift 各用源路径生成时的四个阈值。不可变表每个不同 chart 占 16 B，保留至屏幕状态重建，以免仍存活样本引用失效；参数改变仅上传这张小表，默认没有这份状态。primary 使用两个 bank，前帧相机和 bank 交换只在宿主接受提交后提交；取消录制不会推进历史。resize、后端切换和关闭沿用已有 GPU 完成或取消证明后回收的规则，不按经过的帧数猜测资源寿命。
 
 ## 验证入口
 

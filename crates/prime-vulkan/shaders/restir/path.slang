@@ -31,6 +31,7 @@ module "restir/path.slang";
 import "restir/scene.slang";
 import "restir/reservoir.slang";
 import "restir/rng.slang";
+import "restir/config.slang";
 __exported import "restir/types.slang";
 import "ray_query.slang";
 import "math/color.slang";
@@ -122,18 +123,21 @@ public struct NoRestirPrimaryObserver : IRestirPrimaryObserver {
             public void captureFirstScatter(float distance, uint eventFlags) {}
 };
 
-public PathReservoir restirGenerate<T : IRestirPrimaryObserver>(RestirScene scene, uint2 pixel,
-                                                                uint sequence,
-                                                                out RestirPrimary primary,
-                                                                out float3 residual,
-                                                                inout T observer) {
-    SampleGenerator sg = SampleGenerator(pixel, sequence * 4);
+PathReservoir restirGeneratePath<T : IRestirPrimaryObserver>(RestirScene scene, uint2 pixel,
+                                                             uint sequence, uint initialSample,
+                                                             inout RestirPrimary primary,
+                                                             out float3 residual, inout T observer,
+                                                             out uint finalRngState) {
+    SampleGenerator sg =
+            SampleGenerator(pixel, sequence * restirStreamCount(scene.config) + initialSample);
     uint seed = sg.rng;
-    primary.coverageSeed = seed;
-    primary.hit = HitInfo();
+    if (initialSample == 0u) {
+        primary.coverageSeed = seed;
+        primary.hit = HitInfo();
+    }
     residual = float3(0);
     float distanceThreshold, roughnessThreshold;
-    restirSampleThresholds(sg, distanceThreshold, roughnessThreshold);
+    restirSampleThresholds(scene, sg, distanceThreshold, roughnessThreshold);
     PathRISState ris = {};
     PathReconnectionInfo rc = {};
     rc.initRandomSeed = seed;
@@ -152,11 +156,21 @@ public PathReservoir restirGenerate<T : IRestirPrimaryObserver>(RestirScene scen
     uint budget = min(asuint(scene.frame.displayExtra.z), 254u);
     for (uint bounce = 0; bounce < budget; ++bounce) {
         HitInfo identity;
-        SurfaceHit hit = restirTrace(scene, origin, direction, seed, identity);
+        SurfaceHit hit;
+        if (bounce == 0u && initialSample != 0u) {
+            // RA-015: Falcor shares one VBuffer primary across fresh paths. Prime shares
+            // that captured hit and coverage seed, independently of each path's replay seed.
+            identity = primary.hit;
+            hit = restirLoadHit(scene, primary.hit, -direction, primary.coverageSeed);
+        } else {
+            hit = restirTrace(scene, origin, direction, seed, identity);
+        }
         if (bounce == 0) {
-            primary.hit = identity;
-            observer.capturePrimary(hit, -direction);
-        } else if (bounce == 1) {
+            if (initialSample == 0u) {
+                primary.hit = identity;
+                observer.capturePrimary(hit, -direction);
+            }
+        } else if (bounce == 1 && initialSample == 0u) {
             observer.captureFirstScatter(hit.found ? length(hit.surface.position - previousPosition)
                                                    : 65504.0,
                                          previousFlags);
@@ -287,7 +301,36 @@ public PathReservoir restirGenerate<T : IRestirPrimaryObserver>(RestirScene scen
     PathReservoir reservoir = PathReservoir::createFromRisState(ris, seed, float4(0));
     reservoir.finalizeReservoirWeight();
     reservoir.M = 1;
+    finalRngState = sg.rng;
     return reservoir;
+}
+
+// RA-015: multiple fresh paths form one RIS estimator, still M=1 before reuse.
+// The default single path avoids the extra merge draw and normalization entirely.
+public PathReservoir restirGenerate<T : IRestirPrimaryObserver>(RestirScene scene, uint2 pixel,
+                                                                uint sequence,
+                                                                out RestirPrimary primary,
+                                                                out float3 residual,
+                                                                inout T observer) {
+    primary = {};
+    residual = float3(0);
+    PathReservoir aggregate;
+    aggregate.init();
+    uint count = scene.config.reuse.w;
+    for (uint i = 0u; i < count; ++i) {
+        float3 pathResidual;
+        uint endRng;
+        PathReservoir path = restirGeneratePath(scene, pixel, sequence, i, primary, pathResidual,
+                                                observer, endRng);
+        residual += pathResidual;
+        if (count == 1u)
+            return path;
+        SampleGenerator mergeRandom = SampleGenerator(endRng);
+        aggregate.merge(path.integrand, 1.0, path, mergeRandom, 1.0);
+    }
+    residual /= float(count);
+    restirFinalizeFresh(aggregate, count);
+    return aggregate;
 }
 
 public PathReservoir restirGenerate(RestirScene scene, uint2 pixel, uint sequence,
@@ -436,7 +479,7 @@ public RestirReplayData restirReplay(RestirScene scene, RestirPrimary primary, f
     float primaryFootprint = restirPrimaryFootprint(scene, hit, primaryWo);
     SampleGenerator sg = SampleGenerator(reservoir.initRandomSeed);
     float distanceThreshold, roughnessThreshold;
-    restirSampleThresholds(sg, distanceThreshold, roughnessThreshold);
+    restirSampleThresholds(scene, sg, distanceThreshold, roughnessThreshold);
     float threshold = primaryFootprint * distanceThreshold;
     uint rcLength = uint(reservoir.pathFlags.rcVertexLength());
     uint pathLength = uint(reservoir.pathFlags.pathLength());

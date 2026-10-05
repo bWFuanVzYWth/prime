@@ -11,6 +11,9 @@ import net.minecraft.client.gui.components.CycleButton;
 import net.minecraft.client.OptionInstance;
 import dev.primept.render.OfflineMode;
 import dev.primept.settings.RenderSettings;
+import dev.primept.settings.RestirSettings;
+import dev.primept.RestirVideoOptions;
+import net.minecraft.client.gui.components.EditBox;
 import dev.primept.settings.SettingsFile;
 import java.lang.reflect.Field;
 import java.nio.file.Files;
@@ -278,6 +281,13 @@ public final class SettingsCpuSmoke {
                                                           : bound == 1 ? control.maximum
                                                                        : control.initial);
                     }
+                    var restirSettings = RestirSettings.defaults();
+                    for (var control : RestirSettings.Control.values())
+                        restirSettings =
+                                restirSettings.with(control, bound == 0   ? control.minimum
+                                                             : bound == 1 ? control.maximum
+                                                                          : control.initial);
+                    settings = settings.withRestir(restirSettings);
                     PrimeClient.updateSettings(settings);
                     var screen = new VideoSettingsScreen(null, Minecraft.getInstance(),
                                                          Minecraft.getInstance().options);
@@ -324,6 +334,7 @@ public final class SettingsCpuSmoke {
                     check(terrainBatches.get() ==
                                   settings.value(RenderSettings.Control.TERRAIN_BATCHES_PER_FRAME),
                           "Terrain batch slider preserves each configured bound");
+                    assertRestirOptions(owner, list, translations, false);
                     var opacityMicromap = (net.minecraft.client.OptionInstance<Boolean>)field(
                                                   PrimeVideoOptions.class, "opacityMicromap")
                                                   .get(owner);
@@ -475,6 +486,7 @@ public final class SettingsCpuSmoke {
                         screen.tick();
                         check(spatialButton.active,
                               "Spatial-only control is active for realtime ReSTIR");
+                        assertRestirOptions(owner, list, translations, true);
                         for (boolean enabled : new boolean[] {true, false}) {
                             spatialButton.onPress(new net.minecraft.client.input.KeyEvent(
                                     InputConstants.KEY_RETURN, 0, 0));
@@ -671,9 +683,10 @@ public final class SettingsCpuSmoke {
                                         .getMessage()
                                         .getString())
                         .toList();
-        check(headers.size() == 7, "Four Prime groups and three vanilla groups: " + headers);
-        for (int i = 0; i < 4; ++i) {
-            String group = List.of("render", "lighting", "display", "diagnostics").get(i);
+        check(headers.size() == 8, "Five Prime groups and three vanilla groups: " + headers);
+        for (int i = 0; i < 5; ++i) {
+            String group =
+                    List.of("render", "restir_pt", "lighting", "display", "diagnostics").get(i);
             check(headers.get(i).equals(
                           Component.translatable("primept.settings." + group).getString()) &&
                           headers.get(i).startsWith("Prime PT"),
@@ -689,19 +702,27 @@ public final class SettingsCpuSmoke {
         var spatialOnly =
                 (OptionInstance<?>)field(PrimeVideoOptions.class, "restirSpatialOnly").get(owner);
         boolean diagnostics = false;
+        boolean restirGroup = false;
         for (int i = 0; i < vanilla; ++i) {
             Object row = list.children().get(i);
-            if (row.getClass().getSimpleName().equals("HeaderEntry"))
+            if (row.getClass().getSimpleName().equals("HeaderEntry")) {
+                restirGroup = ((AbstractWidget)((ContainerEventHandler)row).children().getFirst())
+                                      .getMessage()
+                                      .getString()
+                                      .equals(Component.translatable("primept.settings.restir_pt")
+                                                      .getString());
                 diagnostics = ((AbstractWidget)((ContainerEventHandler)row).children().getFirst())
                                       .getMessage()
                                       .getString()
                                       .equals(Component.translatable("primept.settings.diagnostics")
                                                       .getString());
+            }
             if (((ContainerEventHandler)row).children().contains(list.findOption(omm)) ||
                 ((ContainerEventHandler)row).children().contains(list.findOption(rr)) ||
-                ((ContainerEventHandler)row).children().contains(list.findOption(globalResets)) ||
-                ((ContainerEventHandler)row).children().contains(list.findOption(spatialOnly)))
+                ((ContainerEventHandler)row).children().contains(list.findOption(globalResets)))
                 check(diagnostics, "RR and OMM belong only to the diagnostics group");
+            if (((ContainerEventHandler)row).children().contains(list.findOption(spatialOnly)))
+                check(restirGroup, "Spatial-only belongs to the ReSTIR PT group");
         }
         check(list.findOption(Minecraft.getInstance().options.renderDistance()) != null,
               "Vanilla render-distance option remains present");
@@ -709,6 +730,91 @@ public final class SettingsCpuSmoke {
         screen.layout.visitWidgets(widget -> ++layoutWidgets[0]);
         check(layoutWidgets[0] == screen.children().size(),
               "Video layouts do not retain obsolete widget copies");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void assertRestirOptions(PrimeVideoOptions owner, OptionsList list,
+                                            HashMap<String, String> translations, boolean callbacks)
+            throws Exception {
+        var module = (RestirVideoOptions)field(PrimeVideoOptions.class, "restir").get(owner);
+        var options =
+                (List<OptionInstance<?>>)field(RestirVideoOptions.class, "controls").get(module);
+        var seed = (EditBox)field(RestirVideoOptions.class, "seed").get(module);
+        var before = PrimeClient.settings();
+        check(options.size() == RestirSettings.Control.values().length,
+              "Each native ReSTIR setting has exactly one control");
+        for (var control : RestirSettings.Control.values()) {
+            String key = "primept.settings." + control.key;
+            check(translations.containsKey(key) && translations.containsKey(key + ".tooltip"),
+                  "Missing ReSTIR translation: " + control);
+            var option = (OptionInstance<Object>)options.get(control.ordinal());
+            var widget = list.findOption(option);
+            boolean cycle = control.kind == RestirSettings.Kind.BOOLEAN ||
+                            control == RestirSettings.Control.DEBUG_VIEW ||
+                            control == RestirSettings.Control.RR_MODE;
+            check(cycle ? widget instanceof CycleButton<?> : widget instanceof AbstractSliderButton,
+                  "ReSTIR toggle/mode/slider type: " + control);
+            check(widget.getWidth() == list.getRowWidth(), "Full-width ReSTIR control: " + control);
+            check(widget.active == callbacks, "ReSTIR controls follow renderer availability");
+            Object configured = restirOptionValue(control, before.restir().value(control));
+            check(option.get().equals(configured), "Actual configured ReSTIR value: " + control);
+            if (control == RestirSettings.Control.DEBUG_VIEW ||
+                control == RestirSettings.Control.RR_MODE)
+                for (int mode = 0; mode < 3; ++mode)
+                    check(translations.containsKey(key + "." + mode), "Translated ReSTIR mode");
+            if (control.kind == RestirSettings.Kind.FLOAT) {
+                var range = new RestirVideoOptions.FloatRange(control);
+                double previous = -Double.MAX_VALUE;
+                for (double slider : new double[] {0, 0.125, 0.5, 0.875, 1}) {
+                    double value = range.fromSliderValue(slider);
+                    check(value >= control.minimum && value <= control.maximum && value >= previous,
+                          "ReSTIR float sliders remain monotone and bounded");
+                    check(Math.abs(range.toSliderValue(value) - slider) < 0.000001,
+                          "ReSTIR float slider round trip");
+                    previous = value;
+                }
+                check(range.fromSliderValue(range.toSliderValue(control.initial)) ==
+                              control.initial,
+                      "ReSTIR float slider preserves its default, including footprint 0.02");
+            }
+            if (callbacks) {
+                for (double value :
+                     new double[] {control.minimum, control.maximum, control.initial}) {
+                    option.set(restirOptionValue(control, value));
+                    check(PrimeClient.settings().restir().value(control) ==
+                                  control.normalize(value),
+                          "Actual ReSTIR callback persists its exact value: " + control);
+                    check(PrimeClient.settings().renderer() == before.renderer() &&
+                                  PrimeClient.settings().value(RenderSettings.Control.BOUNCES) ==
+                                          before.value(RenderSettings.Control.BOUNCES),
+                          "ReSTIR callback preserves unrelated settings");
+                }
+                option.set(configured);
+            }
+        }
+        check(seed.active == callbacks, "Seed availability follows ReSTIR controls");
+        if (callbacks) {
+            seed.setValue("4294967295");
+            check(PrimeClient.settings().restir().seed() == 0xffffffffL,
+                  "Actual seed field accepts the full unsigned 32-bit range");
+            seed.setValue("4294967296");
+            check(PrimeClient.settings().restir().seed() == 0xffffffffL,
+                  "Invalid seed text preserves the last valid setting");
+            seed.setValue("0");
+            check(PrimeClient.settings().restir().seed() == 0, "Actual seed field accepts zero");
+            seed.setValue(Long.toString(before.restir().seed()));
+            check(PrimeClient.settings().equals(before), "ReSTIR callbacks restore all settings");
+            check(SettingsFile.decode(SettingsFile.encode(before)).settings().equals(before),
+                  "Every ReSTIR control persists through the real file codec");
+        }
+    }
+
+    private static Object restirOptionValue(RestirSettings.Control control, double value) {
+        if (control.kind == RestirSettings.Kind.BOOLEAN)
+            return value != 0;
+        if (control.kind == RestirSettings.Kind.FLOAT)
+            return control.normalize(value);
+        return (int)value / control.step;
     }
 
     private static Font fixtureFont() {

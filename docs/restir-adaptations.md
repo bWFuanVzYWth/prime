@@ -1,6 +1,6 @@
 # ReSTIR PT 适配登记
 
-本文统一登记 Prime 相对 Falcor ReSTIR PT Enhanced 的接口适配、内部语义调整、保留的近似与已撤回分支。源码中的 `RA-xxx` 注释引用本文条目；维护内部行为时同步更新对应条目，不把单次测量与调查流水写入这里。管线、固定配置和资源寿命见 [ReSTIR PT](restir-pt.md)，性能敏感修改仍须回答 [PT 性能问题](pt-state-design.md#修改前必须回答的性能问题)。
+本文统一登记 Prime 相对 Falcor ReSTIR PT Enhanced 的接口适配、内部语义调整、保留的近似与已撤回分支。源码中的 `RA-xxx` 注释引用本文条目；维护内部行为时同步更新对应条目，不把单次测量与调查流水写入这里。管线、默认配置和资源寿命见 [ReSTIR PT](restir-pt.md)，性能敏感修改仍须回答 [PT 性能问题](pt-state-design.md#修改前必须回答的性能问题)。
 
 参考版本为 Falcor 9.0，提交 `759aad033ff610fb0d82c74f7e0a508d0096d5f2` 的 `Source/Modules/ReSTIRPathTracing`。许可与来源见 [第三方声明](../THIRD_PARTY_NOTICES.md)。与上游一致仅说明移植来源，不代替几何测度、支持域与估计量的独立验证；当前不声明任意动态场景或 Prime 材质扩展下严格无偏。
 
@@ -8,7 +8,7 @@
 
 | ID | 类别与状态 | 当前适配及必要边界 | 实现与验证入口 |
 | --- | --- | --- | --- |
-| RA-001 | 保留：接口适配 | Prime 自持场景、OpenPBR/LabPBR 材质、TLAS、纹理和大气；上游 reservoir/replay 数学通过窄接口消费这些资源。464 B 参数块、80 B reservoir 和 60 B replay 的自然 BDA 布局需在真实 SPIR-V 核验；指针依提交完成或取消证明存活。接口替换不引入逐顶点宿主回调。 | `restir/scene.slang`、`parameters.slang`、`bindings.slang`；`scripts/test-restir-layout.py`、借用历史接受测试 |
+| RA-001 | 保留：接口适配 | Prime 自持场景、OpenPBR/LabPBR 材质、TLAS、纹理和大气；上游 reservoir/replay 数学通过窄接口消费这些资源。720 B 参数块保留原 464 B 前缀；80 B reservoir 和 60 B replay 的自然 BDA 布局需在真实 SPIR-V 核验；指针依提交完成或取消证明存活。接口替换不引入逐顶点宿主回调。 | `restir/scene.slang`、`parameters.slang`、`bindings.slang`；`scripts/test-restir-layout.py`、借用历史接受测试 |
 | RA-002 | 保留：坐标适配 | 核心使用 top-left 像素中心 `pixel+.5`；RR 当前 input-pixel jitter 加入主采样；时间 donor 选择遵循上游去 jitter 的运动：`floor(pixel+.5+previousProjection-currentProjection)`。当前 pinhole 交点满足 `currentProjection=pixel+.5+currentJitter`，所以 previous 投影扣当前 jitter；源重放仍使用已接受前帧 jitter。旧 donor 扣前帧 jitter 会将静止 Halton 取整误差持续搬运，此处只修复该接口差异。Native 含噪输出使用零 jitter。不同 bank、相机和 jitter 只在接受提交后推进；不保证任意运动下整数地址周期归零。 | `scene.slang`、`restir_workload.slang`、`src/restir.rs`；原生地址与非零 jitter 测试 |
 | RA-003 | 保留：源与目的连接 chart 一致性修复 | 有限 BSDF 到达以原 `spawnRay` 安全起点到物理端点的 query 向量定义方向、距离和 G；shift 的 first BSDF、RC 入射 Wo、G/J 和逆 footprint 使用同一向量。只有终端 NEE 使用物理 receiver chart，RC 后续的 NEE 不改变到达段分类。物理/query 连接保留源事件及相同偏移侧，含 `>=0` 的切线边界。后缀查询结束后再计算可见性 begin，不长期保存 early begin。原始生成与偏移算法不变。 | `path.slang:restirSegment`、`shift.slang`；强法线/近接触 self-shift、近光源 query 分解 |
 | RA-004 | 保留：面积测度修复 | 源生成、重放与 shift 逆 footprint 的面积项均用几何 ng；BSDF 响应继续使用着色法线 ns。强法线贴图不应使同一源连接因错误面积法线失去支持。混合测度 J 仍为目的/source G 之比，不额外乘 BSDF PDF 比。 | `path.slang`、`shift.slang`；独立端点/ng/安全偏移面积 oracle、Slang CPU reservoir 数学 |
@@ -22,10 +22,14 @@
 | RA-012 | 已退役：Sphere 专属适配与实验 | Sphere 未达到其声明的性能目标，生产采样器、法线状态、变体与专属测试退役。其 view-dependent NEE forced-emitter 分类和 mapped-RC 最后一跳竞争 PDF 强制刷新随之删除；TREE 没有这个 PMF 依赖，不保留额外后缀 Ray Query。Sphere C4 的 1-ULP 非等价候选及其他未验收实验撤回，不作为当前实现。 | 当前生产仅 TREE；历史性能、失败/通过 banks 与候选复盘保留在 ignored `artifacts`，不计为退役后验证 |
 | RA-013 | 保留：Prime 颜色顺序 | 真实源色与发光遵循 Prime working RGB/linear BT.709 合同。有限 NEE 的源顺序先在发光域乘 RGB 可见性再转换；BSDF emitter hit 延续原输运顺序。非对角颜色转换与彩色 Beer 不能随意交换。显示/曝光只在既定输出阶段执行。 | `scene.slang`、`shift.slang`、`restir_resolve.slang`；彩色介质、emitter/NEE、自映射与 RR guide 图像测试 |
 | RA-014 | 保留：仅空间复用诊断 | 默认关闭；开启时宿主跳过全部时间 workload/indirect/retrace/merge 及其队列清零和依赖，初始生成与空间重采样数学不变。空间输出、primary bank、相机、jitter 和身份水位仍按接受提交推进，关闭后可以直接复用最近的实际空间结果。复用原 scratch 和管线，无新增 shader 分支、变体、拷贝或完成等待；身份表继续维护，以保证退出诊断后的局部支持校验。此开关不改变 RR 历史和离线累积。 | `src/restir.rs`、`src/frame.rs`；`restir_tests::gpu_restir_spatial_only_ignores_past_and_resumes_accepted_spatial_history`、离线逐样本/批次对照 |
+| RA-015 | 保留且新增机制默认关闭：原版相关性机制与运行时参数 | 原版重复 ID / 17×17 统计与 `lerp(H,1,pow(dup/288,power))` 时间 cap、最后空间轮解耦颜色、随机 donor 与存活计数分别可选；不改变初始/merge 归一化、默认 RNG 消耗和 TinyUniform。初始路径数、时间 M、空间轮数/邻居/互反 LUT、footprint 与几何门限进入运行时 uniform，不生成参数组合变体。零轮/多轮记录真实最终 bank；候选区与持久状态分开，调邻居数不丢历史。运行中变 threshold 时才附加源 chart ID，赢家继承生成时阈值，双向 source replay/shift 各自取原 chart，默认保持 80 B reservoir 且无该侧状态。统计只改变显示，不进入离线均值或 SDK 含噪输入。 | `restir/config.slang`、统计入口、生成/重放/shift/merge、`src/restir*.rs`、专用设置栏；`test-restir-config.py`、`restir_config_tests`、默认旧 SPIR-V 对照 |
+| RA-016 | 保留且默认关闭：RR 输出去相关 | Prime 依据公开数学描述独立实现；仅实时 RR 有时间复用时，以独立 Bernoulli stream 在保存的初始 RGB/UCW 与复用估计之间选择，不回写 reservoir。Stagnancy 使用只读 Falcor 存活计数、前帧 5×5 step-2 box 与 EMA；亮点标记可覆盖概率。Uniform 关闭亮点时不调度统计 pass。None、主开关关闭或因子零不保留 RR 辅助状态。自适应选择和新样本 UCW 限制不声明严格无偏；存活计数的 donor 约定、working RGB 标量及组内求和顺序与 RTXDI 不逐位等价。 | `restir/rr_decorrelation.slang`、`restir_rr_statistics.slang`、initial/resolve、`restir_aux.rs`；`test-restir-rr-decorrelation.py`、`restir_options_tests` |
 
 ## 保留的上游结构
 
-Point reservoir、Hybrid shift、Compact retrace、双 footprint 分类、双向 pairwise MIS、三个互反配对邻居、一次空间轮次和时间 M 上限沿用固定上游配置。未加入 area reservoir、DoF、splatting、robust temporal、压缩或 duplicate map。初始源概率、RIS 归一化和合并公式见 [管线说明](restir-pt.md#gpu-数据流)。源码注释必须明确是在替换数据接口、修复 Prime 源/目的合同，还是扩展 Prime 材质/光照域，不能笼统写成对上游算法的优化。
+Point reservoir、Hybrid shift、Compact retrace、双 footprint 分类与双向 pairwise MIS 保持。三个互反邻居、一次空间轮次、时间 M20 和初始一条路径继续作为默认值；新增重复统计、解耦颜色和随机 donor 默认关闭。未加入 area reservoir、DoF、splatting、MCMC、robust temporal 或压缩。初始源概率、RIS 归一化和合并公式见 [管线说明](restir-pt.md#gpu-数据流)。源码注释必须明确是在替换数据接口、修复 Prime 源/目的合同，还是扩展 Prime 材质/光照域，不能笼统写成对上游算法的优化。
+
+RA-016 的公开定义固定为 [RTXDI 3.1.0 ReSTIR PT 文档](https://github.com/NVIDIA-RTX/RTXDI/blob/a6efab966b7c3b272da0461578eb56ac61c7cbff/Doc/RestirPT.md)，数值对照固定库提交 `f12037fa8e97ebc08e9e3edfd2de528ed1772a4b`。生产模块由 Prime 编写，沿用项目许可，不将 proprietary 库源码复制到仓库，也不宣称 clean-room。输出随机域与路径采样域分开；亮点归约使用完整 8×8 shared 组，边界 lane 参与两次 barrier。RR 辅助状态最多 28 B/padded pixel，并在没有存活统计时另需其双 bank 8 B；统计 bank 可读性仅由实际接受的前一消费者证明。差异、成本和近似边界同时见[资源与配置说明](restir-pt.md)。
 
 全局失效策略是 Prime 的宿主/资源适配。只由已证明的全局事件请求重置，局部支持变化由身份表拒绝；真实存储重建仍冷启动。诊断开关不会把未初始化存储伪装为有效历史。具体事件、pending/commit/cancel 与完成证明见 [历史合同](restir-pt.md#历史与完成证明)，不在登记表重复维护事件清单。
 

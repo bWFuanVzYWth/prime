@@ -9,7 +9,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Properties;
 
-/** Current schema; v8/v9 retain inverse noisy-output migration, v8-v10 default spatial-only off. */
+/** Schema 12 preserves v8-v11 controls and moves the spatial-only switch into ReSTIR PT. */
 public final class SettingsFile {
     public record Loaded(RenderSettings settings, String resetReason) {}
     private SettingsFile() {}
@@ -28,11 +28,12 @@ public final class SettingsFile {
             var properties = new Properties();
             properties.load(new StringReader(text));
             String version = properties.getProperty("version");
+            boolean legacyRestir = "11".equals(version);
             boolean beforeResetDiagnostic = "8".equals(version);
             boolean legacyReconstruction = beforeResetDiagnostic || "9".equals(version);
             boolean beforeSpatialDiagnostic = legacyReconstruction || "10".equals(version);
-            if (!beforeSpatialDiagnostic &&
-                !Integer.toString(RenderSettings.VERSION).equals(version))
+            legacyRestir |= beforeSpatialDiagnostic;
+            if (!legacyRestir && !Integer.toString(RenderSettings.VERSION).equals(version))
                 return new Loaded(RenderSettings.defaults(),
                                   "Settings version mismatch; defaults restored");
             var renderer = RenderSettings.Renderer.fromKey(properties.getProperty("renderer"));
@@ -51,10 +52,12 @@ public final class SettingsFile {
             if (!"true".equals(ignoreGlobalResets) && !"false".equals(ignoreGlobalResets))
                 throw new IllegalArgumentException(
                         "Invalid diagnostics.ignore_global_history_resets");
-            String spatialOnly = properties.getProperty("diagnostics.restir_spatial_only",
-                                                        beforeSpatialDiagnostic ? "false" : null);
+            String spatialKey =
+                    legacyRestir ? "diagnostics.restir_spatial_only" : "restir_pt.spatial_only";
+            String spatialOnly =
+                    properties.getProperty(spatialKey, beforeSpatialDiagnostic ? "false" : null);
             if (!"true".equals(spatialOnly) && !"false".equals(spatialOnly))
-                throw new IllegalArgumentException("Invalid diagnostics.restir_spatial_only");
+                throw new IllegalArgumentException("Invalid " + spatialKey);
             var result =
                     RenderSettings.defaults()
                             .withRenderer(renderer)
@@ -62,6 +65,7 @@ public final class SettingsFile {
                             .withNativeNoisyOutput(nativeNoisyOutput)
                             .withIgnoreGlobalHistoryResets(Boolean.parseBoolean(ignoreGlobalResets))
                             .withRestirSpatialOnly(Boolean.parseBoolean(spatialOnly))
+                            .withRestir(RestirSettings.decode(properties, legacyRestir))
                             .withDlssQuality(RenderSettings.DlssQuality.valueOf(
                                     properties.getProperty("render.dlss_quality", "")))
                             .withLightSampling(RenderSettings.LightSampling.fromKey(
@@ -70,7 +74,7 @@ public final class SettingsFile {
                 result =
                         result.with(control, Integer.parseInt(properties.getProperty(control.key)));
             return new Loaded(result, "");
-        } catch (IOException | IllegalArgumentException failure) {
+        } catch (IOException | IllegalArgumentException | NullPointerException failure) {
             return new Loaded(RenderSettings.defaults(),
                               "Invalid settings; defaults restored: " + failure.getMessage());
         }
@@ -84,9 +88,10 @@ public final class SettingsFile {
                 "\nrender.light_sampling=" + settings.lightSampling().name() +
                 "\ndiagnostics.ignore_global_history_resets=" +
                 settings.ignoreGlobalHistoryResets() +
-                "\ndiagnostics.restir_spatial_only=" + settings.restirSpatialOnly() + "\n");
+                "\nrestir_pt.spatial_only=" + settings.restirSpatialOnly() + "\n");
         for (var control : RenderSettings.Control.values())
             text.append(control.key).append('=').append(settings.value(control)).append('\n');
+        settings.restir().encode(text);
         return text.toString();
     }
     public static void save(Path path, RenderSettings settings) throws IOException {

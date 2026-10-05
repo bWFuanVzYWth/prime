@@ -118,7 +118,7 @@ public PrecomputedShiftData restirShift(RestirScene scene, RestirPrimary primary
     float Jacobian = geometry / reservoir.reconnectionJacobian;
     SampleGenerator thresholds = SampleGenerator(reservoir.initRandomSeed);
     float distanceThreshold, roughnessThreshold;
-    restirSampleThresholds(thresholds, distanceThreshold, roughnessThreshold);
+    restirSampleThresholds(scene, thresholds, distanceThreshold, roughnessThreshold);
     float threshold = primaryFootprint * distanceThreshold;
     // The preceding vertex must remain in the replay portion of the path in the inverse
     // mapping. Both source and destination use the same random soft threshold.

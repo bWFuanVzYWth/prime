@@ -26,44 +26,19 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #language slang 2026
-module restir_shift;
-#include "restir/bindings.slang"
+module restir_sample_ids;
+import "restir/parameters.slang";
 import "restir/indexing.slang";
-import "restir/pairing.slang";
-import "restir/paired_neighbors.slang";
-import "restir/path.slang";
-import "restir/shift.slang";
-import "restir/types.slang";
 import "restir/reservoir.slang";
-[numthreads(8, 8, 1)] void main(uint3 id : SV_DispatchThreadID) {
+[[vk::binding(23, 0)]] ConstantBuffer<RestirParameters> parameters;
+
+// RA-015, docs/restir-adaptations.md: Falcor FillSampleID's direct replay-seed identity.
+// Optional statistics use the reservoir's Morton address; zero-weight samples have ID zero.
+[numthreads(16, 16, 1)] void main(uint3 id : SV_DispatchThreadID) {
     uint2 extent = parameters.frame.dimensions.xy;
     if (any(id.xy >= extent))
         return;
     uint offset = restirOffset(id.xy, extent);
-    NeighborValidMask mask = parameters.valid[offset];
-    PairedNeighborTransform pairing = restirPairing(parameters, pass.sampleOffset, pass.reserved1);
-    uint stride = parameters.config.queue.y;
-    for (uint i = 0; i < parameters.config.reuse.y; ++i) {
-        // Reciprocal validity is symmetric; merge reads only valid pairs. Valid mappings
-        // that fail the shift still write an explicit zero contribution.
-        if (!mask.isValid(i))
-            continue;
-        RestirScene resources = restirScene();
-        uint2 neighbor = uint2(restirNeighbor(parameters, pairing, id.xy, i));
-        RestirPrimary primary = parameters.primary[offset];
-        PathReservoir reservoir =
-                restirCurrentForPass(parameters, pass)[restirOffset(neighbor, extent)];
-        if ((parameters.config.queue.w & 8u) != 0u)
-            resources.config.shift = parameters.sourceThresholds[restirCurrentProfilesForPass(
-                    parameters, pass)[restirOffset(neighbor, extent)]];
-        float3 wo = -restirPrimaryDirection(resources.frame, id.xy, resources.sampleJitter);
-        RestirReplayData replay;
-        uint address = parameters.retraceOffsets[stride * offset + i];
-        if (address != 0xffffffffu)
-            replay = parameters.retrace[address];
-        else
-            replay = restirDirectReplayData(resources, primary, wo);
-        PrecomputedShiftData shifted = restirShift(resources, primary, wo, reservoir, replay);
-        parameters.shifts[stride * offset + i] = shifted;
-    }
+    PathReservoir final = restirFinalReservoirs(parameters)[offset];
+    parameters.sampleIds[offset] = final.weight == 0.0 ? 0u : final.initRandomSeed;
 }

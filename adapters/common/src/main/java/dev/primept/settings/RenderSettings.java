@@ -8,7 +8,7 @@ import java.util.Arrays;
 
 /** Immutable client settings. Version adapters own widgets; native consumes the validated wire. */
 public final class RenderSettings {
-    public static final int VERSION = 11;
+    public static final int VERSION = 12;
     public static final int WIRE_BYTES = (int)PrimeSettings.SIZE;
     public enum Control {
         BOUNCES("render.bounces", 1, 64, 12),
@@ -81,12 +81,13 @@ public final class RenderSettings {
     private final LightSampling lightSampling;
     private final boolean ignoreGlobalHistoryResets;
     private final boolean restirSpatialOnly;
+    private final RestirSettings restir;
     private final int[] values;
 
     private RenderSettings(Renderer renderer, boolean opacityMicromap, boolean nativeNoisyOutput,
                            DlssQuality dlssQuality, LightSampling lightSampling,
                            boolean ignoreGlobalHistoryResets, boolean restirSpatialOnly,
-                           int[] values) {
+                           RestirSettings restir, int[] values) {
         this.renderer = renderer;
         this.opacityMicromap = opacityMicromap;
         this.nativeNoisyOutput = nativeNoisyOutput;
@@ -94,12 +95,14 @@ public final class RenderSettings {
         this.lightSampling = lightSampling;
         this.ignoreGlobalHistoryResets = ignoreGlobalHistoryResets;
         this.restirSpatialOnly = restirSpatialOnly;
+        this.restir = java.util.Objects.requireNonNull(restir);
         this.values = values;
     }
     public static RenderSettings defaults() {
         return new RenderSettings(
                 Renderer.PATH_TRACE, true, false, DlssQuality.PERFORMANCE, LightSampling.TREE,
-                false, false, Arrays.stream(Control.values()).mapToInt(c -> c.initial).toArray());
+                false, false, RestirSettings.defaults(),
+                Arrays.stream(Control.values()).mapToInt(c -> c.initial).toArray());
     }
     public boolean pathTracing() {
         return renderer != Renderer.VANILLA;
@@ -125,6 +128,17 @@ public final class RenderSettings {
     public boolean restirSpatialOnly() {
         return restirSpatialOnly;
     }
+    public RestirSettings restir() {
+        return restir;
+    }
+    public RenderSettings withRestir(RestirSettings value) {
+        java.util.Objects.requireNonNull(value);
+        if (restir.equals(value))
+            return this;
+        return new RenderSettings(renderer, opacityMicromap, nativeNoisyOutput, dlssQuality,
+                                  lightSampling, ignoreGlobalHistoryResets, restirSpatialOnly,
+                                  value, values);
+    }
     public boolean hdr() {
         return value(Control.HDR) != 0;
     }
@@ -144,39 +158,39 @@ public final class RenderSettings {
             return this;
         return new RenderSettings(value, opacityMicromap, nativeNoisyOutput, dlssQuality,
                                   lightSampling, ignoreGlobalHistoryResets, restirSpatialOnly,
-                                  values);
+                                  restir, values);
     }
     public RenderSettings withOpacityMicromap(boolean value) {
         return new RenderSettings(renderer, value, nativeNoisyOutput, dlssQuality, lightSampling,
-                                  ignoreGlobalHistoryResets, restirSpatialOnly, values);
+                                  ignoreGlobalHistoryResets, restirSpatialOnly, restir, values);
     }
     public RenderSettings withNativeNoisyOutput(boolean value) {
         return new RenderSettings(renderer, opacityMicromap, value, dlssQuality, lightSampling,
-                                  ignoreGlobalHistoryResets, restirSpatialOnly, values);
+                                  ignoreGlobalHistoryResets, restirSpatialOnly, restir, values);
     }
     public RenderSettings withDlssQuality(DlssQuality value) {
         return new RenderSettings(renderer, opacityMicromap, nativeNoisyOutput,
                                   java.util.Objects.requireNonNull(value), lightSampling,
-                                  ignoreGlobalHistoryResets, restirSpatialOnly, values);
+                                  ignoreGlobalHistoryResets, restirSpatialOnly, restir, values);
     }
     public RenderSettings withLightSampling(LightSampling value) {
         java.util.Objects.requireNonNull(value);
         if (value == lightSampling)
             return this;
         return new RenderSettings(renderer, opacityMicromap, nativeNoisyOutput, dlssQuality, value,
-                                  ignoreGlobalHistoryResets, restirSpatialOnly, values);
+                                  ignoreGlobalHistoryResets, restirSpatialOnly, restir, values);
     }
     public RenderSettings withIgnoreGlobalHistoryResets(boolean value) {
         if (value == ignoreGlobalHistoryResets)
             return this;
         return new RenderSettings(renderer, opacityMicromap, nativeNoisyOutput, dlssQuality,
-                                  lightSampling, value, restirSpatialOnly, values);
+                                  lightSampling, value, restirSpatialOnly, restir, values);
     }
     public RenderSettings withRestirSpatialOnly(boolean value) {
         if (value == restirSpatialOnly)
             return this;
         return new RenderSettings(renderer, opacityMicromap, nativeNoisyOutput, dlssQuality,
-                                  lightSampling, ignoreGlobalHistoryResets, value, values);
+                                  lightSampling, ignoreGlobalHistoryResets, value, restir, values);
     }
     public RenderSettings with(Control control, int value) {
         control.validate(value);
@@ -184,7 +198,7 @@ public final class RenderSettings {
         next[control.ordinal()] = value;
         return new RenderSettings(renderer, opacityMicromap, nativeNoisyOutput, dlssQuality,
                                   lightSampling, ignoreGlobalHistoryResets, restirSpatialOnly,
-                                  next);
+                                  restir, next);
     }
     /** Named C structure, borrowed only for prime_configure; offline and view are session controls. */
     public void write(ByteBuffer target, boolean offline, View view) {
@@ -203,7 +217,7 @@ public final class RenderSettings {
         PrimeSettings.sun(s, multiplier(Control.SUN_EV));
         PrimeSettings.sky(s, multiplier(Control.SKY_EV));
         PrimeSettings.depth_range(s, value(Control.DEPTH_RANGE));
-        PrimeSettings.seed(s, 0x13572468);
+        restir.write(s);
         PrimeSettings.latitude_degrees(s, value(Control.LATITUDE));
         PrimeSettings.solar_longitude_degrees(s, value(Control.SOLAR_LONGITUDE));
         PrimeSettings.opacity_micromap(s, opacityMicromap ? 1 : 0);
@@ -232,18 +246,14 @@ public final class RenderSettings {
                 nativeNoisyOutput == settings.nativeNoisyOutput &&
                 dlssQuality == settings.dlssQuality && lightSampling == settings.lightSampling &&
                 ignoreGlobalHistoryResets == settings.ignoreGlobalHistoryResets &&
-                restirSpatialOnly == settings.restirSpatialOnly &&
+                restirSpatialOnly == settings.restirSpatialOnly && restir.equals(settings.restir) &&
                 Arrays.equals(values, settings.values);
     }
     @Override
     public int hashCode() {
-        return 31 * (31 * (31 * (31 * (31 * (31 * (31 * renderer.hashCode() +
-                                                   Boolean.hashCode(opacityMicromap)) +
-                                             Boolean.hashCode(nativeNoisyOutput)) +
-                                       dlssQuality.hashCode()) +
-                                 lightSampling.hashCode()) +
-                           Boolean.hashCode(ignoreGlobalHistoryResets)) +
-                     Boolean.hashCode(restirSpatialOnly)) +
+        return 31 * java.util.Objects.hash(renderer, opacityMicromap, nativeNoisyOutput,
+                                           dlssQuality, lightSampling, ignoreGlobalHistoryResets,
+                                           restirSpatialOnly, restir) +
                 Arrays.hashCode(values);
     }
 }

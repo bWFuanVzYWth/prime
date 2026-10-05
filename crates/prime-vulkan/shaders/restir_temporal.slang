@@ -35,6 +35,7 @@ import "restir/types.slang";
 import "restir/reservoir.slang";
 import "restir/rng.slang";
 import "restir/pairwise.slang";
+import "restir/config.slang";
 
 PrecomputedShiftData temporalShift(RestirScene resources, RestirPrimary primary, float3 wo,
                                    inout PathReservoir source, uint replayAddress,
@@ -57,38 +58,64 @@ PrecomputedShiftData temporalShift(RestirScene resources, RestirPrimary primary,
     PathReservoir temporal = parameters.history[previousOffset];
     RestirScene resources = restirScene();
     // Workload validated both history identities; metadata is immutable until this consumer.
-    temporal.M = min(20.0, temporal.M);
+    uint duplicates = parameters.config.features.y != 0u && (parameters.config.queue.w & 4u) != 0u
+                              ? parameters.duplicateCounts[previousOffset]
+                              : 0u;
+    temporal.M = min(restirDuplicateMCap(parameters.config, duplicates), temporal.M);
+    uint stride = parameters.config.queue.y;
     float canonicalWeight;
     {
         // The original temporal pass computes each direction here, without a full-screen
         // precompute write/read. Its inverse mapping must not mutate the canonical source.
         PathReservoir inverseSource = canonical;
         RestirScene previousScene = restirScene(true);
+        if ((parameters.config.queue.w & 8u) != 0u)
+            previousScene.config.shift =
+                    parameters.sourceThresholds[parameters.currentProfiles[offset]];
         float3 previousWo = -restirPrimaryDirection(previousScene.frame, previousPixel,
                                                     previousScene.sampleJitter);
         PrecomputedShiftData inverse =
                 temporalShift(previousScene, parameters.previousPrimary[previousOffset], previousWo,
-                              inverseSource, parameters.retraceOffsets[3u * offset]);
+                              inverseSource, parameters.retraceOffsets[stride * offset]);
         canonicalWeight = temporalCanonicalWeight(
                 canonical.M, temporal.M, PathRISState::toScalar(canonical.integrand),
                 PathRISState::toScalar(inverse.pathThroughput) * inverse.Jacobian);
     }
     float3 wo = -restirPrimaryDirection(resources.frame, id.xy, resources.sampleJitter);
+    uint temporalProfile = 0u;
+    if ((parameters.config.queue.w & 8u) != 0u) {
+        temporalProfile = restirPreviousProfile(parameters, previousOffset);
+        resources.config.shift = parameters.sourceThresholds[temporalProfile];
+    }
     PrecomputedShiftData forward =
             temporalShift(resources, parameters.primary[offset], wo, temporal,
-                          parameters.retraceOffsets[3u * offset + 1u], pass.reserved0 != 0u);
+                          parameters.retraceOffsets[stride * offset + 1u], pass.reserved0 != 0u);
     float temporalWeight = temporalNeighborWeight(
             canonical.M, temporal.M, PathRISState::toScalar(temporal.integrand),
             PathRISState::toScalar(forward.pathThroughput) * forward.Jacobian);
     temporal.reconnectionJacobian = forward.reconnectionJacobian;
     SampleGenerator sg = TinyUniformSampleGenerator(
             id.xy,
-            4u * (parameters.frame.target.y + pass.sampleOffset + parameters.frame.target.w) + 1u);
+            restirStreamCount(parameters.config) * (parameters.frame.target.y + pass.sampleOffset +
+                                                    parameters.frame.target.w) +
+                    restirTemporalStream(parameters.config));
+    // RA-015: workload already selected the stochastic donor with these first draws.
+    if (parameters.config.features.x != 0u)
+        sampleNext2D(sg);
     PathReservoir result;
     result.init();
     result.merge(forward.pathThroughput, forward.Jacobian, temporal, sg, temporalWeight);
-    result.merge(canonical.integrand, 1.0, canonical, sg, canonicalWeight);
+    bool selectedCanonical = result.merge(canonical.integrand, 1.0, canonical, sg, canonicalWeight);
     result.finalizeReservoirWeight();
     result.weight = isfinite(result.weight) ? max(0.0, result.weight) : 0.0;
     parameters.current[offset] = result;
+    if ((parameters.config.queue.w & 8u) != 0u)
+        parameters.currentProfiles[offset] =
+                selectedCanonical ? parameters.currentProfiles[offset] : temporalProfile;
+    // Upstream's pixel-local survival statistic is diagnostic, not a maximum path age.
+    if ((parameters.config.queue.w & 1u) != 0u)
+        parameters.currentAges[offset] = restirTemporalSurvival(
+                parameters.config, selectedCanonical,
+                (parameters.config.queue.w & 2u) != 0u ? parameters.previousAges[previousOffset]
+                                                       : 0u);
 }

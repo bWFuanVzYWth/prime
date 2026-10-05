@@ -4,6 +4,8 @@ module restir_generate_rr;
 import "restir/indexing.slang";
 import "restir/path.slang";
 import "restir/types.slang";
+import "restir/reservoir.slang";
+import "restir/rr_decorrelation.slang";
 import "restir/rr_guides.slang";
 import "realtime/primary_parameters.slang";
 import "reconstruct/primary_guides.slang";
@@ -63,9 +65,17 @@ import "reconstruct/rr_guides.slang";
     RestirPrimary primary;
     float3 residual;
     uint offset = restirOffset(id.xy, parameters.frame.dimensions.xy);
-    parameters.current[offset] =
+    PathReservoir initial =
             restirGenerate(resources, id.xy, resources.frame.target.y + resources.frame.target.w,
                            primary, residual, observer);
+    parameters.current[offset] = initial;
+    if (restirRrOutputActive(parameters.rrDecorrelation, parameters.control.y != 0u))
+        parameters.rrInitialEstimate[offset] =
+                float4(initial.integrand * initial.weight, initial.weight);
     parameters.primary[offset] = primary;
     parameters.residual[offset] = float4(residual, 0);
+    if ((parameters.config.queue.w & 1u) != 0u)
+        parameters.currentAges[offset] = 0u;
+    if ((parameters.config.queue.w & 8u) != 0u)
+        parameters.currentProfiles[offset] = parameters.currentSourceProfile;
 }

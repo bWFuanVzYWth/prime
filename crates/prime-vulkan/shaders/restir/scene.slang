@@ -28,9 +28,7 @@ public static const uint RESTIR_LIGHT_SUN = 2;
 public static const uint RESTIR_EMITTER_PAGE = 0x40000000u;
 public static const uint RESTIR_MAX_RC_LENGTH = 255;
 public static const float RESTIR_DIFFUSE_PSEUDO_PDF = 0.15915494309189533577;
-public static const float RESTIR_DISTANCE_THRESHOLD = 0.0002;
-public static const float RESTIR_DISTANCE_SIGMA = 0.2;
-public static const float RESTIR_ROUGHNESS_THRESHOLD = 0.2;
+import "restir/config.slang";
 
 // RA-001, docs/restir-adaptations.md: Prime owns scene/material resources; upstream
 // reservoir and replay math consume this narrow adapter without host callbacks.
@@ -47,6 +45,7 @@ public struct RestirScene {
     public uint2 *historyEmitters;
     public uint2 *historyStaticQuads;
     public uint4 identityControl;
+    public RestirConfig config;
 };
 
 public bool restirHistoryHitValid(RestirScene scene, HitInfo hit) {
@@ -211,9 +210,13 @@ public bool restirSampleRough(float samplePdf, float roughnessThreshold) {
 }
 public void restirSampleThresholds(inout SampleGenerator sg, out float distanceThreshold,
                                    out float roughnessThreshold) {
-    distanceThreshold =
-            PathRISState::gaussrand(RESTIR_DISTANCE_THRESHOLD, RESTIR_DISTANCE_SIGMA, sg);
-    roughnessThreshold = RESTIR_ROUGHNESS_THRESHOLD;
+    RestirConfig defaults = {};
+    restirConfigThresholds(defaults, sg, distanceThreshold, roughnessThreshold);
+}
+public void restirSampleThresholds(RestirScene scene, inout SampleGenerator sg,
+                                   out float distanceThreshold, out float roughnessThreshold) {
+    // RA-015: replay the same source thresholds; zero sigma consumes no random draws.
+    restirConfigThresholds(scene.config, sg, distanceThreshold, roughnessThreshold);
 }
 
 public float4 restirIncident(SurfaceHit hit, float4 medium) {

@@ -117,6 +117,26 @@ public struct PairedNeighborTransform {
         unpackDelta(readReuseTexture(pairingDeltaTextures, neighborIndex, tx, ty), dx, dy);
         transformDelta(dx, dy, out_dx, out_dy);
     }
+    // RA-015: the active upstream LUT supplies its real per-neighbor extent, including
+    // neighbor counts four/five; it is not rescaled from the default three-neighbor table.
+    public void readTransformedDelta(uint *pairingDeltaTextures, uint tableStride, uint textureSize,
+                                     int neighborIndex, int x, int y, inout int out_dx,
+                                     inout int out_dy) {
+        int size = int(textureSize);
+        int tx = (x + offsetX) % size, ty = (y + offsetY) % size;
+        if (flipX)
+            tx = size - 1 - tx;
+        if (flipY)
+            ty = size - 1 - ty;
+        if (transpose) {
+            int t = tx;
+            tx = ty;
+            ty = t;
+        }
+        int dx = 0, dy = 0;
+        unpackDelta(pairingDeltaTextures[tableStride * neighborIndex + ty * size + tx], dx, dy);
+        transformDelta(dx, dy, out_dx, out_dy);
+    }
     public int applyDeltaPeriodic(int x, int dx, int width) {
         int r = (x + dx) % width;
         if (r < 0)

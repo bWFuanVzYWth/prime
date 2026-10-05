@@ -32,12 +32,20 @@ def inspect(path):
         elif opcode == 32 and args[1] == 5349:
             pointers[args[0]] = args[2]
         cursor += count
-    uniform = [0, 128, 256, *range(272, 392, 8), 400, 416, 424, 432, 440, 448]
+    uniform = [0, 128, 256, *range(272, 392, 8), 400, 416, 424, 432, 440, 448,
+               464, 560, 568, 576, 584, 592, 608, 656, 664, 672, 680,
+               688, 696, 704, 712]
     # Ray-query renderer never needs RayTracingKHR pipelines or shaderInt64.
     assert not ({4479, 11} & capabilities), (path, capabilities)
     uniforms = [key for key, name in names.items() if name == "RestirParameters_std140"]
     assert len(uniforms) == 1, (path, uniforms)
     assert [offsets[uniforms[0]][i] for i in range(len(uniform))] == uniform, path
+    config = [key for key, name in names.items() if name == "RestirConfig_std140"]
+    assert len(config) == 1, (path, config)
+    assert [offsets[config[0]][i] for i in range(6)] == [0, 16, 32, 48, 64, 80], path
+    rr_config = [key for key, name in names.items() if name == "RestirRrDecorrelationConfig_std140"]
+    assert len(rr_config) == 1, (path, rr_config)
+    assert [offsets[rr_config[0]][i] for i in range(3)] == [0, 16, 32], path
     expected = {
         "PathReservoir": (80, [0, 4, 8, 20, 24, 28, 32, 36, 52, 56, 68]),
         "RestirPrimary": (20, [0, 16]),
@@ -54,7 +62,9 @@ def inspect(path):
             assert [offsets[element][i] for i in range(len(members))] == members, (path, name)
             found[name] = stride
     assert found.keys() == expected.keys(), (path, found)
-    return {"uniform_offsets": uniform, "bda_strides": found}
+    return {"uniform_offsets": uniform, "uniform_bytes": 720,
+            "config_offsets": [0, 16, 32, 48, 64, 80],
+            "rr_config_offsets": [0, 16, 32], "bda_strides": found}
 
 
 def main():

@@ -2,7 +2,9 @@
 
 import argparse
 import hashlib
+import math
 import struct
+import subprocess
 import zlib
 from pathlib import Path
 
@@ -72,7 +74,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("falcor", type=Path)
     parser.add_argument("--output", type=Path, default=Path("crates/prime-vulkan/assets/restir/paired-neighbors-3-16.bytes"))
+    parser.add_argument("--all", action="store_true", help="Pack all 1..5-neighbor, 5..50px original LUTs")
+    parser.add_argument("--zstd", default="zstd", help="Zstd CLI used only to reproduce the optional LUT bank")
     args = parser.parse_args()
+    if args.all:
+        pack_all(args)
+        return
     source = args.falcor / "Source/Modules/ReSTIRPathTracing/PairedReusePattern/neighborCount3-stdev16.0"
     result = bytearray()
     for index, expected in enumerate((254, 232, 196)):
@@ -87,6 +94,43 @@ def main():
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_bytes(result)
     print(args.output, len(result), hashlib.sha256(result).hexdigest())
+
+
+def pack_all(args):
+    # Independently compressed frames allow loading only the selected original table.
+    entries, payloads = [], []
+    offset = 16 + 50 * 48
+    root = args.falcor / "Source/Modules/ReSTIRPathTracing/PairedReusePattern"
+    for count in range(1, 6):
+        for radius in range(5, 51, 5):
+            sigma = math.sqrt(8 / (9 * math.pi)) * radius
+            source = root / f"neighborCount{count}-stdev{sigma:.1f}"
+            raw, sizes = bytearray(), []
+            for index in range(count):
+                width, height, values = decode_png(source / f"neighbor{index}.png")
+                if width != height or not 1 <= width <= 256:
+                    raise ValueError("unexpected paired-neighbor extent")
+                # Check the source table's mutual inverse, including periodic edges.
+                for y in range(height):
+                    for x in range(width):
+                        value = values[y * width + x]
+                        dx, dy = (value & 255) - 128, (value >> 8) - 128
+                        reverse = values[((y + dy) % height) * width + ((x + dx) % width)]
+                        if (reverse & 255) - 128 != -dx or (reverse >> 8) - 128 != -dy:
+                            raise ValueError(f"non-reciprocal original table: {source} / {index}")
+                sizes.append(width)
+                raw.extend(struct.pack(f"<{len(values)}H", *values))
+                raw.extend(bytes(2 * (256 * 256 - len(values))))
+            packed = subprocess.run([args.zstd, "-q", "-3", "-c"], input=raw,
+                                    stdout=subprocess.PIPE, check=True).stdout
+            entries.append(struct.pack("<8I2Q", count, radius, *(sizes + [0] * (5 - count)),
+                                       0, offset, len(packed)))
+            payloads.append(packed)
+            offset += len(packed)
+    result = b"PRPN0001" + struct.pack("<2I", len(entries), 0) + b"".join(entries + payloads)
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_bytes(result)
+    print(args.output, len(result), hashlib.sha256(result).hexdigest(), "50 reciprocal configurations")
 
 
 if __name__ == "__main__":

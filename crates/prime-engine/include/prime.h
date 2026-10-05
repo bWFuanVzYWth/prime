@@ -1,7 +1,7 @@
 #ifndef PRIME_PT_H
 #define PRIME_PT_H
 #include <stdint.h>
-#define PRIME_ABI_VERSION 15
+#define PRIME_ABI_VERSION 16
 #define PRIME_MAX_BATCH_BYTES 268435456
 #define PRIME_DIAGNOSTICS_ENABLED 1
 #define PRIME_DIAGNOSTICS_CAPTURE 2
@@ -95,6 +95,37 @@ typedef struct PrimeSettings {
     /* Diagnostic only, default 0: disable realtime ReSTIR temporal reuse.
        Spatial reuse remains enabled; RR history and offline accumulation are independent. */
     uint32_t restir_spatial_only;
+    /* Point-reservoir Hybrid controls. Boolean fields accept only 0 or 1.
+       Distance threshold retains Falcor UI units; shader threshold is divided by 100. */
+    uint32_t restir_history_length;
+    uint32_t restir_spatial_reuse;
+    uint32_t restir_spatial_iterations;
+    uint32_t restir_spatial_neighbors;
+    uint32_t restir_pairing_radius;
+    uint32_t restir_stochastic_reprojection;
+    uint32_t restir_duplicate_map;
+    float restir_duplication_power;
+    uint32_t restir_decoupled_shading;
+    uint32_t restir_initial_samples;
+    float restir_distance_threshold;
+    float restir_distance_sigma;
+    float restir_roughness_threshold;
+    float restir_roughness_sigma;
+    float restir_normal_threshold;
+    float restir_depth_threshold;
+    /* 0 final output, 1 spatial duplication count, 2 selected sample lifetime. */
+    uint32_t restir_debug_view;
+    /* Optional RR output decorrelation; disabled by default. Modes: none 0,
+       uniform 1, stagnancy 2. Output controls do not mutate reservoir ancestry. */
+    uint32_t restir_rr_decorrelation;
+    uint32_t restir_rr_mode;
+    float restir_rr_factor;
+    float restir_rr_stagnancy_exponent;
+    float restir_rr_ema;
+    float restir_rr_firefly_strength;
+    float restir_rr_multiply_bound;
+    uint32_t restir_rr_bias_reduction;
+    uint32_t restir_rr_firefly;
 } PrimeSettings;
 
 typedef struct PrimeVulkanHost {

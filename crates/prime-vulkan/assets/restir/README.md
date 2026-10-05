@@ -4,6 +4,10 @@
 
 Reproduce using `python scripts/restir-paired-pattern.py <Falcor checkout>`. The generated file has 393216 bytes and SHA-256 `bad5dd07ed0b8f472a6f2950cacc9a477c1f7c1318ab5d9ae4a2a708eb3bf358`.
 
+`paired-neighbors.bank.bytes` adds the 50 original configurations: neighbor counts 1–5 and mean radii 5–50 in steps of 5. Each radius selects `stdev=sqrt(8/(9*pi))*radius`, formatted to one decimal as in the source folder name. Every table is verified for reciprocal offsets across periodic edges before packing. The default still loads the exact separate payload above.
+
+Reproduce with `python scripts/restir-paired-pattern.py <Falcor checkout> --all --output crates/prime-vulkan/assets/restir/paired-neighbors.bank.bytes` and Zstd available on PATH. The bank is 11823793 bytes, SHA-256 `2c91edd5881d73de2a18a1d3107bc23694c820a763ced83797e090ca833987fa`. Its `PRPN0001` header stores 50 little-endian 48-byte entries (count/radius, five dimensions, reserved word, u64 offset/length), followed by independent Zstd frames of uint16 segments. Only the selected frame is decoded and expanded during an actual spatial configuration change; inactive spatial reuse does not upload a changed LUT. The embedded bank is an LFS asset, not a shader variant per setting.
+
 Original PNG SHA-256:
 
 | Table | SHA-256 |

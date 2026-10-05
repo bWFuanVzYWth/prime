@@ -25,6 +25,7 @@ public final class PrimeVideoOptions {
     private OptionInstance<Boolean> offline, opacityMicromap, nativeNoisyOutput, performanceCapture;
     private OptionInstance<Boolean> ignoreGlobalHistoryResets;
     private OptionInstance<Boolean> restirSpatialOnly;
+    private RestirVideoOptions restir;
     private OptionInstance<Renderer> renderer;
     private OptionInstance<View> view;
     private OptionInstance<DlssQuality> dlssQuality;
@@ -126,6 +127,8 @@ public final class PrimeVideoOptions {
         list.addBig(controls.get(Control.BOUNCES));
         list.addBig(controls.get(Control.OFFLINE_SAMPLES));
         list.addBig(controls.get(Control.TERRAIN_BATCHES_PER_FRAME));
+        restir = new RestirVideoOptions(list);
+        restirSpatialOnly = restir.spatialOnly();
         list.addHeader(Component.translatable("primept.settings.lighting"));
         list.addBig(controls.get(Control.SUN_EV));
         list.addBig(controls.get(Control.SKY_EV));
@@ -155,14 +158,6 @@ public final class PrimeVideoOptions {
                 -> PrimeClient.updateSettings(
                         PrimeClient.settings().withIgnoreGlobalHistoryResets(value)));
         list.addBig(ignoreGlobalHistoryResets);
-        restirSpatialOnly = OptionInstance.createBoolean(
-                "primept.settings.restir_spatial_only",
-                OptionInstance.cachedConstantTooltip(
-                        Component.translatable("primept.settings.restir_spatial_only.tooltip")),
-                PrimeClient.settings().restirSpatialOnly(),
-                value
-                -> PrimeClient.updateSettings(PrimeClient.settings().withRestirSpatialOnly(value)));
-        list.addBig(restirSpatialOnly);
         list.addBig(opacityMicromap);
         list.addBig(nativeNoisyOutput);
         view = new OptionInstance<>(
@@ -210,6 +205,7 @@ public final class PrimeVideoOptions {
         }
     }
     private void refresh() {
+        restir.refresh();
         boolean frozen = PrimeClient.offlineRequested() || PrimeClient.offlineActive();
         list.findOption(performanceCapture).active = Minecraft.getInstance().level != null;
         list.findOption(renderer).active = PrimeClient.controlsAvailable();

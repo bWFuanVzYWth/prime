@@ -30,7 +30,14 @@ fn main() {
         "restir_resolve_rr",
         &["PRIME_RESTIR_MATERIAL_ONLY=1", "PRIME_RESTIR_RR=1"],
     );
-    for stage in ["indirect", "spatial"] {
+    for stage in [
+        "indirect",
+        "spatial",
+        "sample_ids",
+        "duplicate_map",
+        "rr_statistics",
+        "debug_display",
+    ] {
         build_support::add(
             &mut shaders,
             &format!("shaders/restir_{stage}.slang"),

@@ -31,6 +31,7 @@ module restir_resolve;
 import "restir/indexing.slang";
 import "restir/types.slang";
 import "restir/reservoir.slang";
+import "restir/rr_decorrelation.slang";
 import "display/prime_drt.slang";
 import "math/color.slang";
 #ifdef PRIME_RESTIR_RR
@@ -57,8 +58,17 @@ import "reconstruct/rr_status.slang";
         return;
     uint offset = restirOffset(id.xy, extent);
     RestirScene resources = restirScene();
-    PathReservoir reservoir = parameters.history[offset];
-    float3 radiance = parameters.residual[offset].rgb + reservoir.integrand * reservoir.weight;
+    PathReservoir reservoir = restirFinalReservoirs(parameters)[offset];
+    float3 reusedColor = parameters.config.features.z != 0u && parameters.config.reuse.z != 0u
+                                 ? parameters.shadingSum[offset].rgb
+                                 : reservoir.integrand * reservoir.weight;
+    if (restirRrOutputActive(parameters.rrDecorrelation, parameters.control.y != 0u))
+        reusedColor = restirRrDecorrelateEstimate(
+                parameters.rrDecorrelation, true, id.xy,
+                parameters.frame.target.y + pass.sampleOffset + parameters.frame.target.w, offset,
+                reusedColor, reservoir.weight, parameters.currentAges[offset],
+                parameters.rrInitialEstimate, parameters.rrSmoothedCurrent, parameters.rrFireflies);
+    float3 radiance = parameters.residual[offset].rgb + reusedColor;
     RestirPrimary primary = parameters.primary[offset];
     float2 sampleUv = (float2(id.xy) + 0.5 + resources.sampleJitter) / float2(extent);
     float3 wo = -restirPrimaryDirection(resources.frame, id.xy, resources.sampleJitter);
@@ -77,6 +87,7 @@ import "reconstruct/rr_status.slang";
                       isfinite(radiance.y) ? max(0.0, radiance.y) : 0.0,
                       isfinite(radiance.z) ? max(0.0, radiance.z) : 0.0);
 #ifdef PRIME_RESTIR_RR
+    // RA-015: RR consumes physical color; the host overlays statistics after SDK evaluation.
     noisyColor[id.xy] = float4(primeRrFiniteHalfColor(workingToLinear709(radiance)),
                                primeRrForeground(guideStatus[id.xy]) ? 1.0 : 0.0);
     primeCompleteReflectionMotion(rrCamera, id.xy, extent, sampleUv, guideStatus, specularMotion,
@@ -89,6 +100,14 @@ import "reconstruct/rr_status.slang";
         radiance = mean + (radiance - mean) / float(count + 1u);
         parameters.accumulation[pixel] = float4(radiance, 1);
     }
+    if (parameters.config.features.w != 0u)
+        radiance = float3(parameters.config.features.w == 1u
+                                  ? float(parameters.duplicateCounts[offset]) / 288.0
+                                  : 0.0,
+                          parameters.config.features.w == 2u
+                                  ? float(parameters.currentAges[offset]) / 40.0
+                                  : 0.0,
+                          0.0);
     uint view = offline != 0u ? 0u : asuint(parameters.frame.displayExtra.w) & 3u;
     if (parameters.control.w != 0u && view == 0u) {
         if (offline == 0u)
@@ -96,7 +115,9 @@ import "reconstruct/rr_status.slang";
         return;
     }
     float3 encoded;
-    if (view == 2u)
+    if (parameters.config.features.w != 0u)
+        encoded = radiance;
+    else if (view == 2u)
         encoded = float3(saturate(depth / parameters.frame.displayExtra.y));
     else if (view == 3u)
         encoded = hit.found ? restirMaterial(hit, wo).normal * 0.5 + 0.5 : float3(0);

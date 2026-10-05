@@ -7,7 +7,7 @@ import static java.lang.foreign.ValueLayout.*;
 
 public final class PrimeAbi {
     private PrimeAbi() {}
-    public static final int PRIME_ABI_VERSION = 15;
+    public static final int PRIME_ABI_VERSION = 16;
     public static final int PRIME_MAX_BATCH_BYTES = 268435456;
     public static final int PRIME_DIAGNOSTICS_ENABLED = 1;
     public static final int PRIME_DIAGNOSTICS_CAPTURE = 2;
@@ -271,7 +271,7 @@ public final class PrimeAbi {
     }
     public static final class PrimeSettings {
         private PrimeSettings() {}
-        public static final long SIZE = 112, ALIGN = 4;
+        public static final long SIZE = 216, ALIGN = 4;
         public static final MemoryLayout LAYOUT =
                 MemoryLayout
                         .structLayout(
@@ -294,7 +294,33 @@ public final class PrimeAbi {
                                 JAVA_INT.withName("light_sampling"),
                                 JAVA_INT.withName("integrator"),
                                 JAVA_INT.withName("ignore_global_history_resets"),
-                                JAVA_INT.withName("restir_spatial_only"))
+                                JAVA_INT.withName("restir_spatial_only"),
+                                JAVA_INT.withName("restir_history_length"),
+                                JAVA_INT.withName("restir_spatial_reuse"),
+                                JAVA_INT.withName("restir_spatial_iterations"),
+                                JAVA_INT.withName("restir_spatial_neighbors"),
+                                JAVA_INT.withName("restir_pairing_radius"),
+                                JAVA_INT.withName("restir_stochastic_reprojection"),
+                                JAVA_INT.withName("restir_duplicate_map"),
+                                JAVA_FLOAT.withName("restir_duplication_power"),
+                                JAVA_INT.withName("restir_decoupled_shading"),
+                                JAVA_INT.withName("restir_initial_samples"),
+                                JAVA_FLOAT.withName("restir_distance_threshold"),
+                                JAVA_FLOAT.withName("restir_distance_sigma"),
+                                JAVA_FLOAT.withName("restir_roughness_threshold"),
+                                JAVA_FLOAT.withName("restir_roughness_sigma"),
+                                JAVA_FLOAT.withName("restir_normal_threshold"),
+                                JAVA_FLOAT.withName("restir_depth_threshold"),
+                                JAVA_INT.withName("restir_debug_view"),
+                                JAVA_INT.withName("restir_rr_decorrelation"),
+                                JAVA_INT.withName("restir_rr_mode"),
+                                JAVA_FLOAT.withName("restir_rr_factor"),
+                                JAVA_FLOAT.withName("restir_rr_stagnancy_exponent"),
+                                JAVA_FLOAT.withName("restir_rr_ema"),
+                                JAVA_FLOAT.withName("restir_rr_firefly_strength"),
+                                JAVA_FLOAT.withName("restir_rr_multiply_bound"),
+                                JAVA_INT.withName("restir_rr_bias_reduction"),
+                                JAVA_INT.withName("restir_rr_firefly"))
                         .withName("PrimeSettings");
         static {
             if (LAYOUT.byteSize() != SIZE || LAYOUT.byteAlignment() != ALIGN)
@@ -366,6 +392,97 @@ public final class PrimeAbi {
             if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("restir_spatial_only")) !=
                 108)
                 throw new ExceptionInInitializerError("PrimeSettings.restir_spatial_only offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("restir_history_length")) !=
+                112)
+                throw new ExceptionInInitializerError("PrimeSettings.restir_history_length offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("restir_spatial_reuse")) !=
+                116)
+                throw new ExceptionInInitializerError("PrimeSettings.restir_spatial_reuse offset");
+            if (LAYOUT.byteOffset(
+                        MemoryLayout.PathElement.groupElement("restir_spatial_iterations")) != 120)
+                throw new ExceptionInInitializerError(
+                        "PrimeSettings.restir_spatial_iterations offset");
+            if (LAYOUT.byteOffset(
+                        MemoryLayout.PathElement.groupElement("restir_spatial_neighbors")) != 124)
+                throw new ExceptionInInitializerError(
+                        "PrimeSettings.restir_spatial_neighbors offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("restir_pairing_radius")) !=
+                128)
+                throw new ExceptionInInitializerError("PrimeSettings.restir_pairing_radius offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement(
+                        "restir_stochastic_reprojection")) != 132)
+                throw new ExceptionInInitializerError(
+                        "PrimeSettings.restir_stochastic_reprojection offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("restir_duplicate_map")) !=
+                136)
+                throw new ExceptionInInitializerError("PrimeSettings.restir_duplicate_map offset");
+            if (LAYOUT.byteOffset(
+                        MemoryLayout.PathElement.groupElement("restir_duplication_power")) != 140)
+                throw new ExceptionInInitializerError(
+                        "PrimeSettings.restir_duplication_power offset");
+            if (LAYOUT.byteOffset(
+                        MemoryLayout.PathElement.groupElement("restir_decoupled_shading")) != 144)
+                throw new ExceptionInInitializerError(
+                        "PrimeSettings.restir_decoupled_shading offset");
+            if (LAYOUT.byteOffset(
+                        MemoryLayout.PathElement.groupElement("restir_initial_samples")) != 148)
+                throw new ExceptionInInitializerError(
+                        "PrimeSettings.restir_initial_samples offset");
+            if (LAYOUT.byteOffset(
+                        MemoryLayout.PathElement.groupElement("restir_distance_threshold")) != 152)
+                throw new ExceptionInInitializerError(
+                        "PrimeSettings.restir_distance_threshold offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("restir_distance_sigma")) !=
+                156)
+                throw new ExceptionInInitializerError("PrimeSettings.restir_distance_sigma offset");
+            if (LAYOUT.byteOffset(
+                        MemoryLayout.PathElement.groupElement("restir_roughness_threshold")) != 160)
+                throw new ExceptionInInitializerError(
+                        "PrimeSettings.restir_roughness_threshold offset");
+            if (LAYOUT.byteOffset(
+                        MemoryLayout.PathElement.groupElement("restir_roughness_sigma")) != 164)
+                throw new ExceptionInInitializerError(
+                        "PrimeSettings.restir_roughness_sigma offset");
+            if (LAYOUT.byteOffset(
+                        MemoryLayout.PathElement.groupElement("restir_normal_threshold")) != 168)
+                throw new ExceptionInInitializerError(
+                        "PrimeSettings.restir_normal_threshold offset");
+            if (LAYOUT.byteOffset(
+                        MemoryLayout.PathElement.groupElement("restir_depth_threshold")) != 172)
+                throw new ExceptionInInitializerError(
+                        "PrimeSettings.restir_depth_threshold offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("restir_debug_view")) !=
+                176)
+                throw new ExceptionInInitializerError("PrimeSettings.restir_debug_view offset");
+            if (LAYOUT.byteOffset(
+                        MemoryLayout.PathElement.groupElement("restir_rr_decorrelation")) != 180)
+                throw new ExceptionInInitializerError(
+                        "PrimeSettings.restir_rr_decorrelation offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("restir_rr_mode")) != 184)
+                throw new ExceptionInInitializerError("PrimeSettings.restir_rr_mode offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("restir_rr_factor")) != 188)
+                throw new ExceptionInInitializerError("PrimeSettings.restir_rr_factor offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement(
+                        "restir_rr_stagnancy_exponent")) != 192)
+                throw new ExceptionInInitializerError(
+                        "PrimeSettings.restir_rr_stagnancy_exponent offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("restir_rr_ema")) != 196)
+                throw new ExceptionInInitializerError("PrimeSettings.restir_rr_ema offset");
+            if (LAYOUT.byteOffset(
+                        MemoryLayout.PathElement.groupElement("restir_rr_firefly_strength")) != 200)
+                throw new ExceptionInInitializerError(
+                        "PrimeSettings.restir_rr_firefly_strength offset");
+            if (LAYOUT.byteOffset(
+                        MemoryLayout.PathElement.groupElement("restir_rr_multiply_bound")) != 204)
+                throw new ExceptionInInitializerError(
+                        "PrimeSettings.restir_rr_multiply_bound offset");
+            if (LAYOUT.byteOffset(
+                        MemoryLayout.PathElement.groupElement("restir_rr_bias_reduction")) != 208)
+                throw new ExceptionInInitializerError(
+                        "PrimeSettings.restir_rr_bias_reduction offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("restir_rr_firefly")) !=
+                212)
+                throw new ExceptionInInitializerError("PrimeSettings.restir_rr_firefly offset");
         }
         public static MemorySegment header(MemorySegment value) {
             return value.asSlice(0L, 8);
@@ -525,6 +642,162 @@ public final class PrimeAbi {
         }
         public static void restir_spatial_only(MemorySegment value, int field) {
             value.set(JAVA_INT, 108L, field);
+        }
+        public static int restir_history_length(MemorySegment value) {
+            return value.get(JAVA_INT, 112L);
+        }
+        public static void restir_history_length(MemorySegment value, int field) {
+            value.set(JAVA_INT, 112L, field);
+        }
+        public static int restir_spatial_reuse(MemorySegment value) {
+            return value.get(JAVA_INT, 116L);
+        }
+        public static void restir_spatial_reuse(MemorySegment value, int field) {
+            value.set(JAVA_INT, 116L, field);
+        }
+        public static int restir_spatial_iterations(MemorySegment value) {
+            return value.get(JAVA_INT, 120L);
+        }
+        public static void restir_spatial_iterations(MemorySegment value, int field) {
+            value.set(JAVA_INT, 120L, field);
+        }
+        public static int restir_spatial_neighbors(MemorySegment value) {
+            return value.get(JAVA_INT, 124L);
+        }
+        public static void restir_spatial_neighbors(MemorySegment value, int field) {
+            value.set(JAVA_INT, 124L, field);
+        }
+        public static int restir_pairing_radius(MemorySegment value) {
+            return value.get(JAVA_INT, 128L);
+        }
+        public static void restir_pairing_radius(MemorySegment value, int field) {
+            value.set(JAVA_INT, 128L, field);
+        }
+        public static int restir_stochastic_reprojection(MemorySegment value) {
+            return value.get(JAVA_INT, 132L);
+        }
+        public static void restir_stochastic_reprojection(MemorySegment value, int field) {
+            value.set(JAVA_INT, 132L, field);
+        }
+        public static int restir_duplicate_map(MemorySegment value) {
+            return value.get(JAVA_INT, 136L);
+        }
+        public static void restir_duplicate_map(MemorySegment value, int field) {
+            value.set(JAVA_INT, 136L, field);
+        }
+        public static float restir_duplication_power(MemorySegment value) {
+            return value.get(JAVA_FLOAT, 140L);
+        }
+        public static void restir_duplication_power(MemorySegment value, float field) {
+            value.set(JAVA_FLOAT, 140L, field);
+        }
+        public static int restir_decoupled_shading(MemorySegment value) {
+            return value.get(JAVA_INT, 144L);
+        }
+        public static void restir_decoupled_shading(MemorySegment value, int field) {
+            value.set(JAVA_INT, 144L, field);
+        }
+        public static int restir_initial_samples(MemorySegment value) {
+            return value.get(JAVA_INT, 148L);
+        }
+        public static void restir_initial_samples(MemorySegment value, int field) {
+            value.set(JAVA_INT, 148L, field);
+        }
+        public static float restir_distance_threshold(MemorySegment value) {
+            return value.get(JAVA_FLOAT, 152L);
+        }
+        public static void restir_distance_threshold(MemorySegment value, float field) {
+            value.set(JAVA_FLOAT, 152L, field);
+        }
+        public static float restir_distance_sigma(MemorySegment value) {
+            return value.get(JAVA_FLOAT, 156L);
+        }
+        public static void restir_distance_sigma(MemorySegment value, float field) {
+            value.set(JAVA_FLOAT, 156L, field);
+        }
+        public static float restir_roughness_threshold(MemorySegment value) {
+            return value.get(JAVA_FLOAT, 160L);
+        }
+        public static void restir_roughness_threshold(MemorySegment value, float field) {
+            value.set(JAVA_FLOAT, 160L, field);
+        }
+        public static float restir_roughness_sigma(MemorySegment value) {
+            return value.get(JAVA_FLOAT, 164L);
+        }
+        public static void restir_roughness_sigma(MemorySegment value, float field) {
+            value.set(JAVA_FLOAT, 164L, field);
+        }
+        public static float restir_normal_threshold(MemorySegment value) {
+            return value.get(JAVA_FLOAT, 168L);
+        }
+        public static void restir_normal_threshold(MemorySegment value, float field) {
+            value.set(JAVA_FLOAT, 168L, field);
+        }
+        public static float restir_depth_threshold(MemorySegment value) {
+            return value.get(JAVA_FLOAT, 172L);
+        }
+        public static void restir_depth_threshold(MemorySegment value, float field) {
+            value.set(JAVA_FLOAT, 172L, field);
+        }
+        public static int restir_debug_view(MemorySegment value) {
+            return value.get(JAVA_INT, 176L);
+        }
+        public static void restir_debug_view(MemorySegment value, int field) {
+            value.set(JAVA_INT, 176L, field);
+        }
+        public static int restir_rr_decorrelation(MemorySegment value) {
+            return value.get(JAVA_INT, 180L);
+        }
+        public static void restir_rr_decorrelation(MemorySegment value, int field) {
+            value.set(JAVA_INT, 180L, field);
+        }
+        public static int restir_rr_mode(MemorySegment value) {
+            return value.get(JAVA_INT, 184L);
+        }
+        public static void restir_rr_mode(MemorySegment value, int field) {
+            value.set(JAVA_INT, 184L, field);
+        }
+        public static float restir_rr_factor(MemorySegment value) {
+            return value.get(JAVA_FLOAT, 188L);
+        }
+        public static void restir_rr_factor(MemorySegment value, float field) {
+            value.set(JAVA_FLOAT, 188L, field);
+        }
+        public static float restir_rr_stagnancy_exponent(MemorySegment value) {
+            return value.get(JAVA_FLOAT, 192L);
+        }
+        public static void restir_rr_stagnancy_exponent(MemorySegment value, float field) {
+            value.set(JAVA_FLOAT, 192L, field);
+        }
+        public static float restir_rr_ema(MemorySegment value) {
+            return value.get(JAVA_FLOAT, 196L);
+        }
+        public static void restir_rr_ema(MemorySegment value, float field) {
+            value.set(JAVA_FLOAT, 196L, field);
+        }
+        public static float restir_rr_firefly_strength(MemorySegment value) {
+            return value.get(JAVA_FLOAT, 200L);
+        }
+        public static void restir_rr_firefly_strength(MemorySegment value, float field) {
+            value.set(JAVA_FLOAT, 200L, field);
+        }
+        public static float restir_rr_multiply_bound(MemorySegment value) {
+            return value.get(JAVA_FLOAT, 204L);
+        }
+        public static void restir_rr_multiply_bound(MemorySegment value, float field) {
+            value.set(JAVA_FLOAT, 204L, field);
+        }
+        public static int restir_rr_bias_reduction(MemorySegment value) {
+            return value.get(JAVA_INT, 208L);
+        }
+        public static void restir_rr_bias_reduction(MemorySegment value, int field) {
+            value.set(JAVA_INT, 208L, field);
+        }
+        public static int restir_rr_firefly(MemorySegment value) {
+            return value.get(JAVA_INT, 212L);
+        }
+        public static void restir_rr_firefly(MemorySegment value, int field) {
+            value.set(JAVA_INT, 212L, field);
         }
     }
     public static final class PrimeVulkanHost {

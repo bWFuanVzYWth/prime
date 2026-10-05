@@ -1,4 +1,5 @@
 //! Current renderer controls. Settings packets are independent of scene command lifetimes.
+pub use crate::restir_settings::{RestirRrMode, RestirSettings};
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[repr(u32)]
 pub enum RenderMode {
@@ -75,6 +76,7 @@ pub struct RenderSettings {
     pub ignore_global_history_resets: bool,
     /// Diagnostic: disable only realtime ReSTIR temporal reuse, preserving spatial reuse.
     pub restir_spatial_only: bool,
+    pub restir: RestirSettings,
 }
 impl Default for RenderSettings {
     fn default() -> Self {
@@ -104,15 +106,16 @@ impl Default for RenderSettings {
             light_sampling: LightSampling::Tree,
             ignore_global_history_resets: false,
             restir_spatial_only: false,
+            restir: Default::default(),
         }
     }
 }
 impl RenderSettings {
-    pub const VERSION: u32 = 11;
-    pub const BYTES: usize = 108;
+    pub const VERSION: u32 = 12;
+    pub const BYTES: usize = 108 + RestirSettings::WIRE_WORDS * 4;
     pub fn parse(bytes: &[u8]) -> Result<Self, String> {
         if bytes.len() != Self::BYTES {
-            return Err("Settings require exactly 108 bytes".into());
+            return Err(format!("Settings require exactly {} bytes", Self::BYTES));
         }
         let word = |offset| u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
         if word(0) != Self::VERSION {
@@ -195,6 +198,7 @@ impl RenderSettings {
                 1 => true,
                 _ => return Err("Unknown ReSTIR spatial-only diagnostic setting".into()),
             },
+            restir: RestirSettings::from_words(std::array::from_fn(|i| word(108 + i * 4)))?,
         };
         result.validate()?;
         Ok(result)
@@ -277,12 +281,14 @@ impl RenderSettings {
                 1 => true,
                 _ => return Err("Unknown ReSTIR spatial-only diagnostic setting".into()),
             },
+            restir: RestirSettings::from_abi(s)?,
         };
         result.validate()?;
         Ok(result)
     }
     pub fn validate(self) -> Result<(), String> {
         self.astronomy.validate()?;
+        self.restir.validate()?;
         if !(1..=64).contains(&self.bounces)
             || !(1..=64).contains(&self.offline_samples)
             || !(1..=128).contains(&self.terrain_batches_per_frame)
@@ -318,7 +324,7 @@ mod tests {
     use super::*;
     fn golden() -> Vec<u8> {
         [
-            11_u32,
+            12_u32,
             1,
             12,
             1,
@@ -345,6 +351,32 @@ mod tests {
             0,
             0,
             0,
+            20,
+            1,
+            1,
+            3,
+            30,
+            0,
+            0,
+            0.1_f32.to_bits(),
+            0,
+            1,
+            0.02_f32.to_bits(),
+            0.2_f32.to_bits(),
+            0.2_f32.to_bits(),
+            0,
+            0.5_f32.to_bits(),
+            0.1_f32.to_bits(),
+            0,
+            0,
+            2,
+            0.4_f32.to_bits(),
+            0.5_f32.to_bits(),
+            0.2_f32.to_bits(),
+            0.7_f32.to_bits(),
+            15.0_f32.to_bits(),
+            1,
+            1,
         ]
         .into_iter()
         .flat_map(u32::to_le_bytes)
@@ -376,7 +408,8 @@ mod tests {
             (0, 8),
             (0, 9),
             (0, 10),
-            (0, 12),
+            (0, 11),
+            (0, 13),
             (48, 91),
             (48, (-91i32) as u32),
             (52, 360),
@@ -505,6 +538,32 @@ mod tests {
             integrator: 0,
             ignore_global_history_resets: 0,
             restir_spatial_only: 0,
+            restir_history_length: 20,
+            restir_spatial_reuse: 1,
+            restir_spatial_iterations: 1,
+            restir_spatial_neighbors: 3,
+            restir_pairing_radius: 30,
+            restir_stochastic_reprojection: 0,
+            restir_duplicate_map: 0,
+            restir_duplication_power: 0.10,
+            restir_decoupled_shading: 0,
+            restir_initial_samples: 1,
+            restir_distance_threshold: 0.02,
+            restir_distance_sigma: 0.20,
+            restir_roughness_threshold: 0.20,
+            restir_roughness_sigma: 0.00,
+            restir_normal_threshold: 0.50,
+            restir_depth_threshold: 0.10,
+            restir_debug_view: 0,
+            restir_rr_decorrelation: 0,
+            restir_rr_mode: 2,
+            restir_rr_factor: 0.4,
+            restir_rr_stagnancy_exponent: 0.5,
+            restir_rr_ema: 0.2,
+            restir_rr_firefly_strength: 0.7,
+            restir_rr_multiply_bound: 15.0,
+            restir_rr_bias_reduction: 1,
+            restir_rr_firefly: 1,
         };
         for (word, method) in [
             (0, LightSampling::Tree),
@@ -555,8 +614,8 @@ mod tests {
     fn global_reset_diagnostic_defaults_off_and_does_not_change_transport() {
         let defaults = RenderSettings::default();
         assert!(!defaults.ignore_global_history_resets);
-        assert_eq!(RenderSettings::VERSION, 11);
-        assert_eq!(RenderSettings::BYTES, 108);
+        assert_eq!(RenderSettings::VERSION, 12);
+        assert_eq!(RenderSettings::BYTES, 212);
         for value in [0_u32, 1] {
             let mut bytes = golden();
             bytes[100..104].copy_from_slice(&value.to_le_bytes());
@@ -597,6 +656,78 @@ mod tests {
             }
         }
         assert!(RenderSettings::parse(&golden()[..104]).is_err());
+    }
+    #[test]
+    fn restir_packet_preserves_nondefault_controls_without_global_transport_reset() {
+        let words = [
+            7_u32,
+            0,
+            2,
+            4,
+            45,
+            1,
+            1,
+            0.375_f32.to_bits(),
+            1,
+            3,
+            0.04125_f32.to_bits(),
+            0.375_f32.to_bits(),
+            0.625_f32.to_bits(),
+            0.125_f32.to_bits(),
+            (-0.25_f32).to_bits(),
+            0.0625_f32.to_bits(),
+            2,
+            1,
+            1,
+            0.625_f32.to_bits(),
+            2.5_f32.to_bits(),
+            0.375_f32.to_bits(),
+            0.875_f32.to_bits(),
+            24.5_f32.to_bits(),
+            0,
+            0,
+        ];
+        let expected = RestirSettings {
+            history_length: 7,
+            spatial_reuse: false,
+            spatial_iterations: 2,
+            spatial_neighbors: 4,
+            pairing_radius: 45,
+            stochastic_reprojection: true,
+            duplicate_map: true,
+            duplication_power: 0.375,
+            decoupled_shading: true,
+            initial_samples: 3,
+            distance_threshold: 0.04125,
+            distance_sigma: 0.375,
+            roughness_threshold: 0.625,
+            roughness_sigma: 0.125,
+            normal_threshold: -0.25,
+            depth_threshold: 0.0625,
+            debug_view: 2,
+            rr_decorrelation: true,
+            rr_mode: RestirRrMode::Uniform,
+            rr_factor: 0.625,
+            rr_stagnancy_exponent: 2.5,
+            rr_ema: 0.375,
+            rr_firefly_strength: 0.875,
+            rr_multiply_bound: 24.5,
+            rr_bias_reduction: false,
+            rr_firefly: false,
+        };
+        let baseline = RenderSettings::parse(&golden()).unwrap();
+        let mut packet = golden();
+        for (index, word) in words.into_iter().enumerate() {
+            packet[108 + index * 4..112 + index * 4].copy_from_slice(&word.to_le_bytes());
+        }
+        let parsed = RenderSettings::parse(&packet).unwrap();
+        assert_eq!(parsed.restir, expected);
+        assert!(baseline.transport_matches(parsed) && parsed.transport_matches(baseline));
+        // The existing seed rule remains separate from reuse/diagnostic settings.
+        assert!(!baseline.transport_matches(RenderSettings {
+            seed: 42,
+            ..baseline
+        }));
     }
     #[test]
     fn saturation_defaults_and_explicit_legacy_wire_values() {
