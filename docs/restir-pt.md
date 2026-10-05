@@ -8,7 +8,7 @@
 
 默认保持 point reservoir、Hybrid shift、Compact retrace、3 个互反配对邻居、标准差 16 的原邻域表、1 轮空间重采样、20 的时间历史 M 上限和每像素 1 条新路径。保留 TinyUniform RNG、path flags、初始 RIS 与 reservoir 合并归一化规则。场景或光照变化时启用上游 current-scene temporal suffix update；没有旧场景副本。支持范围仍不包含 area reservoir、DoF、splatting、MCMC、robust temporal 或压缩。
 
-视频设置的独立“Prime ReSTIR PT”栏保存下列参数；“仅空间复用”从诊断栏迁移到这里，旧配置自动保留。新增机制的主开关默认关闭，启用时使用参考实现的默认数值。
+视频设置的独立“Prime ReSTIR PT”栏保存下列参数；“仅空间复用”从诊断栏迁移到这里，旧配置自动保留。重复度 M 降权和 RR 输出去相关默认开启，沿用参考数值；解耦着色、随机重投影与统计视图默认关闭。已有配置的显式开关值保留，缺失这些字段的旧版本迁移采用当前默认值。
 
 | 参数 | 默认 / 范围 | 消费语义 |
 | --- | --- | --- |
@@ -18,7 +18,7 @@
 | 空间复用、轮数 | 开、1 / 0–8 | 零轮直接消费时间/初始结果；多轮复用两个 reservoir bank |
 | 配对邻居数、平均尺度 | 3、30 / 1–5、5–50（步长 5） | 选择原版完整互反 LUT；标准差为尺度乘 `sqrt(8/(9π))` |
 | 随机重投影 | 关 | 时间 donor 随机像素舍入；不改变源 ray 的 jitter |
-| 重复样本降权、指数 | 关、0.1 / 0–10 | 17×17 重复 seed 统计，将历史 cap 从 H 向 1 插值；指数越小，非零重复率的降权越强 |
+| 重复样本降权、指数 | 开、0.1 / 0–10 | 17×17 重复 seed 统计，将历史 cap 从 H 向 1 插值；指数越小，非零重复率的降权越强 |
 | 解耦着色 | 关 | 最后空间轮累计各候选的加权颜色，历史仍只保存被选中的路径 |
 | 距离阈值、相对随机幅度 | 0.02、0.2 / 0–10000、0–1 | UI 距离除以 100 后进入 footprint chart |
 | PDF roughness 阈值、相对随机幅度 | 0.2、0 / 0–1、0–1 | 以实际 BSDF PDF 分类，非单一材质粗糙度 |
@@ -26,7 +26,7 @@
 | 随机种子 | 0 / uint32 | 新路径随机域；不清空全局 ReSTIR/RR 历史 |
 | 统计视图 | 关 / 重复率、存活统计 | 仅覆盖显示；不写入 reservoir、离线物理均值或 RR 含噪输入 |
 
-可选 RR 输出去相关使用 Prime 独立实现，数学定义参考 [RTXDI ReSTIR PT 文档](https://github.com/NVIDIA-RTX/RTXDI/blob/a6efab966b7c3b272da0461578eb56ac61c7cbff/Doc/RestirPT.md)。主开关默认关闭；模式默认 Stagnancy，基础概率 0.4、停滞指数 0.5、EMA 0.2、亮点强度 0.7、新样本权重限制开启且倍数上限 15。Uniform 直接使用基础概率；Stagnancy 使用 `min(1, 4 × factor × smooth^exponent)`，亮点标记可强制概率为 1。它只在实时 RR 且存在时间复用时，用 Bernoulli 选择初始或重采样颜色，不改历史 reservoir。颜色相关的自适应选择与权重限制不保证严格无偏；Prime 使用 Falcor 的存活计数，不声称与另一引擎逐位等价，见 [RA-016](restir-adaptations.md)。
+可选 RR 输出去相关使用 Prime 独立实现，数学定义参考 [RTXDI ReSTIR PT 文档](https://github.com/NVIDIA-RTX/RTXDI/blob/a6efab966b7c3b272da0461578eb56ac61c7cbff/Doc/RestirPT.md)。主开关默认开启；模式默认 Stagnancy，基础概率 0.4、停滞指数 0.5、EMA 0.2、亮点强度 0.7、新样本权重限制开启且倍数上限 15。Uniform 直接使用基础概率；Stagnancy 使用 `min(1, 4 × factor × smooth^exponent)`，亮点标记可强制概率为 1。它只在实时 RR 且存在时间复用时，用 Bernoulli 选择初始或重采样颜色，不改历史 reservoir。颜色相关的自适应选择与权重限制不保证严格无偏；Prime 使用 Falcor 的存活计数，不声称与另一引擎逐位等价，见 [RA-016](restir-adaptations.md)。
 
 材质适配使用 Prime 已接入的 OpenPBR/LabPBR、真实源色、发光、覆盖、介质与透射契约。自定义材质走上游不支持 BSDF component indexing 的 PDF roughness 判定；没有用单一粗糙度值代替混合 BSDF 的采样 PDF。上游默认的显式材质 LOD 0 保留，因此本渲染器没有采用普通 PT 的传播 ray-cone 纹理过滤。覆盖随机域使用固定的路径 seed 与位置哈希；重放不会再次执行宿主回调。命中身份保存实际复合表面的材质选择，避免重建浮点误差改变涂层来源。
 

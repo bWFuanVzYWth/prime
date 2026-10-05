@@ -128,7 +128,7 @@ cargo test -p prime_engine --no-default-features --lib --locked
 
 诊断组的“忽略所有全局重置”默认关闭，用于对照活动游戏/暂停界面历史；日志明确 event/action/valid，性能 JSON 可进一步区分 temporal、suffix update 和身份表局部支持变化。实际存储重建仍冷启动。“原生分辨率含噪输出”使用正向字段 `native_noisy_output`：开启时禁用降噪并按原生分辨率输出，关闭时允许 RR 和所选 DLSS 档位，默认关闭。它与“实时输出视图”的内部含噪颜色诊断独立，后者保持实际内部输入尺寸后预览；RR Performance 下是半宽半高输入。旧 v8/v9 的 `render.ray_reconstruction` 在迁移时取反，保持原有输出行为。
 
-“视频设置 → Prime PT · ReSTIR PT”专栏集中初始路径、历史M、空间复用、配对距离、移位门槛、样本视图、seed与可选输出去相关控制；默认参数保持原有行为，新增机制默认关闭。原“ReSTIR 仅空间复用”移入此栏，默认关闭；开启时跳过全部时间重采样阶段，保留每帧初始采样及当前空间控制，不禁用DLSS RR历史，也不改变离线累积。关闭后可立即使用上一帧实际结果恢复时间复用，切换不重建管线或scratch。schema v12将此项保存为`restir_pt.spatial_only`，其余专栏键为`restir_pt.*`；v8–v11保留合法旧`diagnostics.restir_spatial_only`，v8–v10缺失此项补false，新增参数补默认值。新采样/移位控制不触发全局历史重置，seed保留原有transport规则；生效条件、成本及近似边界见[ReSTIR PT](docs/restir-pt.md)。
+“视频设置 → Prime PT · ReSTIR PT”专栏集中初始路径、历史M、空间复用、配对距离、移位门槛、样本视图、seed与可选输出去相关控制；重复度M降权和RR输出去相关默认开启，其余机制和数值参数保持。原“ReSTIR 仅空间复用”移入此栏，默认关闭；开启时跳过全部时间重采样阶段，保留每帧初始采样及当前空间控制，不禁用DLSS RR历史，也不改变离线累积。关闭后可立即使用上一帧实际结果恢复时间复用，切换不重建管线或scratch。schema v12将此项保存为`restir_pt.spatial_only`，其余专栏键为`restir_pt.*`；v8–v11保留合法旧`diagnostics.restir_spatial_only`，v8–v10缺失此项补false，新增参数补当前默认值；已有v12显式开关值保留。新采样/移位控制不触发全局历史重置，seed保留原有transport规则；生效条件、成本及近似边界见[ReSTIR PT](docs/restir-pt.md)。
 
 ### 用户手动检查重点
 

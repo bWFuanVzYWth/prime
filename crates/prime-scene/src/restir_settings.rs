@@ -45,7 +45,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn defaults_preserve_point_hybrid_profile_and_ui_units() {
+    fn defaults_enable_accepted_decorrelation_and_preserve_point_hybrid_parameters() {
         let s = RestirSettings::default();
         assert!(s.validate().is_ok());
         assert_eq!(
@@ -54,13 +54,14 @@ mod tests {
         );
         assert_eq!((s.initial_samples, s.pairing_radius), (1, 30));
         assert!(s.spatial_reuse);
-        assert!(!s.stochastic_reprojection && !s.duplicate_map && !s.decoupled_shading);
+        assert!(!s.stochastic_reprojection && !s.decoupled_shading);
+        assert!(s.duplicate_map);
         assert_eq!(s.distance_threshold / 100.0, 0.0002);
         assert_eq!(
             (s.distance_sigma, s.roughness_threshold, s.roughness_sigma),
             (0.2, 0.2, 0.0)
         );
-        assert!(!s.rr_decorrelation);
+        assert!(s.rr_decorrelation);
         assert_eq!(s.rr_mode, RestirRrMode::Stagnancy);
         assert_eq!(
             (s.rr_factor, s.rr_stagnancy_exponent, s.rr_ema),
@@ -215,7 +216,8 @@ impl Default for RestirSettings {
             spatial_neighbors: 3,
             pairing_radius: 30,
             stochastic_reprojection: false,
-            duplicate_map: false,
+            // RA-015: promote the user-accepted M reduction without tuning its exponent.
+            duplicate_map: true,
             duplication_power: 0.1,
             decoupled_shading: false,
             initial_samples: 1,
@@ -226,7 +228,8 @@ impl Default for RestirSettings {
             normal_threshold: 0.5,
             depth_threshold: 0.1,
             debug_view: 0,
-            rr_decorrelation: false,
+            // RA-016: default-enable the user-accepted output mixture, preserving its curve.
+            rr_decorrelation: true,
             rr_mode: RestirRrMode::Stagnancy,
             rr_factor: 0.4,
             rr_stagnancy_exponent: 0.5,

@@ -1,18 +1,21 @@
-//! Optional replay of a frozen previous production SPIR-V bank.
+//! Optional replay of a frozen previous production SPIR-V bank with mechanisms disabled.
 use super::*;
 use restir_tests::{multiple_light_scene, renderer, settings, temporal_snapshot_words};
 
 #[test]
 #[ignore = "requires explicit PRIME_RESTIR_BASELINE_SPV and windowless Vulkan"]
-fn gpu_restir_default_matches_previous_production_bank_bit_for_bit() {
+fn gpu_restir_disabled_mechanisms_match_previous_production_bank_bit_for_bit() {
     let folder = std::env::var_os("PRIME_RESTIR_BASELINE_SPV")
         .map(std::path::PathBuf::from)
         .expect("freeze the previous production shader bank first");
     let extent = [1920, 1080];
-    let config = RenderSettings {
+    let mut config = RenderSettings {
         auto_exposure_compensation: 0.1,
         ..settings(RenderMode::Realtime)
     };
+    // RA-015/016: the frozen bank predates these options; compare the explicit old profile.
+    config.restir.duplicate_map = false;
+    config.restir.rr_decorrelation = false;
     let mut current = renderer(config);
     let mut baseline = renderer(config);
     let fixture = multiple_light_scene(1);
