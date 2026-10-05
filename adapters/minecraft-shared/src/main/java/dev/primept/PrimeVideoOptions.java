@@ -6,6 +6,7 @@ import dev.primept.settings.RenderSettings.Control;
 import dev.primept.settings.RenderSettings.View;
 import dev.primept.settings.RenderSettings.DlssQuality;
 import dev.primept.settings.RenderSettings.Renderer;
+import java.net.URI;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
@@ -15,28 +16,31 @@ import net.minecraft.client.Options;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.CycleButton;
 import net.minecraft.client.gui.components.OptionsList;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.ConfirmLinkScreen;
 import net.minecraft.network.chat.Component;
 
 /** Live Prime controls embedded in the host Video Settings list. */
 public final class PrimeVideoOptions {
     private final OptionsList list;
+    private final Screen screen;
     private final Runnable rebuildScreen;
     private final EnumMap<Control, OptionInstance<Integer>> controls = new EnumMap<>(Control.class);
     private OptionInstance<Boolean> offline, opacityMicromap, nativeNoisyOutput, performanceCapture;
     private OptionInstance<Boolean> ignoreGlobalHistoryResets;
-    private OptionInstance<Boolean> restirSpatialOnly;
-    private RestirVideoOptions restir;
+    private OptionInstance<Boolean> pathTracing;
     private OptionInstance<Renderer> renderer;
     private OptionInstance<View> view;
     private OptionInstance<DlssQuality> dlssQuality;
-    private PrimeVideoOptions(OptionsList list, Runnable rebuildScreen) {
+    private PrimeVideoOptions(OptionsList list, Screen screen, Runnable rebuildScreen) {
         this.list = list;
+        this.screen = screen;
         this.rebuildScreen = rebuildScreen;
     }
 
     /** Append once before vanilla options; each host rebuild creates a fresh option owner. */
-    public static PrimeVideoOptions addTo(OptionsList list, Runnable rebuildScreen) {
-        var options = new PrimeVideoOptions(list, rebuildScreen);
+    public static PrimeVideoOptions addTo(OptionsList list, Screen screen, Runnable rebuildScreen) {
+        var options = new PrimeVideoOptions(list, screen, rebuildScreen);
         options.addOptions();
         return options;
     }
@@ -77,25 +81,36 @@ public final class PrimeVideoOptions {
                               rebuildScreen.run();
                           }).build());
         list.addHeader(Component.translatable("primept.settings.render"));
+        pathTracing = OptionInstance.createBoolean(
+                "primept.settings.path_tracing",
+                OptionInstance.cachedConstantTooltip(
+                        Component.translatable("primept.settings.path_tracing.tooltip")),
+                PrimeClient.settings().pathTracing(),
+                value -> PrimeClient.updateSettings(PrimeClient.settings().withPathTracing(value)));
         renderer = new OptionInstance<>(
                 "primept.settings.renderer",
                 OptionInstance.cachedConstantTooltip(
                         Component.translatable("primept.settings.renderer.tooltip")),
                 (caption, value)
-                        -> Options.genericValueLabel(
-                                caption,
-                                Component.translatable("primept.settings.renderer." + value.key)),
-                new OptionInstance.Enum<>(List.of(Renderer.values()),
+                        -> Component.translatable("primept.settings.renderer." + value.key),
+                new OptionInstance.Enum<>(List.of(Renderer.PATH_TRACE, Renderer.RESTIR_PT),
                                           Codec.STRING.xmap(Renderer::fromKey, value -> value.key)),
-                PrimeClient.settings().renderer(),
-                value -> PrimeClient.updateSettings(PrimeClient.settings().withRenderer(value)));
+                PrimeClient.settings().realtimeRenderer(),
+                value
+                -> PrimeClient.updateSettings(PrimeClient.settings().withRealtimeRenderer(value)));
         offline = OptionInstance.createBoolean(
                 "primept.settings.offline",
                 OptionInstance.cachedConstantTooltip(
                         Component.translatable("primept.settings.offline.tooltip")),
                 PrimeClient.offlineRequested(), PrimeClient::requestOffline);
-        list.addBig(renderer);
+        list.addBig(pathTracing);
         list.addBig(offline);
+        list.addBig(renderer);
+        list.addBig(Button.builder(Component.translatable("primept.settings.restir_pt"), button -> {
+                              list.applyUnsavedChanges();
+                              Minecraft.getInstance().gui.setScreen(
+                                      new RestirSettingsScreen(screen));
+                          }).build());
         opacityMicromap = OptionInstance.createBoolean(
                 "primept.settings.opacity_micromap",
                 OptionInstance.cachedConstantTooltip(
@@ -127,8 +142,6 @@ public final class PrimeVideoOptions {
         list.addBig(controls.get(Control.BOUNCES));
         list.addBig(controls.get(Control.OFFLINE_SAMPLES));
         list.addBig(controls.get(Control.TERRAIN_BATCHES_PER_FRAME));
-        restir = new RestirVideoOptions(list);
-        restirSpatialOnly = restir.spatialOnly();
         list.addHeader(Component.translatable("primept.settings.lighting"));
         list.addBig(controls.get(Control.SUN_EV));
         list.addBig(controls.get(Control.SKY_EV));
@@ -172,19 +185,27 @@ public final class PrimeVideoOptions {
                 PrimeClient.diagnosticView(), PrimeClient::setDiagnosticView);
         list.addBig(view);
         list.addBig(controls.get(Control.DEPTH_RANGE));
+        list.addBig(Button.builder(Component.translatable("primept.settings.github"), button -> {
+                              list.applyUnsavedChanges();
+                              ConfirmLinkScreen
+                                      .confirmLink(
+                                              screen,
+                                              URI.create("https://github.com/bWFuanVzYWth/prime"))
+                                      .onPress(button);
+                          }).build());
         refresh();
     }
     public void tick() {
-        if (renderer.get() != PrimeClient.settings().renderer()) {
-            renderer.set(PrimeClient.settings().renderer());
+        if (renderer.get() != PrimeClient.settings().realtimeRenderer()) {
+            renderer.set(PrimeClient.settings().realtimeRenderer());
             if (list.findOption(renderer) instanceof CycleButton<?> button) {
                 @SuppressWarnings("unchecked") var choice = (CycleButton<Renderer>)button;
                 choice.setValue(renderer.get());
             }
         }
+        syncToggle(pathTracing, PrimeClient.settings().pathTracing());
         syncToggle(performanceCapture, Diagnostics.captureRequested());
         syncToggle(ignoreGlobalHistoryResets, PrimeClient.settings().ignoreGlobalHistoryResets());
-        syncToggle(restirSpatialOnly, PrimeClient.settings().restirSpatialOnly());
         syncToggle(nativeNoisyOutput, PrimeClient.settings().nativeNoisyOutput());
         if (offline.get() != PrimeClient.offlineRequested()) {
             offline.set(PrimeClient.offlineRequested());
@@ -205,18 +226,15 @@ public final class PrimeVideoOptions {
         }
     }
     private void refresh() {
-        restir.refresh();
         boolean frozen = PrimeClient.offlineRequested() || PrimeClient.offlineActive();
         list.findOption(performanceCapture).active = Minecraft.getInstance().level != null;
         list.findOption(renderer).active = PrimeClient.controlsAvailable();
+        list.findOption(pathTracing).active = PrimeClient.controlsAvailable();
         list.findOption(offline).active = PrimeClient.controlsAvailable() &&
                                           PrimeClient.settings().pathTracing() &&
                                           Minecraft.getInstance().level != null;
         list.findOption(opacityMicromap).active = PrimeClient.controlsAvailable();
         list.findOption(ignoreGlobalHistoryResets).active = PrimeClient.controlsAvailable();
-        list.findOption(restirSpatialOnly).active =
-                PrimeClient.controlsAvailable() && !frozen &&
-                PrimeClient.settings().renderer() == Renderer.RESTIR_PT;
         list.findOption(nativeNoisyOutput).active = PrimeClient.controlsAvailable() && !frozen;
         list.findOption(controls.get(Control.FRAME_GENERATION)).active =
                 PrimeClient.controlsAvailable() && !frozen &&

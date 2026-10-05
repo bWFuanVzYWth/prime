@@ -13,6 +13,7 @@ import dev.primept.render.OfflineMode;
 import dev.primept.settings.RenderSettings;
 import dev.primept.settings.RestirSettings;
 import dev.primept.RestirVideoOptions;
+import dev.primept.RestirSettingsScreen;
 import net.minecraft.client.gui.components.EditBox;
 import dev.primept.settings.SettingsFile;
 import java.lang.reflect.Field;
@@ -33,6 +34,7 @@ import net.minecraft.client.gui.components.events.ContainerEventHandler;
 import net.minecraft.client.gui.font.glyphs.EffectGlyph;
 import net.minecraft.client.gui.font.glyphs.EmptyGlyph;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.ConfirmLinkScreen;
 import net.minecraft.client.gui.screens.options.OptionsScreen;
 import net.minecraft.client.gui.screens.options.OptionsSubScreen;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -96,7 +98,7 @@ public final class SettingsCpuSmoke {
             offline.reset();
             inputAndSettings(unsafe, offline);
             System.out.println(
-                    "PRIME_SETTINGS_CPU_SMOKE_OK: Fabric-owned en/zh resources, embedded video options before vanilla, toggle/slider types and full widths, diagnostics placement, single DLSS caption, callback/resize, localized label widths, real version key routing, modifiers, frozen extraction/hand cancellation, repeated reset/scroll/resize");
+                    "PRIME_SETTINGS_CPU_SMOKE_OK: Fabric-owned en/zh resources, ordered path tracing/offline/realtime controls, ReSTIR subpage navigation and temporal semantics, single option captions, toggle/slider types and widths, diagnostics placement, callback/resize, localized labels, real version key routing, modifiers, frozen extraction/hand cancellation, repeated reset/scroll/resize");
         } finally {
             offline.reset();
             if (previous == null)
@@ -310,20 +312,48 @@ public final class SettingsCpuSmoke {
                                            .get(owner);
                     var rendererButton =
                             (CycleButton<RenderSettings.Renderer>)list.findOption(renderer);
-                    for (var kind : RenderSettings.Renderer.values()) {
+                    var pathTracing =
+                            (OptionInstance<Boolean>)field(PrimeVideoOptions.class, "pathTracing")
+                                    .get(owner);
+                    var pathTracingButton = (CycleButton<Boolean>)list.findOption(pathTracing);
+                    for (var kind : List.of(RenderSettings.Renderer.RESTIR_PT,
+                                            RenderSettings.Renderer.PATH_TRACE)) {
                         check(translations.containsKey("primept.settings.renderer." + kind.key),
                               "Missing renderer translation " + locale + ": " + kind.key);
                         rendererButton.onPress(new net.minecraft.client.input.KeyEvent(
                                 InputConstants.KEY_RETURN, 0, 0));
-                        check(PrimeClient.settings().renderer() == renderer.get(),
-                              "Renderer cycle dispatches the exact persisted choice");
+                        check(renderer.get() == kind &&
+                                      PrimeClient.settings().realtimeRenderer() == kind &&
+                                      PrimeClient.settings().pathTracing(),
+                              "Realtime renderer has only naive PT and ReSTIR choices");
+                        assertSingleCaption(rendererButton,
+                                            translations.get("primept.settings.renderer"));
                         PrimeClient.updateSettings(PrimeClient.settings().with(
                                 RenderSettings.Control.BOUNCES,
                                 settings.value(RenderSettings.Control.BOUNCES)));
                         check(PrimeClient.settings().renderer() == renderer.get(),
                               "Other option callbacks preserve the renderer");
                     }
-                    renderer.set(settings.renderer());
+                    pathTracingButton.onPress(new net.minecraft.client.input.KeyEvent(
+                            InputConstants.KEY_RETURN, 0, 0));
+                    check(!pathTracing.get() && !PrimeClient.settings().pathTracing() &&
+                                  PrimeClient.settings().renderer() ==
+                                          RenderSettings.Renderer.VANILLA,
+                          "The separate path tracing toggle restores vanilla rendering");
+                    rendererButton.onPress(new net.minecraft.client.input.KeyEvent(
+                            InputConstants.KEY_RETURN, 0, 0));
+                    check(renderer.get() == RenderSettings.Renderer.RESTIR_PT &&
+                                  PrimeClient.settings().realtimeRenderer() == renderer.get() &&
+                                  !PrimeClient.settings().pathTracing(),
+                          "Changing the remembered realtime renderer keeps path tracing disabled");
+                    pathTracingButton.onPress(new net.minecraft.client.input.KeyEvent(
+                            InputConstants.KEY_RETURN, 0, 0));
+                    check(pathTracing.get() && PrimeClient.settings().pathTracing() &&
+                                  PrimeClient.settings().renderer() ==
+                                          RenderSettings.Renderer.RESTIR_PT,
+                          "Reenabling path tracing restores the selected realtime renderer");
+                    PrimeClient.updateSettings(settings);
+                    renderer.set(settings.realtimeRenderer());
                     rendererButton.setValue(renderer.get());
                     for (var control : RenderSettings.Control.values())
                         check(controls.get(control).get() == settings.value(control),
@@ -334,7 +364,12 @@ public final class SettingsCpuSmoke {
                     check(terrainBatches.get() ==
                                   settings.value(RenderSettings.Control.TERRAIN_BATCHES_PER_FRAME),
                           "Terrain batch slider preserves each configured bound");
-                    assertRestirOptions(owner, list, translations, false);
+                    var restirScreen = openRestirSubpage(screen, router, rebuild);
+                    var restirList = optionsList(restirScreen);
+                    var restirModule =
+                            (RestirVideoOptions)field(RestirSettingsScreen.class, "restir")
+                                    .get(restirScreen);
+                    assertRestirOptions(restirScreen, translations, false);
                     var opacityMicromap = (net.minecraft.client.OptionInstance<Boolean>)field(
                                                   PrimeVideoOptions.class, "opacityMicromap")
                                                   .get(owner);
@@ -351,18 +386,18 @@ public final class SettingsCpuSmoke {
                                                            "ignoreGlobalHistoryResets")
                                     .get(owner);
                     var resetButton = (CycleButton<Boolean>)list.findOption(ignoreGlobalResets);
-                    var spatialOnly = (OptionInstance<Boolean>)field(PrimeVideoOptions.class,
-                                                                     "restirSpatialOnly")
-                                              .get(owner);
-                    var spatialButton = (CycleButton<Boolean>)list.findOption(spatialOnly);
-                    check(!spatialOnly.get() && !PrimeClient.settings().restirSpatialOnly(),
-                          "Spatial-only ReSTIR diagnostic defaults off");
-                    check(translations.containsKey("primept.settings.restir_spatial_only") &&
+                    var temporalReuse = (OptionInstance<Boolean>)field(RestirVideoOptions.class,
+                                                                       "temporalReuse")
+                                                .get(restirModule);
+                    var temporalButton = (CycleButton<Boolean>)restirList.findOption(temporalReuse);
+                    check(temporalReuse.get() && !PrimeClient.settings().restirSpatialOnly(),
+                          "Temporal reuse defaults on and means spatial-only is disabled");
+                    check(translations.containsKey("primept.settings.restir_pt.temporal_reuse") &&
                                   translations.containsKey(
-                                          "primept.settings.restir_spatial_only.tooltip"),
-                          "Spatial-only ReSTIR diagnostic is translated");
-                    check(!spatialButton.active,
-                          "Spatial-only control is inactive for the path-trace integrator");
+                                          "primept.settings.restir_pt.temporal_reuse.tooltip"),
+                          "Temporal reuse is translated");
+                    check(!temporalButton.active,
+                          "Temporal reuse is inactive for the naive path tracer");
                     check(!ignoreGlobalResets.get(),
                           "Global history reset diagnostic is off by default");
                     check(translations.containsKey(
@@ -381,6 +416,7 @@ public final class SettingsCpuSmoke {
                     check(list.findOption(opacityMicromap) instanceof CycleButton<?> &&
                                   list.findOption(nativeNoisyOutput) instanceof CycleButton<?>,
                           "Diagnostic booleans use toggle buttons");
+                    assertRootCaptions(owner, list, translations);
                     for (var control : RenderSettings.Control.values()) {
                         var widget = list.findOption(controls.get(control));
                         boolean toggle = control == RenderSettings.Control.HDR ||
@@ -390,16 +426,15 @@ public final class SettingsCpuSmoke {
                               "Toggle/slider widget type " + control);
                         check(widget.getWidth() == list.getRowWidth(),
                               "Full-width numeric/toggle option " + control);
+                        assertOptionCaption(controls.get(control), widget,
+                                            translations.get("primept.settings." + control.key));
                     }
                     var qualityButton =
                             (CycleButton<RenderSettings.DlssQuality>)list.findOption(dlssQuality);
                     String caption = translations.get("primept.settings.dlss_quality");
                     for (var quality : RenderSettings.DlssQuality.values()) {
                         qualityButton.setValue(quality);
-                        String message = qualityButton.getMessage().getString();
-                        check(message.indexOf(caption) >= 0 &&
-                                      message.indexOf(caption) == message.lastIndexOf(caption),
-                              "DLSS caption occurs exactly once: " + message);
+                        assertSingleCaption(qualityButton, caption);
                     }
                     qualityButton.setValue(dlssQuality.get());
                     check(dlssQuality.get() == RenderSettings.DlssQuality.PERFORMANCE,
@@ -409,12 +444,14 @@ public final class SettingsCpuSmoke {
                     offline.request(true);
                     offline.committed(true);
                     screen.tick();
+                    restirScreen.tick();
                     check(list.findOption(opacityMicromap).active,
                           "Frozen OMM control stays available");
                     check(list.findOption(ignoreGlobalResets).active,
                           "The reset diagnostic remains available while frozen");
-                    check(!spatialButton.active,
-                          "Spatial-only ReSTIR diagnostic does not control offline accumulation");
+                    check(!temporalButton.active,
+                          "Temporal reuse does not control offline accumulation");
+                    assertRestirOptions(restirScreen, translations, false);
                     check(list.findOption(terrainBatches).active,
                           "Frozen terrain scheduling control stays available");
                     check(!list.findOption(controls.get(RenderSettings.Control.STARS)).active,
@@ -448,7 +485,9 @@ public final class SettingsCpuSmoke {
                                           .equals(PrimeClient.settings()),
                                   "The reset diagnostic callback preserves all persisted settings");
                         }
-                        for (int budget : new int[] {1, 128, 8}) {
+                        for (int budget :
+                             new int[] {1, 128,
+                                        RenderSettings.Control.TERRAIN_BATCHES_PER_FRAME.initial}) {
                             terrainBatches.set(budget);
                             check(PrimeClient.settings().value(
                                           RenderSettings.Control.TERRAIN_BATCHES_PER_FRAME) ==
@@ -484,29 +523,48 @@ public final class SettingsCpuSmoke {
                         PrimeClient.updateSettings(
                                 originalSettings.withRenderer(RenderSettings.Renderer.RESTIR_PT));
                         screen.tick();
-                        check(spatialButton.active,
-                              "Spatial-only control is active for realtime ReSTIR");
-                        assertRestirOptions(owner, list, translations, true);
-                        for (boolean enabled : new boolean[] {true, false}) {
-                            spatialButton.onPress(new net.minecraft.client.input.KeyEvent(
+                        restirScreen.tick();
+                        check(temporalButton.active,
+                              "Temporal reuse is active for realtime ReSTIR");
+                        assertRestirOptions(restirScreen, translations, true);
+                        for (boolean enabled : new boolean[] {false, true}) {
+                            temporalButton.onPress(new net.minecraft.client.input.KeyEvent(
                                     InputConstants.KEY_RETURN, 0, 0));
-                            check(spatialOnly.get() == enabled &&
-                                          PrimeClient.settings().restirSpatialOnly() == enabled &&
+                            check(temporalReuse.get() == enabled &&
+                                          PrimeClient.settings().restirTemporalReuse() == enabled &&
+                                          PrimeClient.settings().restirSpatialOnly() != enabled &&
                                           PrimeClient.settings().nativeNoisyOutput() ==
                                                   originalSettings.nativeNoisyOutput() &&
                                           PrimeClient.settings().dlssQuality() ==
                                                   originalSettings.dlssQuality() &&
                                           !offline.active() && !offline.requested(),
-                                  "Actual spatial-only button preserves reconstruction and offline controls");
+                                  "Temporal toggle has positive semantics and preserves reconstruction/offline");
+                            assertSingleCaption(
+                                    temporalButton,
+                                    translations.get("primept.settings.restir_pt.temporal_reuse"));
                             check(SettingsFile.decode(SettingsFile.encode(PrimeClient.settings()))
                                           .settings()
                                           .equals(PrimeClient.settings()),
-                                  "Spatial-only callback persists the exact setting");
+                                  "Temporal reuse callback persists its exact inverse ABI setting");
                         }
+                        PrimeClient.updateSettings(PrimeClient.settings().withPathTracing(false));
+                        restirScreen.tick();
+                        check(!temporalButton.active,
+                              "Disabling path tracing disables realtime ReSTIR controls");
+                        assertRestirOptions(restirScreen, translations, false);
+                        PrimeClient.updateSettings(PrimeClient.settings().withPathTracing(true));
+                        offline.request(true);
+                        offline.committed(true);
+                        restirScreen.tick();
+                        check(!temporalButton.active,
+                              "Frozen ReSTIR keeps temporal controls inactive");
+                        assertRestirOptions(restirScreen, translations, false);
+                        offline.reset();
                         PrimeClient.updateSettings(originalSettings);
                         screen.tick();
-                        check(!spatialButton.active,
-                              "Path tracing leaves the spatial-only diagnostic inactive");
+                        restirScreen.tick();
+                        check(!temporalButton.active,
+                              "Naive PT leaves temporal reuse controls inactive");
                         for (var control : List.of(RenderSettings.Control.STARS,
                                                    RenderSettings.Control.FRAME_GENERATION)) {
                             for (int value :
@@ -663,7 +721,12 @@ public final class SettingsCpuSmoke {
             Object row = list.children().get(i);
             if (row.getClass().getSimpleName().equals("HeaderEntry")) {
                 var widget = (AbstractWidget)((ContainerEventHandler)row).children().getFirst();
-                if (!widget.getMessage().getString().startsWith("Prime PT"))
+                if (List.of("render", "lighting", "display", "diagnostics")
+                            .stream()
+                            .noneMatch(group
+                                       -> widget.getMessage().getString().equals(
+                                               Component.translatable("primept.settings." + group)
+                                                       .getString())))
                     return i;
             }
         }
@@ -683,14 +746,12 @@ public final class SettingsCpuSmoke {
                                         .getMessage()
                                         .getString())
                         .toList();
-        check(headers.size() == 8, "Five Prime groups and three vanilla groups: " + headers);
-        for (int i = 0; i < 5; ++i) {
-            String group =
-                    List.of("render", "restir_pt", "lighting", "display", "diagnostics").get(i);
+        check(headers.size() == 7, "Four Prime groups and three vanilla groups: " + headers);
+        for (int i = 0; i < 4; ++i) {
+            String group = List.of("render", "lighting", "display", "diagnostics").get(i);
             check(headers.get(i).equals(
-                          Component.translatable("primept.settings." + group).getString()) &&
-                          headers.get(i).startsWith("Prime PT"),
-                  "Prime groups precede vanilla with their prefix: " + headers);
+                          Component.translatable("primept.settings." + group).getString()),
+                  "Prime groups precede vanilla: " + headers);
         }
         int vanilla = firstVanillaRow(list);
         var owner = videoOptions(screen);
@@ -699,18 +760,31 @@ public final class SettingsCpuSmoke {
         var globalResets =
                 (OptionInstance<?>)field(PrimeVideoOptions.class, "ignoreGlobalHistoryResets")
                         .get(owner);
-        var spatialOnly =
-                (OptionInstance<?>)field(PrimeVideoOptions.class, "restirSpatialOnly").get(owner);
+        var pathTracing =
+                (OptionInstance<?>)field(PrimeVideoOptions.class, "pathTracing").get(owner);
+        var offline = (OptionInstance<?>)field(PrimeVideoOptions.class, "offline").get(owner);
+        var renderer = (OptionInstance<?>)field(PrimeVideoOptions.class, "renderer").get(owner);
+        for (int i = 0; i < 3; ++i)
+            check(((ContainerEventHandler)list.children().get(2 + i))
+                          .children()
+                          .contains(
+                                  list.findOption(List.of(pathTracing, offline, renderer).get(i))),
+                  "Rendering starts with path tracing, offline, then realtime renderer");
+        check(((ContainerEventHandler)list.children().get(5))
+                      .children()
+                      .stream()
+                      .anyMatch(
+                              child
+                              -> child instanceof Button button &&
+                                         button.getMessage().getString().equals(
+                                                 Component
+                                                         .translatable("primept.settings.restir_pt")
+                                                         .getString())),
+              "Rendering contains one ReSTIR settings subpage button");
         boolean diagnostics = false;
-        boolean restirGroup = false;
         for (int i = 0; i < vanilla; ++i) {
             Object row = list.children().get(i);
             if (row.getClass().getSimpleName().equals("HeaderEntry")) {
-                restirGroup = ((AbstractWidget)((ContainerEventHandler)row).children().getFirst())
-                                      .getMessage()
-                                      .getString()
-                                      .equals(Component.translatable("primept.settings.restir_pt")
-                                                      .getString());
                 diagnostics = ((AbstractWidget)((ContainerEventHandler)row).children().getFirst())
                                       .getMessage()
                                       .getString()
@@ -721,9 +795,25 @@ public final class SettingsCpuSmoke {
                 ((ContainerEventHandler)row).children().contains(list.findOption(rr)) ||
                 ((ContainerEventHandler)row).children().contains(list.findOption(globalResets)))
                 check(diagnostics, "RR and OMM belong only to the diagnostics group");
-            if (((ContainerEventHandler)row).children().contains(list.findOption(spatialOnly)))
-                check(restirGroup, "Spatial-only belongs to the ReSTIR PT group");
         }
+        var controls = (java.util.EnumMap<?, ?>)field(PrimeVideoOptions.class, "controls").get(owner);
+        var depthRange = (OptionInstance<?>)controls.get(RenderSettings.Control.DEPTH_RANGE);
+        check(diagnostics &&
+                      ((ContainerEventHandler)list.children().get(vanilla - 2))
+                              .children()
+                              .contains(list.findOption(depthRange)) &&
+                      ((ContainerEventHandler)list.children().get(vanilla - 1))
+                              .children()
+                              .stream()
+                              .anyMatch(
+                                      child
+                                      -> child instanceof Button button &&
+                                                 button.getMessage().getString().equals(
+                                                         Component
+                                                                 .translatable(
+                                                                         "primept.settings.github")
+                                                                 .getString())),
+              "GitHub finishes Prime diagnostics after its depth control and before vanilla options");
         check(list.findOption(Minecraft.getInstance().options.renderDistance()) != null,
               "Vanilla render-distance option remains present");
         int[] layoutWidgets = {0};
@@ -733,10 +823,11 @@ public final class SettingsCpuSmoke {
     }
 
     @SuppressWarnings("unchecked")
-    private static void assertRestirOptions(PrimeVideoOptions owner, OptionsList list,
+    private static void assertRestirOptions(RestirSettingsScreen screen,
                                             HashMap<String, String> translations, boolean callbacks)
             throws Exception {
-        var module = (RestirVideoOptions)field(PrimeVideoOptions.class, "restir").get(owner);
+        var list = optionsList(screen);
+        var module = (RestirVideoOptions)field(RestirSettingsScreen.class, "restir").get(screen);
         var options =
                 (List<OptionInstance<?>>)field(RestirVideoOptions.class, "controls").get(module);
         var seed = (EditBox)field(RestirVideoOptions.class, "seed").get(module);
@@ -756,6 +847,7 @@ public final class SettingsCpuSmoke {
                   "ReSTIR toggle/mode/slider type: " + control);
             check(widget.getWidth() == list.getRowWidth(), "Full-width ReSTIR control: " + control);
             check(widget.active == callbacks, "ReSTIR controls follow renderer availability");
+            assertOptionCaption(option, widget, translations.get(key));
             Object configured = restirOptionValue(control, before.restir().value(control));
             check(option.get().equals(configured), "Actual configured ReSTIR value: " + control);
             if (control == RestirSettings.Control.DEBUG_VIEW ||
@@ -791,6 +883,11 @@ public final class SettingsCpuSmoke {
                 }
                 option.set(configured);
             }
+            assertSingleCaption(widget, translations.get(key));
+            String label = widget.getMessage().getString();
+            check(!label.contains("primept.settings."), "Unresolved ReSTIR label " + label);
+            check(Minecraft.getInstance().font.width(widget.getMessage()) <= widget.getWidth() - 16,
+                  "ReSTIR label exceeds its control: " + label);
         }
         check(seed.active == callbacks, "Seed availability follows ReSTIR controls");
         if (callbacks) {
@@ -807,6 +904,124 @@ public final class SettingsCpuSmoke {
             check(SettingsFile.decode(SettingsFile.encode(before)).settings().equals(before),
                   "Every ReSTIR control persists through the real file codec");
         }
+    }
+
+    private static OptionsList optionsList(Screen screen) {
+        return (OptionsList)screen.children()
+                .stream()
+                .filter(OptionsList.class ::isInstance)
+                .findFirst()
+                .orElseThrow();
+    }
+
+    private static RestirSettingsScreen openRestirSubpage(VideoSettingsScreen parent,
+                                                          ScreenRouter router,
+                                                          java.lang.reflect.Method rebuild)
+            throws Exception {
+        var list = optionsList(parent);
+        var buttons = ((List<?>)list.children())
+                              .stream()
+                              .flatMap(row -> ((ContainerEventHandler)row).children().stream())
+                              .filter(Button.class ::isInstance)
+                              .map(Button.class ::cast)
+                              .filter(button
+                                      -> button.getMessage().getString().equals(
+                                              Component.translatable("primept.settings.restir_pt")
+                                                      .getString()))
+                              .toList();
+        check(buttons.size() == 1, "All ReSTIR settings share one subpage entry");
+        buttons.getFirst().onPress(null);
+        check(router.selected instanceof RestirSettingsScreen &&
+                      field(OptionsSubScreen.class, "lastScreen").get(router.selected) == parent,
+              "The actual ReSTIR button opens the vanilla options subpage and keeps its parent");
+        var child = (RestirSettingsScreen)router.selected;
+        child.width = 480;
+        child.height = 270;
+        rebuild.invoke(child);
+        int initialWidgets = child.children().size();
+        for (int[] size : new int[][] {{320, 240}, {641, 361}, {480, 270}}) {
+            child.resize(size[0], size[1]);
+            check(child.children().size() == initialWidgets,
+                  "ReSTIR subpage resize retains one list/title/footer");
+            int[] widgets = {0};
+            child.layout.visitWidgets(widget -> ++widgets[0]);
+            check(widgets[0] == initialWidgets, "ReSTIR layout releases obsolete widgets");
+        }
+        var done = child.children()
+                           .stream()
+                           .filter(Button.class ::isInstance)
+                           .map(Button.class ::cast)
+                           .filter(button
+                                   -> button.getMessage().getString().equals(
+                                           Component.translatable("gui.done").getString()))
+                           .findFirst()
+                           .orElseThrow();
+        done.onPress(null);
+        check(router.selected == parent, "Native Done returns to the original video page");
+        buttons.getFirst().onPress(null);
+        check(router.selected instanceof RestirSettingsScreen, "ReSTIR subpage can reopen");
+        child = (RestirSettingsScreen)router.selected;
+        child.width = 480;
+        child.height = 270;
+        rebuild.invoke(child);
+        child.onClose();
+        check(router.selected == parent, "Native Escape close preserves the original parent");
+        var github = ((ContainerEventHandler)list.children().get(firstVanillaRow(list) - 1))
+                             .children()
+                             .stream()
+                             .filter(Button.class ::isInstance)
+                             .map(Button.class ::cast)
+                             .findFirst()
+                             .orElseThrow();
+        github.onPress(null);
+        check(router.selected instanceof ConfirmLinkScreen &&
+                      field(ConfirmLinkScreen.class, "url")
+                              .get(router.selected)
+                              .toString()
+                              .equals("https://github.com/bWFuanVzYWth/prime"),
+              "Actual GitHub button opens the vanilla confirmation for the repository URL");
+        return child;
+    }
+
+    private static void assertRootCaptions(PrimeVideoOptions owner, OptionsList list,
+                                           HashMap<String, String> translations) throws Exception {
+        for (String[] entry :
+             new String[][] {{"pathTracing", "path_tracing"},
+                             {"offline", "offline"},
+                             {"renderer", "renderer"},
+                             {"opacityMicromap", "opacity_micromap"},
+                             {"nativeNoisyOutput", "native_noisy_output"},
+                             {"dlssQuality", "dlss_quality"},
+                             {"performanceCapture", "performance_export"},
+                             {"ignoreGlobalHistoryResets", "ignore_global_history_resets"},
+                             {"view", "view"}}) {
+            var option = (OptionInstance<?>)field(PrimeVideoOptions.class, entry[0]).get(owner);
+            assertOptionCaption(option, list.findOption(option),
+                                translations.get("primept.settings." + entry[1]));
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void assertOptionCaption(OptionInstance<?> option, AbstractWidget widget,
+                                            String caption) {
+        if (widget instanceof CycleButton<?> button && option.values() instanceof
+                                                               OptionInstance.Enum<?> choices) {
+            var cycle = (CycleButton<Object>)button;
+            for (Object value : choices.values()) {
+                cycle.setValue(value);
+                assertSingleCaption(widget, caption);
+            }
+            cycle.setValue(option.get());
+        } else {
+            assertSingleCaption(widget, caption);
+        }
+    }
+
+    private static void assertSingleCaption(AbstractWidget widget, String caption) {
+        String message = widget.getMessage().getString();
+        check(caption != null && !caption.isEmpty() && message.indexOf(caption) >= 0 &&
+                      message.indexOf(caption) == message.lastIndexOf(caption),
+              "Option caption occurs exactly once: " + message);
     }
 
     private static Object restirOptionValue(RestirSettings.Control control, double value) {

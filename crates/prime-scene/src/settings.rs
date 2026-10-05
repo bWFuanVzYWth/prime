@@ -86,7 +86,7 @@ impl Default for RenderSettings {
             integrator: Integrator::PathTrace,
             bounces: 12,
             offline_samples: 1,
-            terrain_batches_per_frame: 8,
+            terrain_batches_per_frame: 1,
             exposure: 1.0,
             hue: 0.75,
             saturation: 0.20,
@@ -341,7 +341,7 @@ mod tests {
             1,
             0,
             3,
-            8,
+            1,
             1_f32.to_bits(),
             0.6_f32.to_bits(),
             0,
@@ -760,7 +760,7 @@ mod tests {
     #[test]
     fn terrain_batch_budget_defaults_range_and_transport_independence() {
         let defaults = RenderSettings::default();
-        assert_eq!(defaults.terrain_batches_per_frame, 8);
+        assert_eq!(defaults.terrain_batches_per_frame, 1);
         for budget in 1..=128_u32 {
             let mut bytes = golden();
             bytes[68..72].copy_from_slice(&budget.to_le_bytes());

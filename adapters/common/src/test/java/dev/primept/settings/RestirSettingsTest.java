@@ -18,14 +18,15 @@ final class RestirSettingsTest {
             restir = restir.with(control, values[control.ordinal()]);
         var settings = RenderSettings.defaults()
                                .withRestir(restir.withSeed(0xffffffffL))
-                               .withRestirSpatialOnly(true);
+                               .withRestirTemporalReuse(false);
         String file = SettingsFile.encode(settings);
         var loaded = SettingsFile.decode(file);
         assertEquals("", loaded.resetReason());
         assertEquals(settings, loaded.settings());
         assertEquals(settings.hashCode(), loaded.settings().hashCode());
         assertFalse(file.contains("diagnostics.restir_spatial_only"));
-        assertTrue(file.contains("restir_pt.spatial_only=true\n"));
+        assertFalse(file.contains("restir_pt.spatial_only"));
+        assertTrue(file.contains("restir_pt.temporal_reuse=false\n"));
         assertTrue(file.contains("restir_pt.seed=4294967295\n"));
         assertTrue(file.contains("restir_pt.duplicate_map=false\n"));
         assertTrue(file.contains("restir_pt.rr_decorrelation=false\n"));
@@ -120,7 +121,9 @@ final class RestirSettingsTest {
                                        .with(RenderSettings.Control.BOUNCES, 32)
                                        .with(RenderSettings.Control.EXPOSURE_EV, -8);
                 String legacy = SettingsFile.encode(expected)
-                                        .replace("version=12", "version=" + version)
+                                        .replace("version=13", "version=" + version)
+                                        .replace("path_tracing=true\nrealtime_renderer=restir_pt",
+                                                 "renderer=restir_pt")
                                         .replaceAll("(?m)^restir_pt\\.[^\\n]*\\n", "") +
                                 "diagnostics.restir_spatial_only=" + spatialOnly + "\n";
                 if (version <= 9)

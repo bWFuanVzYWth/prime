@@ -8,12 +8,12 @@ import java.util.Arrays;
 
 /** Immutable client settings. Version adapters own widgets; native consumes the validated wire. */
 public final class RenderSettings {
-    public static final int VERSION = 12;
+    public static final int VERSION = 13;
     public static final int WIRE_BYTES = (int)PrimeSettings.SIZE;
     public enum Control {
         BOUNCES("render.bounces", 1, 64, 12),
         OFFLINE_SAMPLES("render.offline_samples", 1, 64, 1),
-        TERRAIN_BATCHES_PER_FRAME("terrain.batches_per_frame", 1, 128, 8),
+        TERRAIN_BATCHES_PER_FRAME("terrain.batches_per_frame", 1, 128, 1),
         LATITUDE("astronomy.latitude_degrees", -90, 90, 30),
         SOLAR_LONGITUDE("astronomy.solar_longitude_degrees", 0, 359, 0),
         SUN_EV("lighting.sun_ev_quarters", -32, 32, 0),
@@ -74,7 +74,8 @@ public final class RenderSettings {
             throw new IllegalArgumentException("Unknown renderer: " + key);
         }
     }
-    private final Renderer renderer;
+    private final Renderer realtimeRenderer;
+    private final boolean pathTracing;
     private final boolean opacityMicromap;
     private final boolean nativeNoisyOutput;
     private final DlssQuality dlssQuality;
@@ -84,11 +85,12 @@ public final class RenderSettings {
     private final RestirSettings restir;
     private final int[] values;
 
-    private RenderSettings(Renderer renderer, boolean opacityMicromap, boolean nativeNoisyOutput,
-                           DlssQuality dlssQuality, LightSampling lightSampling,
-                           boolean ignoreGlobalHistoryResets, boolean restirSpatialOnly,
-                           RestirSettings restir, int[] values) {
-        this.renderer = renderer;
+    private RenderSettings(Renderer realtimeRenderer, boolean pathTracing, boolean opacityMicromap,
+                           boolean nativeNoisyOutput, DlssQuality dlssQuality,
+                           LightSampling lightSampling, boolean ignoreGlobalHistoryResets,
+                           boolean restirSpatialOnly, RestirSettings restir, int[] values) {
+        this.realtimeRenderer = realtimeRenderer;
+        this.pathTracing = pathTracing;
         this.opacityMicromap = opacityMicromap;
         this.nativeNoisyOutput = nativeNoisyOutput;
         this.dlssQuality = dlssQuality;
@@ -100,15 +102,19 @@ public final class RenderSettings {
     }
     public static RenderSettings defaults() {
         return new RenderSettings(
-                Renderer.PATH_TRACE, true, false, DlssQuality.PERFORMANCE, LightSampling.TREE,
+                Renderer.PATH_TRACE, true, true, false, DlssQuality.PERFORMANCE, LightSampling.TREE,
                 false, false, RestirSettings.defaults(),
                 Arrays.stream(Control.values()).mapToInt(c -> c.initial).toArray());
     }
     public boolean pathTracing() {
-        return renderer != Renderer.VANILLA;
+        return pathTracing;
     }
     public Renderer renderer() {
-        return renderer;
+        return pathTracing ? realtimeRenderer : Renderer.VANILLA;
+    }
+    /** The remembered real-time integrator is independent of the vanilla/PT switch. */
+    public Renderer realtimeRenderer() {
+        return realtimeRenderer;
     }
     public boolean opacityMicromap() {
         return opacityMicromap;
@@ -128,6 +134,9 @@ public final class RenderSettings {
     public boolean restirSpatialOnly() {
         return restirSpatialOnly;
     }
+    public boolean restirTemporalReuse() {
+        return !restirSpatialOnly;
+    }
     public RestirSettings restir() {
         return restir;
     }
@@ -135,9 +144,9 @@ public final class RenderSettings {
         java.util.Objects.requireNonNull(value);
         if (restir.equals(value))
             return this;
-        return new RenderSettings(renderer, opacityMicromap, nativeNoisyOutput, dlssQuality,
-                                  lightSampling, ignoreGlobalHistoryResets, restirSpatialOnly,
-                                  value, values);
+        return new RenderSettings(realtimeRenderer, pathTracing, opacityMicromap, nativeNoisyOutput,
+                                  dlssQuality, lightSampling, ignoreGlobalHistoryResets,
+                                  restirSpatialOnly, value, values);
     }
     public boolean hdr() {
         return value(Control.HDR) != 0;
@@ -149,27 +158,40 @@ public final class RenderSettings {
         return values[control.ordinal()];
     }
     public RenderSettings withPathTracing(boolean value) {
-        return withRenderer(value ? pathTracing() ? renderer : Renderer.PATH_TRACE
-                                  : Renderer.VANILLA);
+        if (value == pathTracing)
+            return this;
+        return new RenderSettings(realtimeRenderer, value, opacityMicromap, nativeNoisyOutput,
+                                  dlssQuality, lightSampling, ignoreGlobalHistoryResets,
+                                  restirSpatialOnly, restir, values);
     }
+    /** Compatibility for startup/backend requests: PT choices enable PT, vanilla disables it. */
     public RenderSettings withRenderer(Renderer value) {
         java.util.Objects.requireNonNull(value);
-        if (value == renderer)
+        return value == Renderer.VANILLA ? withPathTracing(false)
+                                         : withRealtimeRenderer(value).withPathTracing(true);
+    }
+    public RenderSettings withRealtimeRenderer(Renderer value) {
+        java.util.Objects.requireNonNull(value);
+        if (value == Renderer.VANILLA)
+            throw new IllegalArgumentException("Vanilla is not a real-time PT integrator");
+        if (value == realtimeRenderer)
             return this;
-        return new RenderSettings(value, opacityMicromap, nativeNoisyOutput, dlssQuality,
-                                  lightSampling, ignoreGlobalHistoryResets, restirSpatialOnly,
-                                  restir, values);
+        return new RenderSettings(value, pathTracing, opacityMicromap, nativeNoisyOutput,
+                                  dlssQuality, lightSampling, ignoreGlobalHistoryResets,
+                                  restirSpatialOnly, restir, values);
     }
     public RenderSettings withOpacityMicromap(boolean value) {
-        return new RenderSettings(renderer, value, nativeNoisyOutput, dlssQuality, lightSampling,
-                                  ignoreGlobalHistoryResets, restirSpatialOnly, restir, values);
+        return new RenderSettings(realtimeRenderer, pathTracing, value, nativeNoisyOutput,
+                                  dlssQuality, lightSampling, ignoreGlobalHistoryResets,
+                                  restirSpatialOnly, restir, values);
     }
     public RenderSettings withNativeNoisyOutput(boolean value) {
-        return new RenderSettings(renderer, opacityMicromap, value, dlssQuality, lightSampling,
-                                  ignoreGlobalHistoryResets, restirSpatialOnly, restir, values);
+        return new RenderSettings(realtimeRenderer, pathTracing, opacityMicromap, value,
+                                  dlssQuality, lightSampling, ignoreGlobalHistoryResets,
+                                  restirSpatialOnly, restir, values);
     }
     public RenderSettings withDlssQuality(DlssQuality value) {
-        return new RenderSettings(renderer, opacityMicromap, nativeNoisyOutput,
+        return new RenderSettings(realtimeRenderer, pathTracing, opacityMicromap, nativeNoisyOutput,
                                   java.util.Objects.requireNonNull(value), lightSampling,
                                   ignoreGlobalHistoryResets, restirSpatialOnly, restir, values);
     }
@@ -177,28 +199,35 @@ public final class RenderSettings {
         java.util.Objects.requireNonNull(value);
         if (value == lightSampling)
             return this;
-        return new RenderSettings(renderer, opacityMicromap, nativeNoisyOutput, dlssQuality, value,
-                                  ignoreGlobalHistoryResets, restirSpatialOnly, restir, values);
+        return new RenderSettings(realtimeRenderer, pathTracing, opacityMicromap, nativeNoisyOutput,
+                                  dlssQuality, value, ignoreGlobalHistoryResets, restirSpatialOnly,
+                                  restir, values);
     }
     public RenderSettings withIgnoreGlobalHistoryResets(boolean value) {
         if (value == ignoreGlobalHistoryResets)
             return this;
-        return new RenderSettings(renderer, opacityMicromap, nativeNoisyOutput, dlssQuality,
-                                  lightSampling, value, restirSpatialOnly, restir, values);
+        return new RenderSettings(realtimeRenderer, pathTracing, opacityMicromap, nativeNoisyOutput,
+                                  dlssQuality, lightSampling, value, restirSpatialOnly, restir,
+                                  values);
     }
     public RenderSettings withRestirSpatialOnly(boolean value) {
         if (value == restirSpatialOnly)
             return this;
-        return new RenderSettings(renderer, opacityMicromap, nativeNoisyOutput, dlssQuality,
-                                  lightSampling, ignoreGlobalHistoryResets, value, restir, values);
+        return new RenderSettings(realtimeRenderer, pathTracing, opacityMicromap, nativeNoisyOutput,
+                                  dlssQuality, lightSampling, ignoreGlobalHistoryResets, value,
+                                  restir, values);
+    }
+    /** Public setting uses positive semantics; the native ABI retains its spatial-only bit. */
+    public RenderSettings withRestirTemporalReuse(boolean value) {
+        return withRestirSpatialOnly(!value);
     }
     public RenderSettings with(Control control, int value) {
         control.validate(value);
         int[] next = values.clone();
         next[control.ordinal()] = value;
-        return new RenderSettings(renderer, opacityMicromap, nativeNoisyOutput, dlssQuality,
-                                  lightSampling, ignoreGlobalHistoryResets, restirSpatialOnly,
-                                  restir, next);
+        return new RenderSettings(realtimeRenderer, pathTracing, opacityMicromap, nativeNoisyOutput,
+                                  dlssQuality, lightSampling, ignoreGlobalHistoryResets,
+                                  restirSpatialOnly, restir, next);
     }
     /** Named C structure, borrowed only for prime_configure; offline and view are session controls. */
     public void write(ByteBuffer target, boolean offline, View view) {
@@ -230,7 +259,7 @@ public final class RenderSettings {
         PrimeSettings.hdr_reference_white(s, value(Control.HDR_WHITE));
         PrimeSettings.frame_generation(s, frameGeneration() ? 1 : 0);
         PrimeSettings.light_sampling(s, lightSampling.wireId);
-        PrimeSettings.integrator(s, renderer.integrator);
+        PrimeSettings.integrator(s, renderer().integrator);
         PrimeSettings.ignore_global_history_resets(s, ignoreGlobalHistoryResets ? 1 : 0);
         PrimeSettings.restir_spatial_only(s, restirSpatialOnly ? 1 : 0);
         target.position(WIRE_BYTES);
@@ -241,7 +270,9 @@ public final class RenderSettings {
     }
     @Override
     public boolean equals(Object other) {
-        return other instanceof RenderSettings settings && renderer == settings.renderer &&
+        return other instanceof RenderSettings settings &&
+                realtimeRenderer == settings.realtimeRenderer &&
+                pathTracing == settings.pathTracing &&
                 opacityMicromap == settings.opacityMicromap &&
                 nativeNoisyOutput == settings.nativeNoisyOutput &&
                 dlssQuality == settings.dlssQuality && lightSampling == settings.lightSampling &&
@@ -251,9 +282,9 @@ public final class RenderSettings {
     }
     @Override
     public int hashCode() {
-        return 31 * java.util.Objects.hash(renderer, opacityMicromap, nativeNoisyOutput,
-                                           dlssQuality, lightSampling, ignoreGlobalHistoryResets,
-                                           restirSpatialOnly, restir) +
+        return 31 * java.util.Objects.hash(realtimeRenderer, pathTracing, opacityMicromap,
+                                           nativeNoisyOutput, dlssQuality, lightSampling,
+                                           ignoreGlobalHistoryResets, restirSpatialOnly, restir) +
                 Arrays.hashCode(values);
     }
 }

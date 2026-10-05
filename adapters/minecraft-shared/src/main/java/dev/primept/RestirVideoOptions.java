@@ -12,6 +12,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.OptionInstance;
 import net.minecraft.client.Options;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.components.CycleButton;
 import net.minecraft.client.gui.components.OptionsList;
 import net.minecraft.client.gui.components.StringWidget;
 import net.minecraft.client.gui.components.Tooltip;
@@ -21,20 +22,20 @@ import net.minecraft.network.chat.Component;
 public final class RestirVideoOptions {
     private final OptionsList list;
     private final List<OptionInstance<?>> controls = new ArrayList<>();
-    private final OptionInstance<Boolean> spatialOnly;
+    private final OptionInstance<Boolean> temporalReuse;
     private final EditBox seed;
 
     public RestirVideoOptions(OptionsList list) {
         this.list = list;
-        list.addHeader(Component.translatable("primept.settings.restir_pt"));
-        spatialOnly = OptionInstance.createBoolean(
-                "primept.settings.restir_spatial_only",
-                OptionInstance.cachedConstantTooltip(
-                        Component.translatable("primept.settings.restir_spatial_only.tooltip")),
-                PrimeClient.settings().restirSpatialOnly(),
+        temporalReuse = OptionInstance.createBoolean(
+                "primept.settings.restir_pt.temporal_reuse",
+                OptionInstance.cachedConstantTooltip(Component.translatable(
+                        "primept.settings.restir_pt.temporal_reuse.tooltip")),
+                PrimeClient.settings().restirTemporalReuse(),
                 value
-                -> PrimeClient.updateSettings(PrimeClient.settings().withRestirSpatialOnly(value)));
-        list.addBig(spatialOnly);
+                -> PrimeClient.updateSettings(
+                        PrimeClient.settings().withRestirTemporalReuse(value)));
+        list.addBig(temporalReuse);
         for (var control : Control.values()) {
             var option = control(control);
             controls.add(option);
@@ -57,10 +58,6 @@ public final class RestirVideoOptions {
             }
         });
         list.addSmall(new StringWidget(caption, Minecraft.getInstance().font), seed);
-    }
-
-    public OptionInstance<Boolean> spatialOnly() {
-        return spatialOnly;
     }
 
     public static OptionInstance<?> control(Control control) {
@@ -136,9 +133,18 @@ public final class RestirVideoOptions {
     }
 
     public void refresh() {
+        boolean temporal = PrimeClient.settings().restirTemporalReuse();
+        if (temporalReuse.get() != temporal) {
+            temporalReuse.set(temporal);
+            if (list.findOption(temporalReuse) instanceof CycleButton<?> button) {
+                @SuppressWarnings("unchecked") var toggle = (CycleButton<Boolean>)button;
+                toggle.setValue(temporal);
+            }
+        }
         boolean active = PrimeClient.controlsAvailable() && !PrimeClient.offlineRequested() &&
                          !PrimeClient.offlineActive() &&
                          PrimeClient.settings().renderer() == Renderer.RESTIR_PT;
+        list.findOption(temporalReuse).active = active;
         for (var option : controls)
             list.findOption(option).active = active;
         seed.active = active;

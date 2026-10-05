@@ -15,8 +15,8 @@
 | [工程结构与路由边界](structure.md) | Rust crate、Java 版本适配、公共层依赖、Rust 版本适配、分页路由与矩形分解边界 |
 | [源路由边界与批量数据流](capture-boundaries.md) | 外观描述与下游计算的分界、接管后的 Java 截断、兼容范围、缓存与接入状态 |
 | [全局空间网格与几何合批](spatial-batching.md) | 4×4×4 区块段对齐、翻译层归属、静态/动态分离及光源采样归属边界 |
-| [设置与渲染模式](renderers.md) | 当前配置版本、冻结快照、互斥资源、实时噪声与深度/法线诊断 |
-| [ReSTIR PT Enhanced](restir-pt.md) | 独立积分器、上游默认配置、重放与双向 MIS、状态成本及支持边界 |
+| [设置与渲染模式](renderers.md) | 路径追踪开关、独立实时选择与离线快照、设置子页面、配置迁移和诊断 |
+| [ReSTIR PT Enhanced](restir-pt.md) | 独立积分器、时间/空间复用与子页面参数、上游默认配置、重放与双向 MIS、状态成本及支持边界 |
 | [ReSTIR 适配登记](restir-adaptations.md) | 相对 Falcor 的必要接口适配、数学修复、身份与历史策略及撤回项 |
 | [Streamline、DLSS RR与帧生成](reconstruction.md) | preset F、超分档位、动态前态、重建与插帧输入、Present及完成证明 |
 | [FFM ABI](abi.md) | 生成的 C/FFM 结构、批量数组、输入验证与借用、宿主 Vulkan 接口 |

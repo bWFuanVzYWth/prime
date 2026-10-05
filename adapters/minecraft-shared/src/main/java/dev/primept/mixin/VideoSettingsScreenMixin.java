@@ -37,7 +37,7 @@ public abstract class VideoSettingsScreenMixin extends OptionsSubScreen {
 
     @Inject(method = "addOptions()V", at = @At("HEAD"))
     private void primept$addOptions(CallbackInfo callback) {
-        primept$options = PrimeVideoOptions.addTo(list, this::rebuildWidgets);
+        primept$options = PrimeVideoOptions.addTo(list, this, this::rebuildWidgets);
     }
 
     @Inject(method = "tick()V", at = @At("TAIL"))

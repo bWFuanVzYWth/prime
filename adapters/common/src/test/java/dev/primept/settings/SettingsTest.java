@@ -16,6 +16,12 @@ final class SettingsTest {
     private static String legacyFile(RenderSettings settings, int version) {
         String result = SettingsFile.encode(settings).replace("version=" + RenderSettings.VERSION,
                                                               "version=" + version);
+        result = result.replace("path_tracing=" + settings.pathTracing() +
+                                        "\nrealtime_renderer=" + settings.realtimeRenderer().key,
+                                "renderer=" + settings.renderer().key);
+        if (version == 12)
+            return result.replace("restir_pt.temporal_reuse=" + settings.restirTemporalReuse(),
+                                  "restir_pt.spatial_only=" + settings.restirSpatialOnly());
         result = result.replaceAll("(?m)^restir_pt\\.[^\\n]*\\n", "");
         if (version == 11)
             result += "diagnostics.restir_spatial_only=" + settings.restirSpatialOnly() + "\n";
@@ -84,18 +90,22 @@ final class SettingsTest {
                 RenderSettings.Control.BOUNCES, 12);
         String valid = SettingsFile.encode(changed);
         for (String broken : new String[] {
-                     valid.replace("version=12", "version=0"),
-                     valid.replace("version=12", "version=7"),
-                     valid.replace("version=12", "version=13"),
-                     valid.replace("version=12", ""),
+                     valid.replace("version=13", "version=0"),
+                     valid.replace("version=13", "version=7"),
+                     valid.replace("version=13", "version=14"),
+                     valid.replace("version=13", ""),
                      valid.replace("render.bounces=12", ""),
                      valid.replace("render.bounces=12", "render.bounces=65"),
-                     valid.replace("terrain.batches_per_frame=8", ""),
-                     valid.replace("terrain.batches_per_frame=8", "terrain.batches_per_frame=0"),
-                     valid.replace("terrain.batches_per_frame=8", "terrain.batches_per_frame=129"),
-                     valid.replace("terrain.batches_per_frame=8", "terrain.batches_per_frame=NaN"),
-                     valid.replace("renderer=vanilla", "renderer=unknown"),
-                     valid.replace("renderer=vanilla\n", ""),
+                     valid.replace("terrain.batches_per_frame=1", ""),
+                     valid.replace("terrain.batches_per_frame=1", "terrain.batches_per_frame=0"),
+                     valid.replace("terrain.batches_per_frame=1", "terrain.batches_per_frame=129"),
+                     valid.replace("terrain.batches_per_frame=1", "terrain.batches_per_frame=NaN"),
+                     valid.replace("path_tracing=false\n", ""),
+                     valid.replace("path_tracing=false", "path_tracing=maybe"),
+                     valid.replace("path_tracing=false", "path_tracing=0"),
+                     valid.replace("realtime_renderer=path_trace", "realtime_renderer=unknown"),
+                     valid.replace("realtime_renderer=path_trace", "realtime_renderer=vanilla"),
+                     valid.replace("realtime_renderer=path_trace\n", ""),
                      valid.replace("render.opacity_micromap=true", ""),
                      valid.replace("render.opacity_micromap=true", "render.opacity_micromap=maybe"),
                      valid.replace("diagnostics.native_noisy_output=false", ""),
@@ -148,7 +158,7 @@ final class SettingsTest {
         assertEquals(1, PrimeSettings.opacity_micromap(view(bytes)));
         assertEquals(0, PrimeSettings.native_noisy_output(view(bytes)));
         assertEquals(3, PrimeSettings.reconstruction_quality(view(bytes)));
-        assertEquals(8, PrimeSettings.terrain_batches_per_frame(view(bytes)));
+        assertEquals(1, PrimeSettings.terrain_batches_per_frame(view(bytes)));
         assertEquals(1f, PrimeSettings.stars(view(bytes)));
         assertEquals(.6f, PrimeSettings.auto_exposure_compensation(view(bytes)));
         assertEquals(0, PrimeSettings.hdr(view(bytes)));
@@ -165,7 +175,7 @@ final class SettingsTest {
             throws Exception {
         var control = RenderSettings.Control.SATURATION;
         var defaults = RenderSettings.defaults();
-        assertEquals(12, RenderSettings.VERSION);
+        assertEquals(13, RenderSettings.VERSION);
         assertEquals(20, defaults.value(control));
         Path file = dir.resolve("primept.properties");
         assertEquals(20, SettingsFile.load(file).settings().value(control));
@@ -187,8 +197,8 @@ final class SettingsTest {
     void terrainBatchBudgetDefaultsRangePersistenceAndIndependentWire(@TempDir Path dir) {
         var control = RenderSettings.Control.TERRAIN_BATCHES_PER_FRAME;
         var defaults = RenderSettings.defaults();
-        assertEquals(8, defaults.value(control));
-        assertEquals(8,
+        assertEquals(1, defaults.value(control));
+        assertEquals(1,
                      SettingsFile.load(dir.resolve("absent.properties")).settings().value(control));
         var before = settingsBuffer();
         var after = settingsBuffer();
@@ -203,8 +213,8 @@ final class SettingsTest {
                 assertOnlyFieldChanged(before, after, 72);
             }
         }
-        assertNotEquals(defaults, defaults.with(control, 1));
-        assertEquals(8, defaults.value(control));
+        assertNotEquals(defaults, defaults.with(control, 8));
+        assertEquals(1, defaults.value(control));
         assertThrows(IllegalArgumentException.class, () -> defaults.with(control, 0));
         assertThrows(IllegalArgumentException.class, () -> defaults.with(control, 129));
     }
@@ -306,8 +316,91 @@ final class SettingsTest {
         var restir = defaults.withRenderer(RenderSettings.Renderer.RESTIR_PT);
         assertSame(restir, restir.withPathTracing(true));
         assertEquals(RenderSettings.Renderer.VANILLA, restir.withPathTracing(false).renderer());
-        assertEquals(RenderSettings.Renderer.PATH_TRACE,
+        assertEquals(RenderSettings.Renderer.RESTIR_PT,
                      restir.withPathTracing(false).withPathTracing(true).renderer());
+    }
+    @Test
+    void independentEnableAndRealtimeSelectionSurvivePersistenceAndOtherControls() {
+        var defaults = RenderSettings.defaults();
+        assertTrue(defaults.pathTracing());
+        assertEquals(RenderSettings.Renderer.PATH_TRACE, defaults.realtimeRenderer());
+        assertSame(defaults, defaults.withRealtimeRenderer(RenderSettings.Renderer.PATH_TRACE));
+        assertThrows(NullPointerException.class, () -> defaults.withRealtimeRenderer(null));
+        assertThrows(IllegalArgumentException.class,
+                     () -> defaults.withRealtimeRenderer(RenderSettings.Renderer.VANILLA));
+        for (var renderer : new RenderSettings.Renderer[] {RenderSettings.Renderer.PATH_TRACE,
+                                                           RenderSettings.Renderer.RESTIR_PT}) {
+            var enabled = defaults.withRealtimeRenderer(renderer);
+            var disabled = enabled.withPathTracing(false);
+            assertEquals(RenderSettings.Renderer.VANILLA, disabled.renderer());
+            assertEquals(renderer, disabled.realtimeRenderer());
+            assertNotEquals(enabled, disabled);
+            assertSame(disabled, disabled.withPathTracing(false));
+            assertEquals(disabled, enabled.withRenderer(RenderSettings.Renderer.VANILLA));
+            var copied = disabled.withOpacityMicromap(false)
+                                 .withNativeNoisyOutput(true)
+                                 .withDlssQuality(RenderSettings.DlssQuality.QUALITY)
+                                 .withIgnoreGlobalHistoryResets(true)
+                                 .withRestirTemporalReuse(false)
+                                 .withRestir(RestirSettings.defaults().withSeed(0xffffffffL))
+                                 .with(RenderSettings.Control.BOUNCES, 32);
+            assertFalse(copied.pathTracing());
+            assertEquals(renderer, copied.realtimeRenderer());
+            var loaded = SettingsFile.decode(SettingsFile.encode(copied));
+            assertEquals("", loaded.resetReason());
+            assertEquals(copied, loaded.settings());
+            assertEquals(copied.hashCode(), loaded.settings().hashCode());
+            assertEquals(renderer, loaded.settings().withPathTracing(true).renderer());
+            assertEquals(renderer, disabled.withRenderer(renderer).renderer());
+            var changedWhileDisabled =
+                    disabled.withRealtimeRenderer(renderer == RenderSettings.Renderer.PATH_TRACE
+                                                          ? RenderSettings.Renderer.RESTIR_PT
+                                                          : RenderSettings.Renderer.PATH_TRACE);
+            assertFalse(changedWhileDisabled.pathTracing());
+            assertEquals(changedWhileDisabled.realtimeRenderer(),
+                         changedWhileDisabled.withPathTracing(true).renderer());
+        }
+        assertNotEquals(defaults.withPathTracing(false),
+                        defaults.withRealtimeRenderer(RenderSettings.Renderer.RESTIR_PT)
+                                .withPathTracing(false));
+    }
+    @Test
+    void versionsEightThroughTwelveMigrateEnableSelectionAndTemporalMeaningTogether() {
+        for (int version : new int[] {8, 9, 10, 11, 12})
+            for (var renderer : RenderSettings.Renderer.values())
+                for (boolean temporalReuse : new boolean[] {false, true}) {
+                    if (version <= 10 && !temporalReuse)
+                        continue; // These versions predate the persisted temporal diagnostic.
+                    var expected = RenderSettings.defaults()
+                                           .withRenderer(renderer)
+                                           .withRestirTemporalReuse(temporalReuse)
+                                           .withNativeNoisyOutput(true)
+                                           .withIgnoreGlobalHistoryResets(version != 8)
+                                           .with(RenderSettings.Control.BOUNCES, 32)
+                                           .with(RenderSettings.Control.SATURATION, 8);
+                    if (version == 12)
+                        expected = expected.withRestir(
+                                expected.restir()
+                                        .with(RestirSettings.Control.SPATIAL_NEIGHBORS, 5)
+                                        .with(RestirSettings.Control.RR_FACTOR, 0.375)
+                                        .withSeed(0xffffffffL));
+                    var loaded = SettingsFile.decode(legacyFile(expected, version));
+                    assertEquals("", loaded.resetReason());
+                    assertEquals(expected, loaded.settings());
+                    assertEquals(renderer, loaded.settings().renderer());
+                    assertEquals(renderer == RenderSettings.Renderer.VANILLA
+                                         ? RenderSettings.Renderer.PATH_TRACE
+                                         : renderer,
+                                 loaded.settings().realtimeRenderer());
+                    assertEquals(temporalReuse, loaded.settings().restirTemporalReuse());
+                    var wire = settingsBuffer();
+                    loaded.settings().write(wire, false, RenderSettings.View.OUTPUT);
+                    assertEquals(temporalReuse ? 0 : 1,
+                                 PrimeSettings.restir_spatial_only(view(wire)));
+                    assertEquals(
+                            expected,
+                            SettingsFile.decode(SettingsFile.encode(loaded.settings())).settings());
+                }
     }
     @Test
     void opacityMicromapIsEnabledByDefaultAndCanBePersistedAndToggled() {
@@ -366,7 +459,7 @@ final class SettingsTest {
                 assertEquals("", migrated.resetReason());
                 assertEquals(expected, migrated.settings());
                 String canonical = SettingsFile.encode(migrated.settings());
-                assertTrue(canonical.contains("version=12\n"));
+                assertTrue(canonical.contains("version=13\n"));
                 assertTrue(canonical.contains(
                         "diagnostics.native_noisy_output=" + !oldReconstruction + "\n"));
                 assertFalse(canonical.contains("ray_reconstruction"));
@@ -438,7 +531,7 @@ final class SettingsTest {
                 assertEquals(1, PrimeSettings.light_sampling(view(wire)));
                 SettingsFile.save(file, loaded.settings());
                 String canonical = Files.readString(file);
-                assertTrue(canonical.contains("version=12\n"));
+                assertTrue(canonical.contains("version=13\n"));
                 assertTrue(canonical.contains("render.light_sampling=TREE\n"));
                 assertFalse(canonical.contains(retired));
                 assertEquals(expected, SettingsFile.load(file).settings());
@@ -495,21 +588,24 @@ final class SettingsTest {
         }
     }
     @Test
-    void spatialOnlyDiagnosticDefaultsOffHasIndependentPersistenceAndAbi() {
+    void temporalReuseDefaultsOnHasIndependentPersistenceAndInverseAbi() {
         var defaults = RenderSettings.defaults();
+        assertTrue(defaults.restirTemporalReuse());
         assertFalse(defaults.restirSpatialOnly());
-        assertSame(defaults, defaults.withRestirSpatialOnly(false));
-        var enabled = defaults.withRestirSpatialOnly(true);
+        assertSame(defaults, defaults.withRestirTemporalReuse(true));
+        var enabled = defaults.withRestirTemporalReuse(false);
+        assertFalse(enabled.restirTemporalReuse());
+        assertTrue(enabled.restirSpatialOnly());
         assertNotEquals(defaults, enabled);
-        assertSame(enabled, enabled.withRestirSpatialOnly(true));
+        assertSame(enabled, enabled.withRestirTemporalReuse(false));
         var before = settingsBuffer();
         var after = settingsBuffer();
         for (var renderer : RenderSettings.Renderer.values()) {
             for (boolean offline : new boolean[] {false, true}) {
                 var original = defaults.withRenderer(renderer);
                 original.write(before, offline, RenderSettings.View.OUTPUT);
-                original.withRestirSpatialOnly(true).write(after, offline,
-                                                           RenderSettings.View.OUTPUT);
+                original.withRestirTemporalReuse(false).write(after, offline,
+                                                              RenderSettings.View.OUTPUT);
                 assertEquals(1, PrimeSettings.restir_spatial_only(view(after)));
                 assertOnlyFieldChanged(before, after, 108);
                 assertEquals(0, PrimeSettings.native_noisy_output(view(after)));
@@ -523,16 +619,21 @@ final class SettingsTest {
                              .withIgnoreGlobalHistoryResets(true)
                              .with(RenderSettings.Control.BOUNCES, 32);
         assertTrue(copied.restirSpatialOnly());
+        assertFalse(copied.restirTemporalReuse());
         var loaded = SettingsFile.decode(SettingsFile.encode(copied));
         assertEquals("", loaded.resetReason());
         assertEquals(copied, loaded.settings());
         assertEquals(copied.hashCode(), loaded.settings().hashCode());
-        assertFalse(copied.withRestirSpatialOnly(false).restirSpatialOnly());
+        assertTrue(copied.withRestirTemporalReuse(true).restirTemporalReuse());
+        assertFalse(copied.withRestirTemporalReuse(true).restirSpatialOnly());
         String current = SettingsFile.encode(copied);
-        for (String invalid : new String[] {
-                     current.replace("restir_pt.spatial_only=true\n", ""),
-                     current.replace("restir_pt.spatial_only=true", "restir_pt.spatial_only=maybe"),
-                     current.replace("restir_pt.spatial_only=true", "restir_pt.spatial_only=1")}) {
+        for (String invalid : new String[] {current.replace("restir_pt.temporal_reuse=false\n", ""),
+                                            current.replace("restir_pt.temporal_reuse=false",
+                                                            "restir_pt.temporal_reuse=maybe"),
+                                            current.replace("restir_pt.temporal_reuse=false",
+                                                            "restir_pt.temporal_reuse=0"),
+                                            current.replace("restir_pt.temporal_reuse=false",
+                                                            "restir_pt.spatial_only=true")}) {
             var rejected = SettingsFile.decode(invalid);
             assertEquals(defaults, rejected.settings());
             assertFalse(rejected.resetReason().isEmpty());
@@ -553,8 +654,8 @@ final class SettingsTest {
             assertEquals(expected, loaded.settings());
             assertFalse(loaded.settings().restirSpatialOnly());
             String saved = SettingsFile.encode(loaded.settings());
-            assertTrue(saved.contains("version=12\n"));
-            assertTrue(saved.contains("restir_pt.spatial_only=false\n"));
+            assertTrue(saved.contains("version=13\n"));
+            assertTrue(saved.contains("restir_pt.temporal_reuse=true\n"));
             assertEquals(expected, SettingsFile.decode(saved).settings());
         }
     }

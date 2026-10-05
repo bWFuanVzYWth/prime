@@ -8,11 +8,11 @@
 
 默认保持 point reservoir、Hybrid shift、Compact retrace、3 个互反配对邻居、标准差 16 的原邻域表、1 轮空间重采样、20 的时间历史 M 上限和每像素 1 条新路径。保留 TinyUniform RNG、path flags、初始 RIS 与 reservoir 合并归一化规则。场景或光照变化时启用上游 current-scene temporal suffix update；没有旧场景副本。支持范围仍不包含 area reservoir、DoF、splatting、MCMC、robust temporal 或压缩。
 
-视频设置的独立“Prime ReSTIR PT”栏保存下列参数；“仅空间复用”从诊断栏迁移到这里，旧配置自动保留。重复度 M 降权和 RR 输出去相关默认开启，沿用参考数值；解耦着色、随机重投影与统计视图默认关闭。已有配置的显式开关值保留，缺失这些字段的旧版本迁移采用当前默认值。
+“视频设置 → Prime PT · 渲染 → ReSTIR PT 设置”子页面集中保存所有 ReSTIR 参数。“时间复用”默认开启，关闭时跳过全部时间阶段，保留空间复用的独立控制；旧“仅空间复用”配置取反迁移，实际行为保留。重复度 M 降权和 RR 输出去相关默认开启，沿用参考数值；解耦着色、随机重投影与统计视图默认关闭。已有配置的显式开关值保留，缺失这些字段的旧版本迁移采用当前默认值。
 
 | 参数 | 默认 / 范围 | 消费语义 |
 | --- | --- | --- |
-| 仅空间复用 | 关 | 跳过全部时间阶段，RR 历史继续推进 |
+| 时间复用 | 开 | 关闭时跳过全部时间阶段，空间控制不变，RR 历史继续推进 |
 | 初始路径数 | 1 / 1–16 | 多条新路径先 RIS 聚合，再将 M 归一为 1；共享真实 primary |
 | 时间历史 M 上限 | 20 / 0–100 | 有效候选数上限，不是实际独立样本数或寿命；0 跳过时间阶段但继续接受 fresh/spatial 结果 |
 | 空间复用、轮数 | 开、1 / 0–8 | 零轮直接消费时间/初始结果；多轮复用两个 reservoir bank |
@@ -42,7 +42,7 @@ BSDF 续接与直接光照具有不同支持域。非光学 authored 薄 SSS 可
 
 每个实时帧依次执行生成、时间 workload/retrace/merge、配置轮数的空间 workload/retrace/shift/merge、可选统计、resolve。无有效历史时跳过时间阶段。时间 merge 与原版一样内联顺序计算双向 shift，不增加全屏 shift 中间写读。workload 通过 wave prefix sum 在 GPU 上生成紧凑队列，GPU 写入 `DispatchIndirect` 参数；CPU 不读回队列长度。只有需要 replay prefix 的候选进入队列。空间反向 shift 使用配对邻居已生成的相反方向记录，不重复追踪；无效配对没有消费者，不清零其 shift 槽。
 
-ReSTIR PT 设置“仅空间复用”默认关闭。开启时宿主直接跳过整组时间阶段及其队列清零、indirect 调度和同步，仅保留初始生成、空间阶段与 resolve；空间输出使用现有独立 reservoir bank，不增加历史复制或 shader 变体。既有 scratch 和管线保持复用，身份表及接受提交的相机、jitter、primary bank、水位继续推进，关闭开关后可立即使用最近的真实空间结果恢复时间复用。H=0 同样跳过时间阶段，不因 DupMap 插值升回正历史质量；重新提高 H 可读取最近接受的空间结果，刚恢复的统计地图等实际接受生产者后才可读。不受“忽略所有全局重置”开关覆盖，不重置 DLSS RR 历史，也不改变离线累积。内部适配见 [RA-014、RA-015、RA-017](restir-adaptations.md)。
+ReSTIR PT 设置“时间复用”默认开启。关闭时宿主直接跳过整组时间阶段及其队列清零、indirect 调度和同步，仅保留初始生成、空间阶段与 resolve；空间输出使用现有独立 reservoir bank，不增加历史复制或 shader 变体。既有 scratch 和管线保持复用，身份表及接受提交的相机、jitter、primary bank、水位继续推进，重新开启后可立即使用最近的真实空间结果恢复时间复用。H=0 同样跳过时间阶段，不因 DupMap 插值升回正历史质量；重新提高 H 可读取最近接受的空间结果，刚恢复的统计地图等实际接受生产者后才可读。不受“忽略所有全局重置”开关覆盖，不重置 DLSS RR 历史，也不改变离线累积。内部适配见 [RA-014、RA-015、RA-017](restir-adaptations.md)。
 
 现有 GPU 诊断的 primary、transport、post 区间分别覆盖完整初始生成、重采样和 resolve；不能把这些同名区间当作普通 PT 的 K1/K2 阶段直接比较。性能比较使用完整 GPU 帧区间，并按实际后端解释子阶段。
 
