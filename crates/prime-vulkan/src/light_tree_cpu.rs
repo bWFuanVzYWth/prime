@@ -5,7 +5,10 @@ use crate::{
     plan::Slots,
 };
 use prime_scene::surface::{LightNode, LightRoot, build_light_forest};
-use std::{collections::BTreeMap, ops::Range};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    ops::Range,
+};
 
 #[derive(Clone, Copy)]
 pub(crate) struct Input<'a> {
@@ -51,6 +54,8 @@ pub(crate) struct Changes {
     pub changed: bool,
     pub world_changed: bool,
     pub ranges: Vec<Range<u32>>,
+    pub pages: Vec<u32>,
+    pub checked_emitters: usize,
 }
 
 #[cfg(test)]
@@ -86,10 +91,29 @@ impl Tree {
             })
     }
 
-    /// Complete stable-page snapshot. Planning and validation precede live-table mutation.
+    /// Full recovery snapshot. Delta consumers normally only visit changed owners.
     pub(crate) fn update(
         &mut self,
         inputs: &[Input<'_>],
+        anchor: [f64; 3],
+    ) -> Result<Changes, String> {
+        let keys: BTreeSet<_> = inputs.iter().map(|input| input.key).collect();
+        let removed: Vec<_> = self
+            .by_key
+            .keys()
+            .filter(|key| !keys.contains(key))
+            .copied()
+            .collect();
+        self.update_delta(inputs, &removed, anchor)
+    }
+
+    /// Closed immutable-owner delta. All changed inputs are validated before mutation;
+    /// unchanged resident emitter arrays are never revisited. Membership/world changes
+    /// still rebuild the world tree, preserving its exact existing numerical algorithm.
+    pub(crate) fn update_delta(
+        &mut self,
+        inputs: &[Input<'_>],
+        removed: &[u64],
         anchor: [f64; 3],
     ) -> Result<Changes, String> {
         let mut trace = prime_diagnostics::scope("lt.cpu");
@@ -99,6 +123,7 @@ impl Tree {
             return Err("Invalid light tree anchor".into());
         }
         let mut incoming = BTreeMap::new();
+        let mut checked_emitters = 0;
         for input in inputs {
             if input.inverse_areas.is_empty()
                 || input.paths.len() != input.inverse_areas.len()
@@ -120,95 +145,88 @@ impl Tree {
             {
                 return Err("Invalid light tree page input".into());
             }
+            checked_emitters += input.inverse_areas.len();
             if incoming.insert(input.key, input).is_some() {
                 return Err("Duplicate light tree page key".into());
             }
+            if let Some(page) = self.page(input.key)
+                && page.count as usize != input.inverse_areas.len()
+            {
+                return Err("Immutable light tree page changed length".into());
+            }
         }
-        if self.anchor == Some(anchor)
-            && incoming.len() == self.by_key.len()
-            && incoming.values().all(|input| {
-                self.page(input.key).is_some_and(|page| {
-                    page.origin == input.origin
-                        && page.count as usize == input.inverse_areas.len()
-                        && same_root(page.root, input.root)
-                        && self.references_match(page, input)
+        let mut withdrawn = BTreeSet::new();
+        for key in removed {
+            if incoming.contains_key(key)
+                || !withdrawn.insert(*key)
+                || !self.by_key.contains_key(key)
+            {
+                return Err("Invalid light tree page withdrawal".into());
+            }
+        }
+        let world_changed = self.anchor != Some(anchor)
+            || !withdrawn.is_empty()
+            || inputs.iter().any(|input| {
+                self.page(input.key).is_none_or(|page| {
+                    page.origin != input.origin || !same_root(page.root, input.root)
                 })
-            })
-        {
-            trace.count("changed", 0);
-            trace.succeed();
-            return Ok(Changes {
-                changed: false,
-                world_changed: false,
-                ranges: Vec::new(),
             });
-        }
-        let mut slots = self.slots.clone();
-        let mut pages = self.pages.clone();
-        let mut free_pages = self.free_pages.clone();
-        let mut by_key = self.by_key.clone();
-        let mut world_changed = self.anchor != Some(anchor);
-        for (&key, &slot) in &self.by_key {
-            if !incoming.contains_key(&key) {
+        let updated: Vec<_> = inputs
+            .iter()
+            .filter(|input| {
+                self.page(input.key)
+                    .is_none_or(|page| !self.references_match(page, input))
+            })
+            .copied()
+            .collect();
+        let mut dirty_pages: Vec<_> = inputs
+            .iter()
+            .filter_map(|input| self.by_key.get(&input.key).copied())
+            .collect();
+        let mut rebuilt = None;
+        if world_changed {
+            // Only a world/membership change needs a transactional topology copy. Pure
+            // local-reference replacements mutate their already allocated ranges below.
+            let mut slots = self.slots.clone();
+            let mut pages = self.pages.clone();
+            let mut free_pages = self.free_pages.clone();
+            let mut by_key = self.by_key.clone();
+            for key in withdrawn {
+                let slot = by_key.remove(&key).unwrap();
                 let page = pages[slot as usize].take().unwrap();
                 slots.release(page.first, page.count);
                 free_pages.push(slot);
-                by_key.remove(&key);
-                world_changed = true;
+                dirty_pages.push(slot);
             }
-        }
-        let mut updated = Vec::new();
-        for input in incoming.values() {
-            if let Some(&slot) = by_key.get(&input.key) {
-                let page = pages[slot as usize].as_mut().unwrap();
-                if page.count as usize != input.inverse_areas.len() {
-                    return Err("Immutable light tree page changed length".into());
-                }
-                if page.origin != input.origin {
+            for input in incoming.values() {
+                if let Some(&slot) = by_key.get(&input.key) {
+                    let page = pages[slot as usize].as_mut().unwrap();
                     page.origin = input.origin;
-                    world_changed = true;
-                }
-                if !same_root(page.root, input.root) {
                     page.root = input.root;
-                    world_changed = true;
+                } else {
+                    let count = u32::try_from(input.inverse_areas.len())
+                        .map_err(|_| "Too many tree emitters")?;
+                    let first = slots.allocate(count)?;
+                    let slot = if let Some(slot) = free_pages.pop() {
+                        slot
+                    } else {
+                        let slot =
+                            u32::try_from(pages.len()).map_err(|_| "Too many light tree pages")?;
+                        pages.push(None);
+                        slot
+                    };
+                    pages[slot as usize] = Some(Page {
+                        key: input.key,
+                        origin: input.origin,
+                        first,
+                        count,
+                        path: 0,
+                        root: input.root,
+                    });
+                    by_key.insert(input.key, slot);
+                    dirty_pages.push(slot);
                 }
-                if !self.references_match(page, input) {
-                    updated.push((slot, page.first, *input));
-                }
-                continue;
             }
-            let count =
-                u32::try_from(input.inverse_areas.len()).map_err(|_| "Too many tree emitters")?;
-            let first = slots.allocate(count)?;
-            let slot = if let Some(slot) = free_pages.pop() {
-                slot
-            } else {
-                let slot = u32::try_from(pages.len()).map_err(|_| "Too many light tree pages")?;
-                pages.push(None);
-                slot
-            };
-            pages[slot as usize] = Some(Page {
-                key: input.key,
-                origin: input.origin,
-                first,
-                count,
-                path: 0,
-                root: input.root,
-            });
-            by_key.insert(input.key, slot);
-            updated.push((slot, first, *input));
-            world_changed = true;
-        }
-        if !world_changed && updated.is_empty() {
-            trace.count("changed", 0);
-            trace.succeed();
-            return Ok(Changes {
-                changed: false,
-                world_changed: false,
-                ranges: Vec::new(),
-            });
-        }
-        let rebuilt_world = if world_changed {
             let mut world_scope = prime_diagnostics::scope("lt.world");
             world_scope.fail();
             let roots: Vec<_> = pages
@@ -228,48 +246,60 @@ impl Tree {
                 .collect();
             let source = build_light_forest(&roots)?;
             let tree = DistanceTree::world(&source, pages.len())?;
-            let world = tree.nodes;
             for (slot, page) in pages.iter_mut().enumerate() {
                 if let Some(page) = page {
                     page.path = tree.paths[slot];
                 }
             }
-            world_scope.count("nodes", world.len() as u64);
+            world_scope.count("nodes", tree.nodes.len() as u64);
             world_scope.succeed();
-            drop(world_scope);
-            Some((world, source.first().map_or(0.0, |node| node.power)))
-        } else {
-            None
-        };
-        self.refs.resize(slots.end as usize, Reference::default());
+            rebuilt = Some((
+                slots,
+                pages,
+                free_pages,
+                by_key,
+                tree.nodes,
+                source.first().map_or(0.0, |node| node.power),
+            ));
+        }
+        if let Some((slots, pages, free_pages, by_key, world, power)) = rebuilt {
+            self.slots = slots;
+            self.pages = pages;
+            self.free_pages = free_pages;
+            self.by_key = by_key;
+            self.world = world;
+            self.power = power;
+        }
+        self.refs
+            .resize(self.slots.end as usize, Reference::default());
         let mut ranges = Vec::with_capacity(updated.len());
-        for (slot, first, input) in updated {
+        for input in &updated {
+            let slot = self.by_key[&input.key];
+            let page = self.pages[slot as usize].unwrap();
             for (index, inv_area) in input.inverse_areas.iter().enumerate() {
-                self.refs[first as usize + index] = Reference {
+                self.refs[page.first as usize + index] = Reference {
                     page: slot,
                     emitter: index as u32,
                     path: input.paths[index],
                     inv_area: *inv_area,
                 };
             }
-            ranges.push(first..first + input.inverse_areas.len() as u32);
+            ranges.push(page.first..page.first + page.count);
         }
-        if let Some((world, power)) = rebuilt_world {
-            self.world = world;
-            self.power = power;
-        }
-        self.pages = pages;
-        self.by_key = by_key;
-        self.free_pages = free_pages;
-        self.slots = slots;
         self.anchor = Some(anchor);
-        trace.count("changed", 1);
+        dirty_pages.sort_unstable();
+        dirty_pages.dedup();
+        let changed = world_changed || !updated.is_empty();
+        trace.count("changed", u64::from(changed));
         trace.count("ranges", ranges.len() as u64);
+        trace.count("checked", checked_emitters as u64);
         trace.succeed();
         Ok(Changes {
-            changed: true,
+            changed,
             world_changed,
             ranges,
+            pages: dirty_pages,
+            checked_emitters,
         })
     }
 }
@@ -291,6 +321,74 @@ mod tests {
                 .collect::<Vec<_>>(),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn closed_delta_visits_only_changed_emitters_and_matches_full_recovery() {
+        let source = nodes(&[1.; 8]);
+        let local = DistanceTree::world(&source, 8).unwrap();
+        let areas = [1.; 8];
+        let inputs: Vec<_> = (0..128)
+            .map(|key| Input {
+                key,
+                origin: [key as f64 * 16., 0., 0.],
+                root: source[0],
+                inverse_areas: &areas,
+                paths: &local.paths,
+            })
+            .collect();
+        let mut delta = Tree::default();
+        let mut full = Tree::default();
+        delta.update(&inputs, [0.; 3]).unwrap();
+        full.update(&inputs, [0.; 3]).unwrap();
+        let before = delta.refs.clone();
+        let mut paths = local.paths.clone();
+        paths.rotate_left(1);
+        let replacement = Input {
+            paths: &paths,
+            inverse_areas: &[0.5; 8],
+            ..inputs[63]
+        };
+        let changed = delta.update_delta(&[replacement], &[], [0.; 3]).unwrap();
+        assert_eq!(
+            changed.checked_emitters, 8,
+            "127 unchanged owners are not validated/scanned"
+        );
+        assert_eq!(changed.pages, [63]);
+        assert!(!changed.world_changed);
+        assert_eq!(changed.ranges, [504..512]);
+        assert_eq!(&delta.refs[..504], &before[..504]);
+        assert_eq!(&delta.refs[512..], &before[512..]);
+        let mut current = inputs.clone();
+        current[63] = replacement;
+        full.update(&current, [0.; 3]).unwrap();
+        assert_eq!(delta.refs, full.refs);
+        assert_eq!(
+            crate::light_distance_cpu::node_bytes(&delta.world),
+            crate::light_distance_cpu::node_bytes(&full.world)
+        );
+        let before = delta.refs.clone();
+        assert!(
+            delta
+                .update_delta(&[replacement], &[replacement.key], [0.; 3])
+                .is_err()
+        );
+        assert!(delta.update_delta(&[], &[999], [0.; 3]).is_err());
+        assert_eq!(delta.refs, before);
+        let changed = delta.update_delta(&[], &[0], [10.; 3]).unwrap();
+        current.remove(0);
+        full.update(&current, [10.; 3]).unwrap();
+        assert_eq!(changed.checked_emitters, 0);
+        assert!(changed.world_changed);
+        assert_eq!(delta.refs, full.refs);
+        assert_eq!(
+            crate::light_distance_cpu::node_bytes(&delta.world),
+            crate::light_distance_cpu::node_bytes(&full.world)
+        );
+        println!(
+            "light delta resident_pages=128 resident_emitters=1024 checked_emitters={} dirty_page_bytes=48",
+            8
+        );
     }
 
     #[test]

@@ -91,7 +91,7 @@ def main():
     defaults = execute(4, [(0,) * 8])[0]
     assert defaults == (20, 3, 1, 1, u(0.0002), u(0.2), u(0.2), u(0.0)), defaults
     rows = []
-    for history in (1, 20, 100):
+    for history in (0, 1, 20, 100):
         for fresh in (1, 2, 16):
             for rounds in (0, 1, 4):
                 for requested, ready in ((0, 0), (1, 0), (1, 4), (1, 7)):
@@ -101,7 +101,7 @@ def main():
     for row, result in zip(rows, execute(0, rows, seed=3, age=27), strict=True):
         h, _, rounds, fresh, requested, ready, power, duplicate = row
         assert result[:3] == (fresh + rounds + 2, fresh, fresh + 5), (row, result)
-        expected = h if not requested or not ready & 4 else h + (1 - h) * (duplicate / 288) ** f(power)
+        expected = 0 if h == 0 else h if not requested or not ready & 4 else h + (1 - h) * (duplicate / 288) ** f(power)
         assert math.isclose(f(result[3]), expected, abs_tol=2e-5, rel_tol=2e-6), (row, result, expected)
         assert result[4:6] == ((28 if ready & 2 else 1), 0), (row, result)
 
@@ -157,9 +157,32 @@ def main():
             means.append({"mean": mean, "expected": expected[axis], "standard_error": standard_error})
         assert all(f(row[3]) == 1.0 for row in results)
         fresh_results.append({"count": count, "independent_seed_chains": len(results), "channels": means})
+    # Finite raw RIS has a finite final UCW, although separately normalizing the
+    # first path would overflow. Execute the production raw add/finalizer, not text.
+    extreme = execute(5, [(u(2e-20), u(2e-20), u(2e-20), u(1e19), 42, u(1), u(1), u(1))])[0]
+    assert all(math.isfinite(f(value)) and f(value) > 0 for value in extreme[:4]), extreme
+    for value in extreme[:3]:
+        assert math.isclose(f(value), 5e18, rel_tol=3e-6), extreme
+    assert f(extreme[4]) == 1.0 and extreme[5] == lcg(42), extreme
+    support_rows = []
+    media = [(1, 0, 0, 0), (1.5, 0, 0, 0), (1, 0.2, 0, 0), (1.5, 0.2, 0.4, 0.7)]
+    for length in range(256):
+        for nee in (0, 1):
+            for budget in (0, 1, 2, 6, 12, 64, 254, 255):
+                for source_nonvacuum in (0, 1):
+                    for medium in media:
+                        support_rows.append((length, nee, budget, source_nonvacuum, *map(u, medium)))
+    for row, result in zip(support_rows, execute(6, support_rows), strict=True):
+        length, nee, budget, source_nonvacuum, *medium = row
+        vacuum = tuple(map(f, medium)) == (1.0, 0.0, 0.0, 0.0)
+        assert result[:4] == (int(length + (not nee) < budget), source_nonvacuum,
+                              int(source_nonvacuum or not vacuum), 0), (row, result)
+        assert result[4:7] == (source_nonvacuum, length, nee), (row, result)
     report = {"configuration_cases": len(rows), "threshold_cases": len(threshold_rows),
               "threshold_max_absolute_error": maximum_error, "stochastic_cases": len(stochastic_rows),
               "fresh_ris": fresh_results,
+              "raw_finite_overflow_witness": list(map(f, extreme[:5])),
+              "budget_and_medium_support_cases": len(support_rows),
               "boundary": "Pure production math on CPU; no visibility, GPU timeline, or image correlation claim."}
     (output / "result.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf8")
     print(f"ReSTIR config CPU math: PASS ({len(rows)} configs, {len(threshold_rows)} thresholds, {len(stochastic_rows)} donors, 4 fresh RIS means)")

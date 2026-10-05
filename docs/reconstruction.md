@@ -28,7 +28,7 @@ Streamline 是进程级状态，一次只允许一个 Prime RR owner。游戏在
 
 普通 PT 实时采用 K1主表面/delta/guides → K2主要输运 → post 三段。RR的K1写入主表面guides及首纯delta透明面的独立反射运动；K2只可能完成一个已移交的实际反射次段距离。`realtime_rr.slang` 合成FP32 prefix+tail、执行原相机空气段aerial与清洗，写入noisy color，并补全其余像素的反射运动。原始实时不分配RR图像，Offline不进入这两个实时PT kernel。阶段布局见[PT设计](pt-state-design.md)。[ReSTIR PT](restir-pt.md) 在自身生成阶段共享首交点并发布同合同的独立规范 guides，在 resolve 写入最终重采样 radiance 与 aerial；不执行普通 PT 的照明阶段。
 
-RR主射线在像素中心加CPU Halton帧采样偏移；Streamline接收投影位移，XY均为采样偏移的相反数，单位是输入像素。相机矩阵不含抖动；普通 PT 的 coverage 与照明随机域继续由 Z-Sobol 产生。ReSTIR 保留原 TinyUniform RNG 与路径 seed/位置哈希 coverage；首 guide 共享实际首交点及所选材质，独立 guide 后缀使用既有 Z-Sobol coverage 域。guide 从同一主射线开始，之后按确定的几何事件选择独立终点，不随照明的首透明0.5分支或roulette改变。原点、像素中心、相机基、矩阵布局、呈现翻转与 FG 尚未统一的方向边界见[坐标契约](coordinates.md)。
+RR主射线在像素中心加CPU Halton帧采样偏移；Streamline接收投影位移，XY均为采样偏移的相反数，单位是输入像素。相机矩阵不含抖动；普通 PT 的 coverage 与照明随机域继续由 Z-Sobol 产生。ReSTIR 保留原 TinyUniform RNG 与路径 seed/位置哈希 coverage；首 guide 共享实际首交点及所选材质，独立 guide 后缀使用既有 Z-Sobol coverage 域。guide 从同一主射线开始，之后按确定的几何事件选择独立终点，不随照明的首透明0.5分支或roulette改变。RR/FG 图像、最终 swapchain 与 SDK 相机统一为 canonical 左上；像素中心、矩阵布局及 UI 呈现转换见[坐标契约](coordinates.md)。
 
 | Binding | 图像/常量 | 格式与语义 |
 | --- | --- | --- |

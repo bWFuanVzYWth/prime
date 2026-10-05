@@ -4,7 +4,7 @@
 use crate::packing::{self, Input, Plan};
 use prime_scene::{
     geometry::{CompiledQuad, MeshGeometry},
-    surface::{SurfaceFace, SurfaceMesh},
+    surface::{SurfaceFace, SurfaceMesh, TerrainSurfaces},
     translation::{TerrainGeometry, TerrainMember, TerrainUpdate},
 };
 use std::{
@@ -97,6 +97,7 @@ fn dependencies(face: &SurfaceFace, textures: &mut BTreeMap<u32, u32>) {
 }
 
 impl StaticPacking {
+    #[cfg(test)]
     pub fn prepare(
         update: &mut TerrainUpdate,
         old: Option<&Self>,
@@ -104,15 +105,52 @@ impl StaticPacking {
     ) -> Result<Self, String> {
         Self::prepare_hashed(update, old, revision, hash)
     }
+    #[cfg(test)]
     fn prepare_hashed(
         update: &mut TerrainUpdate,
         old: Option<&Self>,
         revision: u64,
         fingerprint: impl Fn(&[u8]) -> u64,
     ) -> Result<Self, String> {
+        Self::prepare_compiled_hashed(update, old, revision, Vec::new(), fingerprint)
+    }
+    pub fn prepare_compiled(
+        update: &mut TerrainUpdate,
+        old: Option<&Self>,
+        revision: u64,
+        compiled: Vec<Option<TerrainSurfaces>>,
+    ) -> Result<Self, String> {
+        Self::prepare_compiled_hashed(update, old, revision, compiled, hash)
+    }
+    fn prepare_compiled_hashed(
+        update: &mut TerrainUpdate,
+        old: Option<&Self>,
+        revision: u64,
+        compiled: Vec<Option<TerrainSurfaces>>,
+        fingerprint: impl Fn(&[u8]) -> u64,
+    ) -> Result<Self, String> {
         let mut incoming = Vec::new();
         let mut textures = BTreeMap::from([(0, 0)]);
+        let mut compiled = compiled.into_iter();
         for geometry in &update.geometries {
+            if let Some(resolved) = compiled.next().flatten() {
+                let mut formats: [Vec<SurfaceFace>; packing::FORMATS] = Default::default();
+                for mut face in resolved.quads {
+                    // Match the old resolved-mesh Plan's zero-offset normalization,
+                    // including signed zero, before comparing direct-record bytes.
+                    for point in &mut face.geometry.positions {
+                        for value in point {
+                            *value += 0.0;
+                        }
+                    }
+                    dependencies(&face, &mut textures);
+                    formats[packing::format(&face)].push(face);
+                }
+                for (format, faces) in formats.into_iter().enumerate() {
+                    incoming.extend(faces.into_iter().map(|face| (geometry.flags, format, face)));
+                }
+                continue;
+            }
             let plan = Plan::new(
                 geometry.members.iter().map(|member| Input {
                     triangles: member.triangles.view(member.range.clone()),
@@ -240,8 +278,24 @@ impl StaticPacking {
                 candidates.pop();
             }
         }
+        // Only discard suffixes: surviving primitive and page ordinals are exact.
+        // Only missing source faces are dead; a zero live mask alone is not a
+        // proof that a supplied tiny/degenerate face may bypass final validation.
+        // An empty middle page retains one dead slot until it becomes a tail page.
+        while rows
+            .last()
+            .is_some_and(|row| row.2.iter().all(Option::is_none))
+        {
+            rows.pop();
+        }
         let mut pages = Vec::with_capacity(rows.len());
-        for (flags, format, faces, states) in rows {
+        for (flags, format, mut faces, mut states) in rows {
+            let count = faces
+                .iter()
+                .rposition(Option::is_some)
+                .map_or(1, |last| last + 1);
+            faces.truncate(count);
+            states.truncate(count);
             let faces = faces
                 .into_iter()
                 .map(|face| face.unwrap_or_else(|| tombstone(flags)))
@@ -301,6 +355,160 @@ mod tests {
                     offset: [0.; 3],
                 }],
             }],
+        }
+    }
+    #[test]
+    fn dead_suffixes_shrink_without_moving_live_quads_or_middle_pages() {
+        use prime_scene::surface::{Medium, Optics};
+        let a = face(0.);
+        let mut b = face(10.);
+        b.emission.radiance = [1.; 3];
+        let mut c = face(20.);
+        c.optics = Some(Optics {
+            negative: Medium::default(),
+            positive: Medium::default(),
+            ior_textures: [None; 2],
+            transmit: false,
+            thin: false,
+        });
+        let mut initial = update(vec![a.clone(), face(1.), face(2.), b, c.clone()]);
+        let old = StaticPacking::prepare(&mut initial, None, 1).unwrap();
+        assert_eq!(
+            old.pages
+                .iter()
+                .map(|p| p.mesh.quads.len())
+                .collect::<Vec<_>>(),
+            [3, 1, 1]
+        );
+        let mut source = update(vec![a.clone(), c]);
+        let smaller = StaticPacking::prepare(&mut source, Some(&old), 2).unwrap();
+        assert_eq!(
+            smaller.pages.len(),
+            3,
+            "dead middle page keeps the later ordinal"
+        );
+        assert_eq!(
+            smaller
+                .pages
+                .iter()
+                .map(|p| p.mesh.quads.len())
+                .collect::<Vec<_>>(),
+            [1, 1, 1]
+        );
+        assert!(!smaller.pages[0].states[0].changed && !smaller.pages[2].states[0].changed);
+        assert_eq!(smaller.pages[1].states[0].live, 0);
+        assert_eq!(smaller.pages[2].mesh.quads[0].geometry.positions[0][0], 20.);
+        let mut source = update(vec![a]);
+        let tail = StaticPacking::prepare(&mut source, Some(&smaller), 3).unwrap();
+        assert_eq!(tail.pages.len(), 1);
+        assert!(!tail.pages[0].states[0].changed);
+        let mut empty = update(Vec::new());
+        let removed = StaticPacking::prepare(&mut empty, Some(&tail), 4).unwrap();
+        assert!(removed.pages.is_empty() && empty.geometries.is_empty());
+        let bytes = |packing: &StaticPacking| {
+            packing
+                .pages
+                .iter()
+                .map(|page| page.mesh.quads.len() * packing::stride(page.format))
+                .sum::<usize>()
+        };
+        assert_eq!(
+            (bytes(&old), bytes(&smaller), bytes(&tail)),
+            (1040, 688, 176)
+        );
+        println!(
+            "stable-tail material bytes: old={} local={} tail={} empty=0; live indices preserved",
+            bytes(&old),
+            bytes(&smaller),
+            bytes(&tail)
+        );
+    }
+
+    #[test]
+    fn supplied_zero_mask_faces_remain_and_invalid_emission_is_still_rejected() {
+        let mut tiny = face(0.);
+        tiny.geometry.positions = [
+            [0.; 3],
+            [1e-30, 0., 0.],
+            [1e-30, 1e-30, 0.],
+            [0., 1e-30, 0.],
+        ];
+        assert_eq!(live(&tiny), 0);
+        assert!(tiny.geometry.areas().iter().all(|area| *area > 0.));
+        let mut source = update(vec![tiny.clone()]);
+        let packing = StaticPacking::prepare(&mut source, None, 1).unwrap();
+        assert_eq!(packing.pages[0].mesh.quads[0].geometry, tiny.geometry);
+        let mut invalid = face(0.);
+        invalid.geometry.positions = [[0.; 3]; 4];
+        invalid.emission.radiance = [-1., 0., 0.];
+        let mut source = update(vec![face(0.)]);
+        let resolved = TerrainSurfaces {
+            revision: 1,
+            quads: vec![invalid],
+            stats: Default::default(),
+        };
+        assert!(
+            StaticPacking::prepare_compiled(&mut source, None, 1, vec![Some(resolved)]).is_err()
+        );
+    }
+
+    #[test]
+    fn deferred_terrain_lights_equal_the_complete_compiler_after_stable_ordering() {
+        let mut emission = face(10.);
+        emission.emission.radiance = [2.; 3];
+        let source = update(vec![face(0.), emission]);
+        let mut compiler = prime_scene::surface::SurfaceCompiler::new();
+        let mut ordinary = update(
+            compiler
+                .compile_terrain(1, &source.geometries[0])
+                .unwrap()
+                .unwrap()
+                .quads,
+        );
+        let expected = StaticPacking::prepare(&mut ordinary, None, 1).unwrap();
+        let resolved = compiler.resolve_terrain(1, &source.geometries[0]).unwrap();
+        let mut deferred = source;
+        let actual =
+            StaticPacking::prepare_compiled(&mut deferred, None, 1, vec![resolved]).unwrap();
+        let textures = BTreeMap::from([(0, 0)]);
+        assert_eq!(actual.pages.len(), expected.pages.len());
+        for (a, b) in actual.pages.iter().zip(&expected.pages) {
+            let encode = |page: &Page| {
+                page.mesh
+                    .quads
+                    .iter()
+                    .map(|face| packing::encode(face, page.format, None, None, &textures).unwrap())
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(encode(a), encode(b));
+            assert_eq!(
+                a.mesh
+                    .lights
+                    .emitters
+                    .iter()
+                    .map(|e| (e.quad, e.area, e.power))
+                    .collect::<Vec<_>>(),
+                b.mesh
+                    .lights
+                    .emitters
+                    .iter()
+                    .map(|e| (e.quad, e.area, e.power))
+                    .collect::<Vec<_>>()
+            );
+            assert_eq!(
+                a.mesh
+                    .lights
+                    .nodes
+                    .iter()
+                    .map(|n| (n.bounds, n.power, n.child))
+                    .collect::<Vec<_>>(),
+                b.mesh
+                    .lights
+                    .nodes
+                    .iter()
+                    .map(|n| (n.bounds, n.power, n.child))
+                    .collect::<Vec<_>>()
+            );
         }
     }
     #[test]

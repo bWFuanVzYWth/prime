@@ -19,6 +19,12 @@ pub(super) struct Auxiliary {
     pixels: u32,
 }
 
+pub(super) fn duplicate_producer(settings: RestirSettings, realtime: bool) -> bool {
+    // RA-017: cold/spatial-only realtime still produces the next accepted map.
+    // Offline has no temporal consumer; debug1 independently displays this map.
+    settings.debug_view == 1 || (realtime && settings.history_length != 0 && settings.duplicate_map)
+}
+
 impl Auxiliary {
     pub fn prepare(
         &mut self,
@@ -26,6 +32,7 @@ impl Auxiliary {
         pixels: u32,
         settings: RestirSettings,
         rr_consumer: bool,
+        duplicate_producer: bool,
     ) -> Result<(), String> {
         if self.pixels != pixels {
             *self = Self {
@@ -36,7 +43,7 @@ impl Auxiliary {
                 ..Default::default()
             };
         }
-        let duplicates = settings.duplicate_map || settings.debug_view == 1;
+        let duplicates = duplicate_producer;
         if duplicates && self.sample_ids.is_none() {
             let ids = allocate(context, u64::from(pixels) * 4)?;
             let counts = allocate(context, u64::from(pixels) * 4)?;
@@ -139,4 +146,26 @@ fn allocate(context: &Arc<Context>, bytes: u64) -> Result<Buffer, String> {
             },
         false,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn duplicate_map_requires_an_actual_consumer_or_next_frame_producer() {
+        let mut settings = RestirSettings::default();
+        assert!(duplicate_producer(settings, true)); // includes cold and spatial-only
+        assert!(!duplicate_producer(settings, false));
+        settings.history_length = 0;
+        assert!(!duplicate_producer(settings, true));
+        settings.debug_view = 1;
+        assert!(duplicate_producer(settings, true));
+        assert!(duplicate_producer(settings, false));
+        settings.debug_view = 2;
+        assert!(!duplicate_producer(settings, false));
+        settings.history_length = 20;
+        settings.duplicate_map = false;
+        assert!(!duplicate_producer(settings, true));
+    }
 }

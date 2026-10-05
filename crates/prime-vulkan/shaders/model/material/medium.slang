@@ -13,3 +13,12 @@ public float primePbrFresnelCodeIor(uint canonicalCode) {
     float root = sqrt(primeDecodeDielectricF0(canonicalCode));
     return (1.0 + root) / (1.0 - root);
 }
+
+// Physical endpoint identity, independent of relative IOR. A submerged sheet's glass
+// can have lower IOR than water; selecting the larger endpoint loses its extinction.
+public float4 primeThinInsideMedium(bool physicalFront, float4 incident, float4 transmitted) {
+    return physicalFront ? transmitted : incident;
+}
+public float4 primeThinOutsideMedium(bool physicalFront, float4 incident, float4 transmitted) {
+    return physicalFront ? incident : transmitted;
+}

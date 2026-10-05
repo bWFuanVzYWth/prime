@@ -46,11 +46,11 @@ HDR world 与 SDR baseline 都保留为 canonical top-left snapshot。世界写�
 
 `[EOTF(max(C−B×(1−a),0)/a)×a + EOTF(H)×(1−a)] × W/80`
 
-`a=0` 时界面项为 0。EOTF 保留 extended-sRGB 的正负与高于 1 的值；HDR 世界不从 RGBA8 恢复。world snapshot 到 UI 呈现方向的翻转显式处理。该界面恢复沿用旧 Prime 的 source-over 近似：RGBA8 量化、非 source-over blend 和主动改写 alpha 的渲染不能从最终图精确逆推。原版/菜单的 HDR fallback 只把现有编码 UI 经过 EOTF 和同一 nit 比例输出，不加载 PT 世界资产。
+`a=0` 时界面项为 0。EOTF 保留 extended-sRGB 的正负与高于 1 的值；HDR 世界不从 RGBA8 恢复。直接写入的 swapchain 保持 canonical 左上，UI 按宿主目标方向反向索引，world/baseline 不翻转。该界面恢复沿用旧 Prime 的 source-over 近似：RGBA8 量化、非 source-over blend 和主动改写 alpha 的渲染不能从最终图精确逆推。原版/菜单的 HDR fallback 只把现有编码 UI 经过 EOTF 和同一 nit 比例输出，不加载 PT 世界资产。
 
 ## 帧生成的显示输入
 
-有效 FG 的 SDR 世界也写 alpha=0并保存 primeDRT 编码 baseline。窄 SDR pass 把 baseline 旋转到最终 UI 方向，输出 RGBA8 HUDless（alpha=1）和 R8 UI coverage；不从叠有界面的最终颜色恢复世界。HDR present 在同一 pass 追加 FP16 HUDless `EOTF(H)×W/80` 和同一 R8 coverage，保持与最终 scRGB 图相同方向。两者只消费真实 UI alpha；SDK 调用、能力/模式 gate 和最后消费者证明由宿主与重建层负责。
+有效 FG 的 SDR 世界也写 alpha=0并保存 primeDRT 编码 baseline。窄 SDR pass 在 canonical 左上空间读取 baseline，输出 RGBA8 HUDless（alpha=1）和反向索引宿主 UI 后的 R8 coverage；与原版 SDR surface blit 的最终 backbuffer 同向，不从叠有界面的最终颜色恢复世界。HDR present 在同一 pass 追加 FP16 HUDless `EOTF(H)×W/80` 和同一 R8 coverage，与最终 scRGB、FG depth/motion 和 SDK 矩阵同向。两者只消费真实 UI alpha；SDK 调用、能力/模式 gate 和最后消费者证明由宿主与重建层负责。
 
 FG 关闭时不写 HUDless/mask，可绑定对应格式的有效 1×1 dummy。HDR 关闭时不创建全帧 HDR world；需要 SDR FG baseline 时仍保存 RGBA8。显示模块不自行 Present，不通过帧数猜资源寿命。world、HDR 和 FG 各自的 descriptor 槽依据实际完成值复用；SDK 借用输入还必须满足其最后消费者协议。
 

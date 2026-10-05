@@ -155,16 +155,14 @@ PrimePrimaryGuideSeed primePrimaryLighting<Guides, Environment>(
         coneWidth += coneSpread * segmentDistance;
         if (opticalFeatures != 0) {
             if (bounce == 0)
-                medium = hit.thin ? float4(1, 0, 0, 0) : hit.incident;
+                medium = hit.thin ? primeThinOutsideMedium(hit) : hit.incident;
             throughput *= exp(-medium.yzw * segmentDistance);
         }
         if (dot(surface.normal, direction) > 0.0)
             surface.normal = -surface.normal;
         PrimePbrVertex material = primePrimaryMaterial(hit, direction);
         float4 incident = hit.optical && !hit.thin ? hit.incident : medium;
-        float4 transmitted =
-                hit.thin ? (hit.incident.x > hit.transmitted.x ? hit.incident : hit.transmitted)
-                         : hit.transmitted;
+        float4 transmitted = hit.thin ? primeThinInsideMedium(hit) : hit.transmitted;
         if (bounce == 0) {
             primaryDistance =
                     medium.x == 1.0 ? length(surface.position - parameters.position.xyz) : 0.0;
@@ -263,7 +261,7 @@ PrimePrimaryGuideSeed primePrimaryLighting<Guides, Environment>(
             }
         }
 
-        if (guideCanContinue && bounce == 0 && hit.optical &&
+        if (opticalFeatures != 0 && guideCanContinue && bounce == 0 && hit.optical &&
             (nextGuide.psr.flags & PRIME_PRIMARY_PSR_INTERFACE_SPECULAR) != 0) {
             PrimePbrGuideDirection reflected = primePbrReflectionGuideDirection(
                     material, -direction, surface.normal, incident, transmitted);
@@ -348,9 +346,7 @@ void primePrimaryGuideWalk<Guides>(TraceScene resources, PrimaryParameters param
         // Guide direction/classification/albedo consume only the incident IOR. Extinction is
         // deliberately absent from guide state: it cannot terminate or select this path.
         float4 incident = hit.optical && !hit.thin ? hit.incident : float4(seed.mediumIor, 0, 0, 0);
-        float4 transmitted =
-                hit.thin ? (hit.incident.x > hit.transmitted.x ? hit.incident : hit.transmitted)
-                         : hit.transmitted;
+        float4 transmitted = hit.thin ? primeThinInsideMedium(hit) : hit.transmitted;
         if (!primePbrVertexIsDiscreteOnly(material, incident, transmitted)) {
             guides.surface(parameters, pixel, sampleUv, surface, material, seed.direction, incident,
                            transmitted, hit.previousPosition, hit.previousPositionKnown, seed.psr);
@@ -390,7 +386,7 @@ public void primeTracePrimary<Guides, Environment>(TraceScene resources, Environ
     bool companion = (seed.psr.flags & PRIME_PRIMARY_GUIDE_COMPANION) != 0;
     if (guides.enabled() && (seed.psr.flags & PRIME_PRIMARY_GUIDE_SEED) != 0)
         primePrimaryGuideWalk(resources, parameters, pixel, sampler, sampleUv, seed, guides);
-    if (guides.enabled() && companion) {
+    if (opticalFeatures != 0 && guides.enabled() && companion) {
         // Keep only one seed live across traversal. The finished landing occupies planes 0..6;
         // its complementary guide remains disjoint in planes 7..10 until this load.
         seed = primePrimaryLoadSeed(parameters, index, 7);
@@ -417,11 +413,9 @@ public bool primeTraceGuidesFromPrimary<Guides>(TraceScene resources, PrimaryPar
     if (dot(surface.normal, direction) > 0.0)
         surface.normal = -surface.normal;
     PrimePbrVertex material = primePrimaryMaterial(hit, direction);
-    float mediumIor = hit.thin ? 1.0 : hit.incident.x;
+    float mediumIor = hit.thin ? primeThinOutsideMedium(hit).x : hit.incident.x;
     float4 incident = hit.optical && !hit.thin ? hit.incident : float4(mediumIor, 0, 0, 0);
-    float4 transmitted =
-            hit.thin ? (hit.incident.x > hit.transmitted.x ? hit.incident : hit.transmitted)
-                     : hit.transmitted;
+    float4 transmitted = hit.thin ? primeThinInsideMedium(hit) : hit.transmitted;
     if (!primePbrVertexIsDiscreteOnly(material, incident, transmitted)) {
         guides.surface(parameters, pixel, sampleUv, surface, material, direction, incident,
                        transmitted, hit.previousPosition, hit.previousPositionKnown, psr);

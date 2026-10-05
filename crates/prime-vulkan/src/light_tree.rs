@@ -7,8 +7,17 @@ use crate::{
     resources::{Buffer, Context},
     surface::LightPage,
 };
+#[path = "light_tree_publication.rs"]
+mod publication;
 use ash::vk;
-use std::{collections::BTreeMap, sync::Arc};
+#[cfg(test)]
+use publication::page_bytes;
+use publication::{PageBinding, header_bytes, needs_full_snapshot, page_ranges};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    ops::Deref,
+    sync::Arc,
+};
 
 pub(crate) struct LightTree {
     cpu: CpuTree,
@@ -17,14 +26,7 @@ pub(crate) struct LightTree {
     world: Option<Buffer>,
     header: Option<Buffer>,
     needs_full_publication: bool,
-}
-
-#[derive(Clone, Copy)]
-struct PageBinding {
-    nodes: u64,
-    emitters: u64,
-    format: u32,
-    static_page: Option<u32>,
+    source_revision: Option<u64>,
 }
 
 struct Copy {
@@ -42,6 +44,7 @@ impl LightTree {
             world: None,
             header: None,
             needs_full_publication: true,
+            source_revision: None,
         }
     }
 
@@ -69,6 +72,7 @@ impl LightTree {
         self.cpu.pages[index].map(|page| (page.key, page.count * 2))
     }
 
+    #[cfg(test)]
     pub(crate) fn update(
         &mut self,
         context: &Arc<Context>,
@@ -76,15 +80,63 @@ impl LightTree {
         sources: &BTreeMap<u64, ([f64; 3], &LightPage)>,
         uploads: &mut Arena,
     ) -> Result<(), String> {
+        self.update_sources(context, anchor, sources, None, uploads)
+    }
+
+    pub(crate) fn update_closed<T: Deref<Target = LightPage>>(
+        &mut self,
+        context: &Arc<Context>,
+        anchor: [f64; 3],
+        sources: &BTreeMap<u64, ([f64; 3], T)>,
+        revision: u64,
+        changed: &BTreeSet<u64>,
+        full: bool,
+        uploads: &mut Arena,
+    ) -> Result<(), String> {
+        self.update_sources(
+            context,
+            anchor,
+            sources,
+            Some((revision, changed, full)),
+            uploads,
+        )
+    }
+
+    fn update_sources<T: Deref<Target = LightPage>>(
+        &mut self,
+        context: &Arc<Context>,
+        anchor: [f64; 3],
+        sources: &BTreeMap<u64, ([f64; 3], T)>,
+        publication: Option<(u64, &BTreeSet<u64>, bool)>,
+        uploads: &mut Arena,
+    ) -> Result<(), String> {
         let mut trace = prime_diagnostics::scope("lt.update");
         trace.fail();
         trace.count("pg", sources.len() as u64);
-        let mut inputs = Vec::with_capacity(sources.len());
-        for (&key, &(origin, source)) in sources {
+        let full_snapshot = publication.is_none_or(|(revision, _, full)| {
+            needs_full_snapshot(
+                self.source_revision,
+                revision,
+                full,
+                self.needs_full_publication,
+            )
+        });
+        let keys: Vec<_> = if full_snapshot {
+            sources.keys().copied().collect()
+        } else {
+            publication.unwrap().1.iter().copied().collect()
+        };
+        let mut inputs = Vec::with_capacity(keys.len());
+        let mut removed = Vec::new();
+        for key in keys {
+            let Some((origin, source)) = sources.get(&key) else {
+                removed.push(key);
+                continue;
+            };
             let tree = &source.tree;
             inputs.push(Input {
                 key,
-                origin,
+                origin: *origin,
                 root: tree.root,
                 inverse_areas: &source.inverse_areas,
                 paths: &tree.paths,
@@ -94,7 +146,11 @@ impl LightTree {
         // make its next unchanged snapshot skip the GPU ranges that were never published.
         let retry = self.needs_full_publication;
         self.needs_full_publication = true;
-        let changes = self.cpu.update(&inputs, anchor)?;
+        let changes = if full_snapshot {
+            self.cpu.update(&inputs, anchor)?
+        } else {
+            self.cpu.update_delta(&inputs, &removed, anchor)?
+        };
         if self.cpu.world.is_empty() {
             // Buffer drops retire against the Context recording/submitted serial.
             *self = Self::new(context);
@@ -105,6 +161,7 @@ impl LightTree {
         let world_count = self.world_count();
         trace.count("changed", u64::from(changes.changed));
         trace.count("world", u64::from(world_changed));
+        trace.count("checked", changes.checked_emitters as u64);
         let mut copies = Vec::new();
         let mut staging = prime_diagnostics::scope("lt.stage");
         staging.fail();
@@ -153,8 +210,13 @@ impl LightTree {
             }
             let mut pages = prime_diagnostics::scope("lt.pages");
             pages.fail();
-            let bytes = page_bytes(&self.cpu, anchor, |key| {
-                let source = sources[&key].1;
+            let page_indices: Vec<_> = if retry || world_changed {
+                (0..self.cpu.pages.len() as u32).collect()
+            } else {
+                changes.pages
+            };
+            let ranges = page_ranges(&self.cpu, anchor, &page_indices, |key| {
+                let source = &sources[&key].1;
                 PageBinding {
                     nodes: source.tree.nodes.address(),
                     emitters: source.emitters.address(),
@@ -162,8 +224,23 @@ impl LightTree {
                     static_page: source.static_page,
                 }
             })?;
-            pages.count("bytes", bytes.len() as u64);
-            stage_table(context, uploads, &bytes, &mut self.pages, &mut copies)?;
+            let pages_grew = grow(context, &mut self.pages, self.cpu.pages.len() * 48)?;
+            // A new pages buffer only occurs with world membership growth, which
+            // publishes all rows. Header BDA changes follow that same proof.
+            debug_assert!(!pages_grew || world_changed);
+            pages.count(
+                "bytes",
+                ranges.iter().map(|(_, bytes)| bytes.len() as u64).sum(),
+            );
+            for (range, bytes) in ranges {
+                copies.push(stage(
+                    context,
+                    uploads,
+                    &bytes,
+                    self.pages.as_ref().unwrap().buffer,
+                    u64::from(range.start) * 48,
+                )?);
+            }
             if world_changed {
                 let bytes = header_bytes(
                     [
@@ -211,54 +288,11 @@ impl LightTree {
         }
         submitted?;
         self.needs_full_publication = false;
+        self.source_revision = publication.map(|publication| publication.0);
         publish.succeed();
         trace.succeed();
         Ok(())
     }
-}
-
-fn page_bytes(
-    cpu: &CpuTree,
-    anchor: [f64; 3],
-    mut binding: impl FnMut(u64) -> PageBinding,
-) -> Result<Vec<u8>, String> {
-    let mut bytes = Vec::with_capacity(cpu.pages.len() * 48);
-    for page in &cpu.pages {
-        if let Some(page) = page {
-            let source = binding(page.key);
-            bytes.extend_from_slice(&source.nodes.to_le_bytes());
-            bytes.extend_from_slice(&source.emitters.to_le_bytes());
-            for (origin, anchor) in page.origin.into_iter().zip(anchor) {
-                let relative = (origin - anchor) as f32;
-                if !relative.is_finite() {
-                    return Err("Light tree page exceeds shader coordinate range".into());
-                }
-                bytes.extend_from_slice(&relative.to_le_bytes());
-            }
-            for word in [
-                source.format,
-                page.first,
-                page.count,
-                page.path,
-                source.static_page.map_or(0, |page| page + 1),
-            ] {
-                bytes.extend_from_slice(&word.to_le_bytes());
-            }
-        } else {
-            bytes.extend_from_slice(&[0; 48]);
-        }
-    }
-    Ok(bytes)
-}
-
-fn header_bytes(addresses: [u64; 3], power: f32, pages: u32) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(32);
-    for address in addresses {
-        bytes.extend_from_slice(&address.to_le_bytes());
-    }
-    bytes.extend_from_slice(&power.to_le_bytes());
-    bytes.extend_from_slice(&pages.to_le_bytes());
-    bytes
 }
 
 fn grow(context: &Arc<Context>, buffer: &mut Option<Buffer>, bytes: usize) -> Result<bool, String> {

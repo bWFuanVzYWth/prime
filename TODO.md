@@ -2,6 +2,21 @@
 
 这里只维护后续工作与验收条件，当前能力和缺口见 [HACK.md](HACK.md)。单次调查与性能数据保存在 `artifacts/`。
 
+## 全项目审查 P3：测量后决定的设计
+
+- [ ] Full BSDF 的 view/IOR/roughness 准备共享：先计实际 local/sun/sample 重复和跨 Ray Query 活跃值；比较窄局部准备与重算，完整帧收益不足时不保留大 closure 缓存。
+- [ ] 独立 guide 后缀与粗糙反射 motion：记录分离率、unresolved、query 数及完整时间，比较 SDK reflection-motion 与 hit-distance 输入。精确动态次段需 endpoint/identity/完成证明，不能把当前距离代理当成真实光流。
+- [ ] 大气表刷新：记录真实相机/FOV/太阳变化下的更新频率与完整 GPU 时间，再评估视角无关表或减少无输入依赖的重算；保留插值与遮挡误差，不降低刷新频率掩盖成本。
+- [ ] SDK/AS/transfer 屏障：分别建立正常录制与部分失败路径的实际依赖图，再以 sync2 收窄 stage/access；须严格同步零错误及整帧收益，保留失败隔离与 Present 最后消费者证明。
+- [ ] 具名 camera-relative 自定义源：量化源比较、复制及 BLAS 重建占比；只在精确平移和局部顶点往返证明下复用 prototype，不重播有状态 callback 或以 epsilon/hash 相似猜身份。
+- [ ] 稳定槽中间孔压缩：本轮只裁死尾和空尾页；进一步压缩必须证明 live primitive/page ordinal、旧 alias、材质地址及局部历史映射，不能以整页/区块重置换索引整理。
+- [ ] Tree 叶界发布：对比四角重算与新增 immutable bounds 的整帧收益、约24B/emitter容量及 ABI/极端距离退路；正反整数 PMF/support 必须一致，收益不足不保留新布局。量化节点/拓扑实验单独比较质量。
+- [ ] ReSTIR suffix 精确依赖：先记录有资格 donor、RC 类别、刷新长度/query 数及局部光照更新放大，同时测量 shift/temporal 的驱动编译、寄存器与 spill；局部介质刷新使完整 suffix 体进入这两入口，SPV 静态大小不代表实际执行成本。80B reservoir 不含完整依赖，RC 未变不能证明后缀未变。新增依赖索引须足够整帧收益，不用不安全跳过或全局重置替代。
+- [ ] 构建产物与缓存回收：明确共享 shader cache GC、过期 OUT_DIR 和 test-only/HostBenchmark 边界，分别评估 Slang 调试记录与非调试指令体，记录真实增量 type-check/codegen/final-link 及 pipeline 创建时间；不按源码行数盲拆 crate，不混入生产优化/布局变化。
+- [ ] 数值稳定乘除的常规范围快路：保留当前极端/FTZ/零通道保护；先取得真实驱动代价与 normal/subnormal/zero/NaN/Inf/tiny-PDF 等价证明，新增范围分支只有完整帧净收益才保留。
+
+以上保持原生1920×1080固定场景、seed、画质/射线预算的正式基线；分别记录稳态、更新、初始化和 CPU/GPU，保留离群与未覆盖范围。局部数学、SPIR-V尺寸和逻辑请求数不折算为毫秒。
+
 ## 下一阶段方向：对照旧 Prime
 
 参考项目为 `C:\WorkSpace\prime`。下面区分其已实现能力与本项目缺口，不把旧项目的待办、实验能力或已有缺陷作为可直接迁移的成品。Java 宿主绑定、Rust 场景与资源所有权的边界不变；剩余 CPU 性能债为非阻塞工作，真实游戏验收贯穿各阶段。
@@ -19,7 +34,7 @@
 
 - [ ] ReSTIR PT 闪烁部分改善，残余似按区块分界，继续收窄局部历史拒绝；关闭 RR 后的轻微蠕动与结构化亮像素扩大到 ReSTIR 内部调查，分别按 [PT-013、PT-018](HACK.md) 管理。旧 RR Responsivity 仍需补锁定 SDK 的 Vulkan 转发，暗处沸腾与 FG 果冻继续延后，保持当前生产默认。
 - [x] 修正 ReSTIR 时间 donor 的 jitter 接口，避免周期 jitter 取整形成定向历史搬运；完整 Halton 周期及运动/FOV 回归通过，用户确认实机滚动问题已经解决，关闭 [PT-014](HACK.md)。
-- [ ] FG 开启后的严重果冻感从首次接入版本起存在，按 [PT-017](HACK.md) 登记，本轮不修复。核对 SDK 输入图像方向：当前 `bottom_up=true` 时 HUDless/UI mask 属于宿主方向，depth/motion 属于核心左上方向；连同生成帧呈现方向与运动 Y 分量一起验证。范围见[坐标契约](docs/coordinates.md)，不把尚未证明的方向问题当作果冻根因。
+- [ ] FG 开启后的严重果冻感从首次接入版本起存在，按 [PT-017](HACK.md) 跟踪。已依据双版本实际 SDR swapchain blit，将 FG HUDless/UI mask 和 HDR 直接呈现统一到 depth/motion 的核心左上方向；继续手动验收真实运动、生成帧及呈现。范围见[坐标契约](docs/coordinates.md)，接口修复尚未证明果冻感已解决。
 - [ ] 逐项收敛 P001/P004/P005/P006/P007/P008：先补真实标准 offset、剔面和源上下文，再确定自定义模型/流体必要回调的单次批量准备合同。每个支持项同时增加双版本实际宿主参照、失效与资源重载测试；未知来源继续明确计数，不用名称猜测或回调重播填补数据。
 - [x] 接入 Streamline DLSS RR preset F 与可调超分档位，默认 Performance；版本无关首表面guides、实际采中反射距离、相机及有稳定局部几何对应的持久实例motion、jitter/矩阵/history和完成值退休由Rust持有，未知形变保持无效。SDK/能力失败显式回退，Java只绑定设备与真实Present；契约见[实时重建](docs/reconstruction.md)。实际游戏画质不因编译通过而视为已验收。
 - [ ] 收敛真实 DLSS RR 的 Vulkan 同步验证：当前锁定 SDK 的内部清图仍有 `WRITE_AFTER_WRITE`，即使实际 evaluate、完成和完整有限输出读回成功，严格验证仍失败。以 `scripts/test-streamline-gpu.ps1` 的零错误结果关闭；不能屏蔽验证错误或替调用方管理 NGX 私有图像。

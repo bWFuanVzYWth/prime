@@ -32,6 +32,7 @@ import "restir/scene.slang";
 import "restir/path.slang";
 import "restir/reservoir.slang";
 import "restir/rng.slang";
+import "restir/history_support.slang";
 import "ray_query.slang";
 import "pbr.slang";
 import "math/color.slang";
@@ -39,12 +40,34 @@ import "math/ray_offset.slang";
 import "math/transport.slang";
 import "service/bsdf/contract/sample.slang";
 
+public float3 restirConnectionVisibility(RestirScene scene, SurfacePoint previous,
+                                         SurfacePoint target, bool finite, float3 connection,
+                                         uint seed, float4 startingMedium,
+                                         out float4 terminalMedium) {
+    // RA-003/011: preserve both safe spawn endpoints and the same straight visibility query.
+    float3 begin = spawnRay(previous, connection);
+    terminalMedium = startingMedium;
+    if (finite) {
+        float3 segment = spawnRay(target, -connection) - begin;
+        float limit = length(segment);
+        if (!(limit > 0.0))
+            return float3(0);
+        return traceTransmittance(scene.resources, begin, segment / limit, seed, limit,
+                                  startingMedium, terminalMedium);
+    }
+    return traceTransmittance(scene.resources, begin, connection, seed, 100000, startingMedium,
+                              terminalMedium);
+}
+
 public PrecomputedShiftData restirShift(RestirScene scene, RestirPrimary primary, float3 primaryWo,
                                         inout PathReservoir reservoir, RestirReplayData replay,
                                         bool updateSuffix = false) {
     PrecomputedShiftData result = {};
     result.reconnectionJacobian = reservoir.reconnectionJacobian;
-    if (reservoir.weight == 0 || all(replay.data.pathThroughput == 0))
+    // RA-009: the destination's proposal must support the complete source path,
+    // including direct RC1 inverses that do not enter prefix replay.
+    if (!restirPathFitsBudget(reservoir.pathFlags, asuint(scene.frame.displayExtra.z)) ||
+        reservoir.weight == 0 || all(replay.data.pathThroughput == 0))
         return result;
     uint rcLength = uint(reservoir.pathFlags.rcVertexLength());
     uint pathLength = uint(reservoir.pathFlags.pathLength());
@@ -127,6 +150,19 @@ public PrecomputedShiftData restirShift(RestirScene scene, RestirPrimary primary
         return result;
     bool violateRoughness = !(emitter && !nee) && !restirSampleRough(first.pdf, roughnessThreshold);
     bool violateDistance = finite && 1.0 / (first.pdf * geometry) < threshold;
+    if (!(emitter && nee) && (violateRoughness || violateDistance))
+        return result;
+    float3 visibility;
+    if (opticalFeatures != 0) {
+        // RA-011: the RC BSDF and suffix need the connection's actual terminal medium.
+        // Reuse its one visibility query; the non-optical variant keeps the late query.
+        float4 terminalMedium;
+        visibility = restirConnectionVisibility(scene, previous.surface, target, finite, connection,
+                                                reservoir.initRandomSeed, medium, terminalMedium);
+        if (all(visibility == 0))
+            return result;
+        medium = terminalMedium;
+    }
     float3 integrand = float3(0);
     float3 emitterRadiance = float3(0);
     float emitterMis = 1;
@@ -155,9 +191,19 @@ public PrecomputedShiftData restirShift(RestirScene scene, RestirPrimary primary
                 reservoir.lightPdf = lightPdf * geometry;
             }
         } else {
-            // RA-011/012, docs/restir-adaptations.md: TREE's fixed-RC PMF has no
-            // view-normal dependency; retain upstream static cached-suffix behavior.
-            if (updateSuffix && !restirUpdateSuffix(scene, rcHit, -connection, medium, reservoir))
+            bool suffixTransmission = dot(rcHit.surface.normal, -connection) *
+                                              dot(rcHit.surface.normal, reservoir.reconnectionWi) <
+                                      0;
+            float4 suffixMedium = rcHit.optical && !rcHit.thin && suffixTransmission
+                                          ? rcHit.transmitted
+                                          : restirIncident(rcHit, medium);
+            // RA-011: static geometry alone does not prove an inherited medium unchanged.
+            // The compact source flag proves only vacuum-to-vacuum; ambiguous opaque/thin
+            // paths refresh locally, with extra suffix queries and no global reset/state plane.
+            bool refresh = updateSuffix ||
+                           restirSuffixNeedsRefresh(reservoir.pathFlags,
+                                                    rcHit.optical && !rcHit.thin, suffixMedium);
+            if (refresh && !restirUpdateSuffix(scene, rcHit, -connection, medium, reservoir))
                 return result;
             integrand = reservoir.reconnectionIncidentRadiance * first.response;
             BsdfEvaluation second = restirEvaluate(scene, rcHit, -connection,
@@ -204,34 +250,20 @@ public PrecomputedShiftData restirShift(RestirScene scene, RestirPrimary primary
         // generate/replay; a mapped BSDF normal must not reject its own source connection.
         float inverseGeometry =
                 finite ? distanceSquared / abs(dot(previous.surface.normal, -connection)) : 0;
-        if (violateRoughness || violateDistance ||
-            !(emitter && !finite) &&
-                    inverseGeometry / (emitter && !nee ? RESTIR_DIFFUSE_PSEUDO_PDF : secondPdf) <
-                            threshold)
+        if (!(emitter && !finite) &&
+            inverseGeometry / (emitter && !nee ? RESTIR_DIFFUSE_PSEUDO_PDF : secondPdf) < threshold)
             return result;
     }
-    // RA-003/011, docs/restir-adaptations.md: compute late, without retaining begin
-    // across suffix queries. Visibility keeps Prime's straight transmittance approximation.
-    // The source-event checks above ensure the query and physical spawn sides agree.
-    float3 begin = spawnRay(previous.surface, connection);
-    float3 visibility;
-    if (finite) {
-        float3 end = spawnRay(target, -connection);
-        float3 segment = end - begin;
-        float limit = length(segment);
-        if (!(limit > 0))
-            return result;
-        visibility = traceTransmittance(scene.resources, begin, segment / limit,
-                                        reservoir.initRandomSeed, limit, medium);
-    } else {
-        visibility = traceTransmittance(scene.resources, begin, connection,
-                                        reservoir.initRandomSeed, 100000, medium);
+    // RA-003/011: no non-optical medium dependency; compute late without keeping begin
+    // alive across suffix queries. This remains exactly one connection visibility query.
+    if (opticalFeatures == 0) {
+        float4 terminalMedium;
+        visibility = restirConnectionVisibility(scene, previous.surface, target, finite, connection,
+                                                reservoir.initRandomSeed, medium, terminalMedium);
     }
-    // RA-013, docs/restir-adaptations.md: preserve local-emitter source transport order;
-    // RGB transmittance and the non-diagonal color conversion cannot be interchanged.
+    // RA-013: visibility is working RGB, so convert authored emitter709 before multiplying.
     if (finite && emitter) {
-        float3 visibleLe = nee ? linear709ToWorking(emitterRadiance * visibility)
-                               : linear709ToWorking(emitterRadiance) * visibility;
+        float3 visibleLe = linear709ToWorking(emitterRadiance) * visibility;
         integrand = visibleLe * first.response * emitterMis * replay.data.pathThroughput;
     } else
         integrand *= visibility * replay.data.pathThroughput;

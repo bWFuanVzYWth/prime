@@ -129,6 +129,8 @@ CPU 源事务同步闭合，没有软时间预算或跨帧字节配额。Rust �
 
 原型/回退桶保持独立 BLAS，但其 storage 与临时 scratch 采用设备页子分配。构建完成后的 scratch 和已消费的静态/纹理上传区间归还页；宿主可写输入只在真实完成槽复用。buffer 在分配时映射一次，写入不逐次 map/unmap。静态打包直接写复用的材质记录，不再同时物化位置数组。小批串行，大批使用共享 session 同步 CPU 池；1/2/4/8 线程下的结果等价与成本通过独立夹具检查。页和部分数组保留高水位容量，增长仍分配，不能将批量与池化描述为全链路零分配。
 
+临时 arena 根据真实 completed serial 释放租约后，空页只有 live=0 且 Rc owner 独占时才可收集。自动收集只在有待回收页、完成值推进达到低频门限时扫描；显式收集复用相同证明。每池最多保留一个标准空页（host4 MiB、device32 MiB），不保留 burst 大页；live 页的稀疏索引及 BDA 不移动。低频门限只控制扫描时机，不能替代 GPU 完成或取消证明。
+
 独立的 `HostBenchmark` 通过相同 `Renderer::borrowed` / `record_host` 接口模拟宿主设备、主图像和 timeline，测量时不回读输出。它不包含 Minecraft 捕获、Java FFM、HUD 或窗口呈现，因此不能将其吞吐直接称为游戏 FPS。`Renderer::render` 是同步回读的图像诊断接口，不用于评价生产合成路径。
 
 构建、验证、原生 1080p 测量方法与指标定义见 [CONTRIBUTING](../CONTRIBUTING.md)。尚未实现的性能工作见 [HACK](../HACK.md)。

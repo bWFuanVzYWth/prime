@@ -10,6 +10,12 @@ import "bsdf/full/math/spectrum.slang";
 // Thin film is omitted because the compact support predicate rejects it.
 
 public PrimeFullOpenPbrFloatPair primeFullOpenPbrDielectricRsRp(float ior, float cosineTheta) {
+    // Equal optical media have no interface. The general subtraction loses precision
+    // near grazing incidence and is 0/0 at exactly zero cosine.
+    if (ior == 1.0) {
+        PrimeFullOpenPbrFloatPair zero = {0.0, 0.0};
+        return zero;
+    }
     float eta = ior;
     if (cosineTheta < 0.0) {
         cosineTheta = -cosineTheta;

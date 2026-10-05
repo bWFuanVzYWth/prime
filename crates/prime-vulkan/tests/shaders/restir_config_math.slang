@@ -4,6 +4,7 @@ module restir_config_math_test;
 import "restir/config.slang";
 import "restir/reservoir.slang";
 import "restir/rng.slang";
+import "restir/history_support.slang";
 [[vk::binding(0, 0)]] StructuredBuffer<uint4> inputs;
 [[vk::binding(1, 0)]] RWStructuredBuffer<uint4> outputs;
 [[vk::push_constant]] ConstantBuffer<uint4> dispatch;
@@ -37,6 +38,35 @@ import "restir/rng.slang";
     } else if (dispatch.x == 4u) {
         outputs[2u * index] = config.reuse;
         outputs[2u * index + 1u] = asuint(config.shift);
+    } else if (dispatch.x == 5u) {
+        SampleGenerator sg = SampleGenerator(b.x);
+        PathReservoir aggregate = {}, path = {};
+        aggregate.M = path.M = 1;
+        aggregate.integrand = asfloat(a.xyz);
+        aggregate.weight = asfloat(a.w);
+        path.integrand = asfloat(b.yzw);
+        path.weight = 1;
+        restirAddFreshRaw(aggregate, path, sg);
+        restirFinalizeFresh(aggregate, 2u);
+        outputs[2u * index] =
+                asuint(float4(aggregate.integrand * aggregate.weight, aggregate.weight));
+        outputs[2u * index + 1u] = uint4(asuint(aggregate.M), sg.rng, 0, 0);
+    } else if (dispatch.x == 6u) {
+        ReSTIRPathFlags flags = {};
+        flags.insertPathLength(int(a.x));
+        flags.insertLastVertexNEE(a.y != 0u);
+        flags.insertSuffixNonVacuum(a.w != 0u);
+        bool budgetFit = restirPathFitsBudget(flags, a.z);
+        float4 medium = asfloat(b);
+        outputs[2u * index] = uint4(budgetFit, flags.suffixNonVacuum(),
+                                    restirSuffixNeedsRefresh(flags, false, medium),
+                                    restirSuffixNeedsRefresh(flags, true, medium));
+        flags.tryInsertBounceTypesBeforeRcVertex(63, true);
+        flags.tryInsertBounceTypesAfterRcVertex(31, true);
+        flags.insertRcVertexLength(13);
+        flags.insertLightType(2);
+        outputs[2u * index + 1u] = uint4(flags.suffixNonVacuum(), flags.pathLength(),
+                                         flags.lastVertexNEE(), flags.flags);
     } else {
         SampleGenerator sg = SampleGenerator(uint2(index, 73u), dispatch.z);
         PathReservoir aggregate = {}, path = {};
@@ -45,9 +75,13 @@ import "restir/rng.slang";
         float3 sum = float3(0);
         for (uint i = 0u; i < a.w; ++i) {
             path.integrand = float3(float(i + 1u), float((i % 3u) + 1u), 0.25);
-            path.weight = 0.5 + float(i % 2u);
-            sum += path.integrand * path.weight;
-            aggregate.merge(path.integrand, 1.0, path, sg, 1.0);
+            float ucw = 0.5 + float(i % 2u);
+            path.weight = PathRISState::toScalar(path.integrand) * ucw;
+            sum += path.integrand * ucw;
+            if (i == 0u)
+                aggregate = path;
+            else
+                restirAddFreshRaw(aggregate, path, sg);
         }
         restirFinalizeFresh(aggregate, a.w);
         outputs[2u * index] = asuint(float4(aggregate.integrand * aggregate.weight, aggregate.M));

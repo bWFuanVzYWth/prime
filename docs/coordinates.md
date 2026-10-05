@@ -15,7 +15,7 @@
 | HDR world 与 SDR baseline 快照 | 左上 | 输出尺寸；保存世界结果，不随之后的手部/HUD 绘制改变 |
 | 宿主 world/UI composite、最终呈现目标 | 由宿主接口的 `bottom_up` 显式声明；为真时是左下原点、`+y` 上 | 输出尺寸；界面采样按宿主 texel，不套用 PT jitter |
 | FG depth / motion（binding 21 / 22） | 左上 | RR 输入尺寸；真实首可见物理表面与方向天空，独立于 RR 提升后的 PSR guide |
-| 当前 FG HUDless / UI mask | 与最终宿主 UI composite 相同方向 | 输出尺寸；当前呈现 pass 在 `bottom_up=true` 时翻转 canonical world 快照，再写 HUDless；mask 直接取宿主 UI alpha。与 FG guides 的未统一边界见下文 |
+| FG HUDless / UI mask、最终 swapchain | 左上，与 FG depth/motion 及 SDK 相机同向 | 输出尺寸；world 快照保持 canonical，UI mask 从宿主 texel 反向索引。SDR 宿主 surface blit 与 HDR 直接输出遵守同一最终方向 |
 
 像素边界是整数坐标，归一化 UV 的 `(0,0)` 与 `(1,1)` 分别是图像左上、右下边界。采样偏移 `q` 相对于像素左上角，`SampleJitterPixels=q-0.5` 相对于中心；两者不能混用。
 
@@ -60,13 +60,13 @@ ReSTIR 时间复用也按无 jitter 的运动选择前帧 reservoir：`floor(pix
 
 反射虚拟表面、厚折射局部代理、方向天空与粗糙反射距离代理的对应范围见[重建契约](reconstruction.md)。图像方向一致不意味着这些近似已成为真实光流。
 
-## 呈现边界与当前 FG 限制
+## 呈现边界与 FG
 
 核心到宿主的 Y 转换只属于呈现边界：当 `bottom_up=true` 时，目标行为 `hostY=height-1-canonicalY`，`hostX=canonicalX`。直接 raw/Offline/ReSTIR SDR、`rr_display` 和 `display/from_linear` 各自承担所选路径的这一次转换；线性中间图、RR 输入/输出、HDR world 和 baseline 仍保持 canonical 方向，不串联多次翻转。
 
-HDR/UI 呈现反向索引 canonical world/baseline，以匹配已经绘制手部/HUD 的宿主 texel。这里不能翻转 UI 本身，也不能在两侧反复翻转世界。SDR/HDR FG 的 HUDless 与 UI coverage 当前也由该呈现 pass 生成到宿主 UI 方向。
+Minecraft 26.2/26.3 的 Vulkan surface blit 将中间 UI 目标翻转到最终左上 swapchain。SDR FG 的 HUDless 直接读取 canonical baseline，mask 反向索引宿主 UI alpha；HDR pass 直接写 swapchain，按 canonical 像素读取 world/baseline，并反向索引宿主 UI。原帧与生成帧因此使用同一最终图像方向。
 
-当前 `bottom_up=true` 的 FG 接口尚有方向不一致：`display/frame_generation_present.slang` 与 `display/hdr_present.slang` 写入的 HUDless/mask 是宿主方向，而 `reconstruct/visible_guides.slang` 及 K1 写入的 FG depth/motion 是 canonical 方向，native 桥接直接标记这些图像，未做统一。FG 默认关闭；该边界不能宣称已经统一，也不能用作 FG 关闭时 RR 伪影的原因。修正时应在 adapter 明确统一输入方向及运动 Y 分量，保留核心约定。
+FG 四张输入和最终 backbuffer 均属于 canonical 空间。motion 的 Y 分量、无 jitter 矩阵、jitter 符号和共用 frame-token 常量保持核心定义，不另做一次符号翻转。此合同修正不证明 FG 果冻的全部原因已解决；实际连续帧与窗口呈现仍按 PT-017 验收。
 
 ## 纹理 UV 的范围
 
@@ -76,6 +76,6 @@ HDR/UI 呈现反向索引 canonical world/baseline，以匹配已经绘制手部
 
 ## 验证边界
 
-生产 Slang 的 CPU 合同检查覆盖实际采样位置、像素 motion、reflection proxy、非法输入和深度。无窗口 GPU fixtures 检查真实 RR/ReSTIR 的 FP16 guide 产物，独立世界几何投影、静止/移动相机与 FOV、前后不同 jitter、非等输入/输出 aspect、奇数尺寸边缘，以及显示/UI 各自的方向。测试产物通过不证明 SDK 私有重建、连续帧或游戏呈现正确；未统一的 FG 边界仍需显式修复与验收。
+生产 Slang 的 CPU 合同检查覆盖实际采样位置、像素 motion、reflection proxy、非法输入、深度及呈现地址。无窗口 GPU fixtures 检查真实 RR/ReSTIR 的 FP16 guide 产物，独立世界几何投影、静止/移动相机与 FOV、前后不同 jitter、非等输入/输出 aspect、奇数尺寸边缘，以及显示/UI 各自的方向。具体执行范围以本次验证记录为准；测试产物通过不证明 SDK 私有重建、连续帧或游戏呈现正确。
 
 实现入口是[普通 PT 射线](../crates/prime-vulkan/shaders/transport.slang)、[ReSTIR 射线](../crates/prime-vulkan/shaders/restir/scene.slang)、[RR 投影与像素运动](../crates/prime-vulkan/shaders/reconstruct/rr_guides.slang)、[CPU 相机/SDK 矩阵](../crates/prime-vulkan/src/reconstruction_history.rs)、[线性显示边界](../crates/prime-vulkan/shaders/display/from_linear.slang)、[HDR/UI 呈现](../crates/prime-vulkan/shaders/display/hdr_present.slang)和[纹理源采样](../crates/prime-vulkan/shaders/trace/closest.slang)。修改其中一处的方向或单位时，须同时检查其生产者、消费者和本契约。

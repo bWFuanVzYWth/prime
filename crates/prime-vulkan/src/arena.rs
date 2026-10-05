@@ -7,6 +7,11 @@ use ash::vk;
 use std::{collections::VecDeque, rc::Rc, sync::Arc};
 
 const UNIT: u64 = 256;
+const COLLECTION_INTERVAL: u64 = 64;
+
+#[path = "arena_policy.rs"]
+mod policy;
+use policy::{completed_leases, keep_idle_page};
 struct Page {
     buffer: Rc<Buffer>,
     slots: Slots,
@@ -52,6 +57,8 @@ pub(crate) struct Arena {
     serial: u64,
     host: bool,
     next: usize,
+    pending_collection: bool,
+    last_collection: u64,
 }
 impl Arena {
     pub fn new(context: &Context, host: bool) -> Self {
@@ -61,20 +68,28 @@ impl Arena {
             serial: context.retirement_serial(),
             host,
             next: 0,
+            pending_collection: false,
+            last_collection: 0,
         }
     }
     pub fn begin(&mut self, completed: u64, serial: u64) {
         self.serial = serial;
-        while self
-            .retired
-            .front()
-            .is_some_and(|(value, _)| *value <= completed)
-        {
-            let (_, lease) = self.retired.pop_front().unwrap();
+        let mut newly_empty = false;
+        let budget = self.idle_budget();
+        let multiple_pages = self.pages.len() > 1;
+        for lease in completed_leases(&mut self.retired, completed) {
             let page = self.pages[lease.page].as_mut().unwrap();
             page.slots.release(lease.first, lease.units);
             page.live -= lease.units;
+            newly_empty |= page.live == 0 && (multiple_pages || page.buffer.size > budget);
             self.next = lease.page;
+        }
+        self.pending_collection |= newly_empty;
+        if self.pending_collection
+            && completed.saturating_sub(self.last_collection) >= COLLECTION_INTERVAL
+        {
+            self.reclaim_empty_pages();
+            self.last_collection = completed;
         }
     }
     pub fn allocate(
@@ -167,21 +182,44 @@ impl Arena {
     pub fn retire(&mut self, lease: Lease) {
         self.retired.push_back((self.serial, lease));
     }
-    /// Completion has already released every range. Keep one idle page for future
-    /// work; sparse page identities remain valid for all other live leases.
+    fn idle_budget(&self) -> u64 {
+        if self.host {
+            4 * 1024 * 1024
+        } else {
+            32 * 1024 * 1024
+        }
+    }
+    /// Completion has already released every range. Keep at most one standard
+    /// idle page, never a burst-sized page. External owners prevent collection.
     pub fn reclaim_empty_pages(&mut self) {
-        let mut idle = false;
-        for page in &mut self.pages {
+        if !self.pending_collection {
+            return;
+        }
+        let budget = self.idle_budget();
+        let keep = keep_idle_page(
+            self.pages.iter().enumerate().filter_map(|(index, page)| {
+                let page = page.as_ref()?;
+                Some((
+                    index,
+                    page.buffer.size,
+                    page.live == 0 && Rc::strong_count(&page.buffer) == 1,
+                ))
+            }),
+            budget,
+        );
+        self.pending_collection = false;
+        for (index, page) in self.pages.iter_mut().enumerate() {
             if page
                 .as_ref()
                 .is_some_and(|page| page.live == 0 && Rc::strong_count(&page.buffer) == 1)
             {
-                if idle {
+                if Some(index) != keep {
                     *page = None;
-                } else {
-                    idle = true;
                 }
             }
+            self.pending_collection |= page
+                .as_ref()
+                .is_some_and(|page| page.live == 0 && Rc::strong_count(&page.buffer) != 1);
         }
         while self.pages.last().is_some_and(Option::is_none) {
             self.pages.pop();
@@ -217,67 +255,54 @@ mod tests {
         let context = Context::new().unwrap();
         let mut arena = Arena::new(&context, false);
         arena.begin(0, 7);
+        let normal = arena.allocate(&context, 31 * 1024 * 1024, 256).unwrap();
         let a = arena.allocate(&context, 40 * 1024 * 1024, 256).unwrap();
         let b = arena.allocate(&context, a.size, 256).unwrap();
-        let c = arena.allocate(&context, a.size, 256).unwrap();
-        let d = arena.allocate(&context, a.size, 256).unwrap();
-        let stable = (d.page, d.buffer.buffer, d.offset, d.address());
+        let c = arena.allocate(&context, normal.size, 256).unwrap();
+        let stable = (c.page, c.buffer.buffer, c.offset, c.address());
         let held = b.buffer.clone();
         arena.retire(a);
-        arena.begin(7, 8);
+        arena.begin(6, 8);
+        arena.reclaim_empty_pages();
+        assert_eq!(
+            arena.page_count(),
+            4,
+            "in-flight ranges keep physical pages"
+        );
         arena.retire(b);
         arena.begin(7, 9);
-        arena.retire(c);
-        arena.reclaim_empty_pages();
-        assert_eq!(
-            arena.page_count(),
-            4,
-            "in-flight ranges keep their physical pages"
-        );
-        arena.begin(8, 9);
-        arena.reclaim_empty_pages();
-        assert_eq!(
-            arena.page_count(),
-            4,
-            "external buffer owners also prevent collection"
-        );
-        drop(held);
         arena.reclaim_empty_pages();
         assert_eq!(arena.page_count(), 3);
         assert!(arena.pages[1].is_none());
-        assert_eq!((d.page, d.buffer.buffer, d.offset, d.address()), stable);
-        let idle = arena.allocate(&context, d.size, 256).unwrap();
-        let hole = arena.allocate(&context, d.size, 256).unwrap();
-        assert_eq!(idle.page, 0);
-        assert_eq!(hole.page, 1);
-        // Unsubmitted allocations can use the same conservative serial/cancel proof.
-        arena.retire(idle);
-        arena.retire(hole);
+        assert_eq!((c.page, c.buffer.buffer, c.offset, c.address()), stable);
         arena.begin(8, 10);
         arena.reclaim_empty_pages();
-        assert_eq!(arena.page_count(), 4);
-        arena.begin(9, 10);
+        assert_eq!(arena.page_count(), 3, "external owners prevent collection");
+        drop(held);
         arena.reclaim_empty_pages();
         assert_eq!(arena.page_count(), 2);
-        assert_eq!((d.page, d.buffer.buffer, d.offset, d.address()), stable);
-        arena.retire(d);
+        assert!(arena.pages[2].is_none());
+        assert_eq!((c.page, c.buffer.buffer, c.offset, c.address()), stable);
+        let hole = arena.allocate(&context, 40 * 1024 * 1024, 256).unwrap();
+        assert_eq!(
+            hole.page, 1,
+            "new pages reuse sparse holes without moving c"
+        );
+        arena.retire(hole);
+        arena.retire(normal);
+        arena.retire(c);
         arena.begin(9, 11);
         arena.reclaim_empty_pages();
-        assert_eq!(arena.page_count(), 2);
-        arena.begin(10, 11);
+        assert_eq!(arena.page_count(), 3);
+        arena.begin(10, 12);
         arena.reclaim_empty_pages();
         assert_eq!(
             arena.page_count(),
             1,
-            "one idle page remains for later work"
+            "one standard idle page survives; burst pages do not"
         );
         assert_eq!(arena.pages.len(), 1);
-        assert_eq!(
-            context
-                .live_allocations
-                .load(std::sync::atomic::Ordering::Relaxed),
-            1
-        );
+        assert_eq!(arena.reserved_bytes(), 32 * 1024 * 1024);
     }
     #[test]
     #[ignore = "requires Vulkan host-visible memory; checks exclusive mapped writes and failure reuse"]

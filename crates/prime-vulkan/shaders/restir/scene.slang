@@ -123,6 +123,7 @@ public SurfaceHit restirLoadEmitter(RestirScene scene, HitInfo identity, float3 
     hit.light = page.first + (primitive >> 1);
     hit.incident = front ? record.positive : record.negative;
     hit.transmitted = front ? record.negative : record.positive;
+    hit.physicalFront = front;
     hit.shadingNormal = hit.surface.normal;
     return hit;
 }
@@ -225,8 +226,8 @@ public float4 restirIncident(SurfaceHit hit, float4 medium) {
     return hit.optical && !hit.thin ? hit.incident : medium;
 }
 public float4 restirTransmitted(SurfaceHit hit) {
-    return hit.thin ? (hit.incident.x > hit.transmitted.x ? hit.incident : hit.transmitted)
-                    : hit.transmitted;
+    // RA-011: physical thin inside follows the authored negative side, not maximum IOR.
+    return hit.thin ? primeThinInsideMedium(hit) : hit.transmitted;
 }
 #if !defined(PRIME_RESTIR_MATERIAL_ONLY)
 public bool restirDirectLightSupported(SurfaceHit hit, float3 view, float3 direction) {
@@ -351,10 +352,11 @@ public RestirLightSample restirSampleLight(RestirScene scene, SurfaceHit receive
             shadowReceiver.normal = -shadowReceiver.normal;
         float3 attenuated = evaluateLocalLight(scene.resources, shadowReceiver, light, coverageSeed,
                                                shadowMedium, receiver.optical, pdf);
-        result.visibility =
-                float3(result.Le.x > 0 ? linear709ToWorking(attenuated).x / result.Le.x : 1,
-                       result.Le.y > 0 ? linear709ToWorking(attenuated).y / result.Le.y : 1,
-                       result.Le.z > 0 ? linear709ToWorking(attenuated).z / result.Le.z : 1);
+        // RA-013: shared local evaluation now returns working radiance; its RGB
+        // attenuation must not be multiplied in 709 before the color conversion.
+        result.visibility = float3(result.Le.x > 0 ? attenuated.x / result.Le.x : 1,
+                                   result.Le.y > 0 ? attenuated.y / result.Le.y : 1,
+                                   result.Le.z > 0 ? attenuated.z / result.Le.z : 1);
         result.pdf = pdf * localProbability;
         result.type = RESTIR_LIGHT_EMISSIVE;
         // RA-009, docs/restir-adaptations.md: preserve the actual sampled half/barycentrics

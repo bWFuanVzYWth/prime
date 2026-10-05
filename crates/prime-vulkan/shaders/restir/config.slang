@@ -28,9 +28,25 @@ public uint restirTemporalSurvival(RestirConfig config, bool selectedCanonical, 
     return selectedCanonical ? 0u : ((config.queue.w & 2u) != 0u ? previousAge : 0u) + 1u;
 }
 public void restirFinalizeFresh(inout PathReservoir aggregate, uint count) {
-    aggregate.finalizeReservoirWeight();
-    aggregate.weight /= float(count);
+    // RA-015: keep raw initial RIS wSum until this single normalization, as upstream.
+    // Dividing each path first can overflow a finite final S-path estimator.
+    float pHat = PathRISState::toScalar(aggregate.integrand);
+    aggregate.weight = pHat == 0.0 ? 0.0 : aggregate.weight / (float(count) * pHat);
     aggregate.M = 1.0;
+}
+public void restirAddFreshRaw(inout PathReservoir aggregate, PathReservoir path,
+                              inout SampleGenerator sg) {
+    PathRISState raw = {};
+    raw.weight = path.weight;
+    raw.integrand = path.integrand;
+    raw.pathFlags = path.pathFlags;
+    raw.lightPdf = path.lightPdf;
+    raw.rcNextVertexBounceSeed = path.rcNextVertexBounceSeed;
+    raw.reconnectionHit = path.reconnectionHit;
+    raw.reconnectionJacobian = path.reconnectionJacobian;
+    raw.reconnectionIncidentRadiance = path.reconnectionIncidentRadiance;
+    raw.reconnectionWi = path.reconnectionWi;
+    aggregate.add(raw, path.initRandomSeed, float4(0), sg);
 }
 public uint restirSpatialStream(RestirConfig config, uint round) {
     return config.reuse.w + 2u + round;
@@ -40,6 +56,9 @@ public uint restirPairSize(RestirConfig config, uint neighbor) {
 }
 public float restirDuplicateMCap(RestirConfig config, uint duplicateCount) {
     float history = float(config.reuse.x);
+    // RA-015: zero explicitly disables temporal mass, even with DupMap/power zero.
+    if (config.reuse.x == 0u)
+        return 0.0;
     if (config.features.y == 0u || (config.queue.w & 4u) == 0u)
         return history;
     // RA-015: the exposed zero exponent means one, including zero duplicates; GLSL Pow
@@ -58,6 +77,7 @@ public void restirConfigThresholds(RestirConfig config, inout SampleGenerator sg
 }
 // The donor chart includes the pixel-center half. Stochastic reprojection replaces that
 // half with U[0,1)^2; source replay still uses the accepted camera's actual jitter.
+// RA-015: the same actual donor supplies DupMap/age, unlike Falcor's second donor.
 public float2 restirStochasticLocation(float2 location, RestirConfig config,
                                        inout SampleGenerator sg) {
     return config.features.x != 0u ? location - 0.5 + sampleNext2D(sg) : location;

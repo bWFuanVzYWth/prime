@@ -18,8 +18,10 @@ public PrimeFullOpenPbrVecPair primeFullThinWallRt(float cosineTheta,
                                                    float3 transmissionTint, float3 extinction) {
     PrimeFullOpenPbrVecPair fresnel =
             primeFullOpenPbrSpecularFresnelRt(specularFresnel, cosineTheta);
-    float t0 =
-            1.0 - (1.0 - cosineTheta * cosineTheta) / primeFullOpenPbrSquare(specularFresnel.ior);
+    float t0 = specularFresnel.ior == 1.0
+                       ? cosineTheta * cosineTheta
+                       : 1.0 - (1.0 - cosineTheta * cosineTheta) /
+                                         primeFullOpenPbrSquare(specularFresnel.ior);
     if (t0 <= 0.0) {
         return fresnel;
     }

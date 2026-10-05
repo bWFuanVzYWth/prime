@@ -1,6 +1,10 @@
 //! One tree sampler owner. Updates only occur during light publications.
 use crate::{arena::Arena, light_tree::LightTree, resources::Context, surface::LightPage};
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    rc::Rc,
+    sync::Arc,
+};
 
 pub(crate) struct LightSampler {
     tree: LightTree,
@@ -20,11 +24,15 @@ impl LightSampler {
         &mut self,
         context: &Arc<Context>,
         anchor: [f64; 3],
-        sources: &BTreeMap<u64, ([f64; 3], &LightPage)>,
+        sources: &BTreeMap<u64, ([f64; 3], Rc<LightPage>)>,
+        revision: u64,
+        changed: &BTreeSet<u64>,
+        full: bool,
         uploads: &mut Arena,
     ) -> Result<(), String> {
         // Geometry owns the upload Arena; table Buffer drops use Context completion retirement.
-        self.tree.update(context, anchor, sources, uploads)?;
+        self.tree
+            .update_closed(context, anchor, sources, revision, changed, full, uploads)?;
         self.has_lights = self.tree.has_lights();
         Ok(())
     }

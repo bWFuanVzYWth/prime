@@ -47,6 +47,8 @@ Rust 为每个辅助图生成与基色帧尺寸对应的规范 mip。法线 foot
 
 solid dielectric 使用 Walter GGX 反射/折射、相关 Smith masking-shadowing、Snell/TIR 与 Beer-Lambert 吸收；thin-wall 保留两界面 Fresnel/吸收解析级数和轻量 single-scatter GGX。漫反射使用余弦半球，GGX 使用可见法线采样；分量选择概率与所选分量的响应/PDF 成对。没有 transmission directional-energy LUT、表驱动多次散射补偿或对应 GPU binding。高粗糙度反射/透射的角分布和能量仍需按此近似边界评估。
 
+物理薄片的 negative side 是 authored 内部材料，positive side 是已解析外部介质；查询保留选择 coating 前的物理正反侧。inside/outside 不按 IOR 大小推断，因此材料 IOR 低于邻水时仍使用该材料的吸收及正确 TIR。直线阴影逐片使用真实外部 IOR 与 Full 相同的内部 Snell 余弦和两界面 RGB 级数：`A=exp(-sigma*t/cosInternal)`，`T=(1-F)^2*A/(1-F^2*A^2)`，有效厚度 t=1/16 m；不以外部余弦 Beer 乘无吸收级数替代。IOR 比恰为1时 Fresnel 为零并直接保留入射余弦，避免 grazing 的0/0。厚边界的终点介质取最远候选，吸收 moment 累积保持 BVH 顺序无关；直线连接仍不解算折射焦散。
+
 LitePBR 数学保留两项支持修正：thin-wall 对外侧 IOR 大于内侧、Snell 折射余弦平方不大于0的情况显式返回 `R=1, T=0`，修正历史端点的非零透射；折射采样的反射候选检查从 `dot(wi,wi+wo)*wi.z` 去掉重复的 `wi.z` 符号因子，避免退出侧反射及 TIR 被提前丢弃。归一化且朝 +Z 的半向量和后续两侧支持检查保留；薄壁 relative eta=1 与介质身份保持规则不变，其余 LitePBR 数学按历史来源保留。
 
 生产根据已有表面分类使用 opaque 和已证明水/玻璃的 dielectric 闭包；普通 opaque 缺图参考粗糙度为0.9，已证明的 dielectric 缺 specular 图时为光滑边界，法线分布仍可提高粗糙度。非金属且规范 specular B>64 的 authored SSS 进入 opaque 的 subsurface 分支。optical thin 或 cutout authored SSS 使用 Full thin-material 的有色余弦双半球 reflection/transmission，thin-material 与介质几何薄片标志分别表示；其余使用历史 thick 分支的白色 diffuse transmission，SSS 分量的采样概率为反射0、透射1，介质身份不变。该 thick 分支是低阶近似，不表示厚介质 random-walk 散射。已证明介质薄片保留 1/16 m 有效厚度，foliage 底层 API 不意味着 Minecraft 树叶已自动采用该拓扑或旧固定 15% 透射权重。旧 PBR presets、`MaterialRecipeResolver` 的名称配方和用户材质预设不移植。

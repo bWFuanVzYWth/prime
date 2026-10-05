@@ -29,7 +29,12 @@ fn main() {
             &[],
         );
     }
-    for stage in ["restir_adapter", "restir_history", "restir_rc_view"] {
+    for stage in [
+        "restir_adapter",
+        "restir_history",
+        "restir_rc_view",
+        "restir_medium_support",
+    ] {
         build_support::samplers(
             &mut shaders,
             &format!("tests/shaders/{stage}.slang"),

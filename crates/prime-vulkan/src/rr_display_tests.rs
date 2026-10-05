@@ -163,15 +163,28 @@ fn pipeline(context: &Arc<Context>) -> Pipeline {
 }
 
 fn run(context: &Arc<Context>, pipeline: &Pipeline, image: &Image, control: [u32; 3]) -> Vec<u8> {
+    run_extent(context, pipeline, image, control, INPUT, OUTPUT)
+}
+
+fn run_extent(
+    context: &Arc<Context>,
+    pipeline: &Pipeline,
+    image: &Image,
+    control: [u32; 3],
+    input: [u32; 2],
+    output: [u32; 2],
+) -> Vec<u8> {
     let mut push = Vec::with_capacity(64);
-    for value in [2, 2, 5, 3, control[0], control[1], control[2], 0] {
+    for value in [
+        input[0], input[1], output[0], output[1], control[0], control[1], control[2], 0,
+    ] {
         push.extend(value.to_le_bytes());
     }
     for value in PrimeDrtSettings::default().prepare(1.0).unwrap().values {
         push.extend(value.to_le_bytes());
     }
     push[52..56].copy_from_slice(&4.0f32.to_le_bytes());
-    let readback = Buffer::new_readback(context, u64::from(OUTPUT[0] * OUTPUT[1] * 4)).unwrap();
+    let readback = Buffer::new_readback(context, u64::from(output[0] * output[1] * 4)).unwrap();
     context
         .submit_named("rr_display_fixture_dispatch", |command| unsafe {
             let before = [vk::MemoryBarrier::default()
@@ -231,8 +244,8 @@ fn run(context: &Arc<Context>, pipeline: &Pipeline, image: &Image, control: [u32
                             .layer_count(1),
                     )
                     .image_extent(vk::Extent3D {
-                        width: OUTPUT[0],
-                        height: OUTPUT[1],
+                        width: output[0],
+                        height: output[1],
                         depth: 1,
                     })],
             );
@@ -250,7 +263,7 @@ fn run(context: &Arc<Context>, pipeline: &Pipeline, image: &Image, control: [u32
             );
         })
         .unwrap();
-    readback.read((OUTPUT[0] * OUTPUT[1] * 4) as usize).unwrap()
+    readback.read((output[0] * output[1] * 4) as usize).unwrap()
 }
 
 #[test]
@@ -391,4 +404,22 @@ fn gpu_rr_display_fallback_upscale_and_orientation() {
     assert_eq!(&depth[16..20], &[128, 128, 128, 255]);
     assert_eq!(&depth[40..44], &[255, 255, 255, 255]);
     assert_eq!(&depth[56..60], &[0, 0, 0, 255]);
+    let reconstructed: Vec<_> = [0.125f32, 0.125, 0.125, 1.0]
+        .repeat((OUTPUT[0] * OUTPUT[1]) as usize)
+        .into_iter()
+        .flat_map(|v| half(v).to_le_bytes())
+        .collect();
+    upload(&context, &images[4], OUTPUT, &reconstructed);
+    upload(&context, &images[5], INPUT, &[0; 4]);
+    let dlaa_success = run_extent(&context, &pipeline, &images[0], [0, 0, 1], INPUT, INPUT);
+    let dlaa_raw = run_extent(&context, &pipeline, &images[0], [0, 0, 0], INPUT, INPUT);
+    upload(&context, &images[5], INPUT, &[0, 0, 0, 255]);
+    let dlaa = run_extent(&context, &pipeline, &images[0], [0, 0, 1], INPUT, INPUT);
+    assert_eq!(
+        &dlaa[..12],
+        &dlaa_success[..12],
+        "DLAA zero-weight neighbours cannot expand fallback"
+    );
+    assert_eq!(&dlaa[12..16], &dlaa_raw[12..16]);
+    assert_ne!(&dlaa_raw[4..8], &dlaa_success[4..8]); // the adjacent consumer is observable
 }

@@ -2,6 +2,7 @@
 module mature_display;
 import "display/exposure.slang";
 import "display/hdr.slang";
+import "display/image_space.slang";
 import "atmosphere/starmap.slang";
 [[vk::binding(0, 0)]] StructuredBuffer<float4> inputs;
 [[vk::binding(1, 0)]] RWStructuredBuffer<float4> outputs;
@@ -27,6 +28,12 @@ public float3 mdCpuHdrDecode(float3 hdr) {
 public float mdCpuEotf(float encoded) {
     return primeExtendedSrgbEotf(encoded);
 }
+public uint mdCpuUiRow(uint y, uint height, bool bottomUp) {
+    return primePresentUiPixel(uint2(0, y), uint2(1, height), bottomUp).y;
+}
+public uint mdCpuRrFootprint(float2 position) {
+    return primeRrFootprintMask(position);
+}
 public float2 mdCpuStarmapUv(float3 sun, float latitude, float longitude, float3 ray) {
     return primeStarmapUv(primeCelestialFrame(sun, latitude, longitude), ray);
 }
@@ -45,5 +52,7 @@ public float3 mdCpuComposite(float3 scene, float3 stars, float coverage) {
     outputs[id.x * 5 + 2] = mdCpuFootprint(a.xy, a.zw, b.xy);
     outputs[id.x * 5 + 3] =
             float4(mdCpuStarmapUv(a.xyz, b.x, b.y, b.xyz), mdCpuComposite(a.xyz, b.xyz, a.w).xy);
-    outputs[id.x * 5 + 4] = float4(mdCpuHdrLinear(mdCpuHdrDecode(a.xyz), b.xyz, a, b.w), 1);
+    outputs[id.x * 5 + 4] =
+            float4(mdCpuHdrLinear(mdCpuHdrDecode(a.xyz), b.xyz, a, b.w),
+                   float(mdCpuUiRow(uint(b.x), uint(b.y), b.z != 0.0) + mdCpuRrFootprint(a.xy)));
 }

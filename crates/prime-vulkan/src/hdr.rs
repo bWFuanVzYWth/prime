@@ -65,7 +65,7 @@ impl HdrPresent {
             )?,
         })
     }
-    // Output preserves the UI image orientation; world/baseline orientation is explicit.
+    // Output is the final canonical swapchain; bottom_up describes only the UI source.
     #[allow(clippy::too_many_arguments)]
     pub fn record(
         &self,

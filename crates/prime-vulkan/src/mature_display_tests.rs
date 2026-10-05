@@ -465,15 +465,17 @@ fn gpu_hdr_composite_absolute_units_and_orientation() {
                     .as_chunks::<4>()
                     .0
                     .iter()
-                    .map(|p| p[3])
+                    .enumerate()
+                    .map(|(p, _)| ui_bytes[4 * ((1 - p / 2) * 2 + p % 2) + 3])
                     .collect::<Vec<_>>()
             );
         }
         for p in 0..4 {
-            let wp = (1 - p / 2) * 2 + p % 2;
-            let coverage = f32::from(ui_bytes[4 * p + 3]) / 255.;
+            let wp = p;
+            let up = (1 - p / 2) * 2 + p % 2;
+            let coverage = f32::from(ui_bytes[4 * up + 3]) / 255.;
             for c in 0..3 {
-                let u = f32::from(ui_bytes[4 * p + c]) / 255.;
+                let u = f32::from(ui_bytes[4 * up + c]) / 255.;
                 let baseline = f32::from(baseline_bytes[4 * wp + c]) / 255.;
                 let expected = if composite {
                     let encoded_ui = (u - baseline * (1. - coverage)).max(0.);
@@ -531,17 +533,16 @@ fn gpu_sdr_frame_generation_hudless_and_mask() {
             .unwrap();
         let result = read_image(&context, &hudless, extent, 4);
         for p in 0..4 {
-            let src = if bottom_up {
-                (1 - p / 2) * 2 + p % 2
-            } else {
-                p
-            };
-            assert_eq!(&result[4 * p..4 * p + 3], &source[4 * src..4 * src + 3]);
+            assert_eq!(&result[4 * p..4 * p + 3], &source[4 * p..4 * p + 3]);
             assert_eq!(result[4 * p + 3], 255);
         }
         assert_eq!(
             read_image(&context, &mask, extent, 1),
-            vec![0, 85, 170, 255]
+            if bottom_up {
+                vec![170, 255, 0, 85]
+            } else {
+                vec![0, 85, 170, 255]
+            }
         );
     }
 }

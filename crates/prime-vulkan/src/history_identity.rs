@@ -538,6 +538,50 @@ mod tests {
     }
 
     #[test]
+    fn dead_tail_shrink_preserves_live_quad_stamps_and_clears_every_page_alias() {
+        let state = |live, changed| QuadState { live, changed };
+        let mut identity = HistoryIdentity::after(0).unwrap();
+        identity
+            .static_quads(4, &[state(3, true); 3], false)
+            .unwrap();
+        identity.static_quads(5, &[state(3, true)], false).unwrap();
+        identity.static_quads(6, &[state(3, true)], false).unwrap();
+        identity.static_quads(9, &[state(1, true)], false).unwrap();
+        let accepted = identity.revision();
+        let neighbor = identity.tables[0].records[9];
+        identity.advance().unwrap();
+        identity.static_quads(4, &[state(3, false)], true).unwrap();
+        let first = identity.quad_pages[&4].0;
+        assert_eq!(identity.quad_records.records[first as usize], [accepted, 3]);
+        assert_eq!(identity.tables[0].records[4][1], 0x8000_0002);
+        identity.relocate_static_quads(4, 20, 3).unwrap();
+        identity.remove_static(22, 1);
+        identity.alias_static(4, 20, 3, 2);
+        assert_eq!(
+            identity.tables[0].records[4],
+            identity.tables[0].records[20]
+        );
+        assert_eq!(
+            identity.tables[0].records[5],
+            identity.tables[0].records[21]
+        );
+        assert_eq!(identity.tables[0].records[6], [0; 2]);
+        assert_eq!(identity.tables[0].records[22][1], 0);
+        assert!(!identity.quad_pages.contains_key(&22));
+        assert_eq!(identity.quad_records.records[first as usize], [accepted, 3]);
+        assert_eq!(identity.tables[0].records[9], neighbor);
+        identity
+            .static_quads(30, &[state(3, true); 2], false)
+            .unwrap();
+        assert_eq!(
+            identity.quad_pages[&30].0, 1,
+            "released quad suffix reuses storage without moving live records"
+        );
+        assert_eq!(identity.quad_records.records[first as usize], [accepted, 3]);
+        assert_eq!(identity.tables[0].records[9], neighbor);
+    }
+
+    #[test]
     fn emitter_identity_ignores_anchor_and_rejects_same_slot_new_source() {
         let mut identity = HistoryIdentity::default();
         identity.advance().unwrap();

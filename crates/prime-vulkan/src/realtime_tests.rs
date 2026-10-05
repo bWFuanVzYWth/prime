@@ -149,6 +149,10 @@ fn settings(mode: RenderMode) -> RenderSettings {
         mode,
         bounces: 6,
         exposure: 0.25,
+        // These transport/sequence comparisons require a fixed display transform.
+        // Realtime adapts exposure by elapsed time; Offline freezes it after sample one.
+        auto_exposure_compensation: 0.,
+        stars: 0.,
         sun: 1. / 256.,
         sky: 1. / 256.,
         native_noisy_output: true,

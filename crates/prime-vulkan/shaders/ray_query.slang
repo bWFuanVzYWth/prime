@@ -5,6 +5,7 @@ import "math/ray_offset.slang";
 import "math/transport.slang";
 import "math/z_sobol.slang";
 import "tree_sampling.slang";
+__exported import "trace/visibility.slang";
 
 [[vk::constant_id(1)]] public const uint lightFeatures = 1;
 
@@ -53,7 +54,8 @@ public float dielectricFresnel(float cosine, float etaI, float etaT) {
 // Boundary moments integrate absorption independent of BVH candidate traversal order.
 // This is the straight visibility segment for NEE; refracted paths use the BSDF below.
 public float3 traceTransmittance(TraceScene resources, float3 origin, float3 direction, uint seed,
-                                 float limit, float4 startingMedium) {
+                                 float limit, float4 startingMedium, out float4 terminalMedium) {
+    terminalMedium = startingMedium;
     if (opticalFeatures == 0)
         return traceOcclusionRange(resources, origin, direction, seed, limit) ? float3(0)
                                                                               : float3(1);
@@ -63,7 +65,11 @@ public float3 traceTransmittance(TraceScene resources, float3 origin, float3 dir
     RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> query;
     query.TraceRayInline(resources.acceleration, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, 0xff,
                          ray);
-    float3 moment = float3(0), terminal = startingMedium.yzw;
+    float3 moment = float3(0), thinTransmission = float3(1);
+    // Keep eta scalar until the final output assembly. RGB-only callers discard it,
+    // so Slang can remove the unused loop Phi instead of retaining a float4 terminal.
+    float3 terminalSigma = startingMedium.yzw;
+    float terminalIor = startingMedium.x;
     float last = -1, fresnel = 1;
     while (query.Proceed()) {
         if (query.CandidateType() != CANDIDATE_NON_OPAQUE_TRIANGLE)
@@ -74,7 +80,9 @@ public float3 traceTransmittance(TraceScene resources, float3 origin, float3 dir
         float distance = query.CandidateTriangleRayT();
         bool front = query.CandidateTriangleFrontFace();
         float2 bary = query.CandidateTriangleBarycentrics();
-        record = boundaryIors(resources, record, bary, 0.0);
+        // Ordinary blockers do not consume either IOR. The physical bit survives coatings.
+        if ((record.identity.w & 128) != 0)
+            record = boundaryIors(resources, record, bary, 0.0);
         record =
                 selectMaterial(resources, record, front, bary, origin + direction * distance, seed);
         if ((record.identity.w & 128) == 0) {
@@ -88,23 +96,25 @@ public float3 traceTransmittance(TraceScene resources, float3 origin, float3 dir
         float3 n = normalize(cross(t.p1.xyz - t.p0.xyz, t.p2.xyz - t.p0.xyz));
         float cosine = abs(dot(n, direction));
         if ((record.identity.w & 64) != 0) {
-            float4 glass =
-                    record.negative.x > record.positive.x ? record.negative : record.positive;
-            float f = dielectricFresnel(cosine, startingMedium.x, glass.x);
-            fresnel *= (1.0 - f) / (1.0 + f);
-            moment += glass.yzw * (0.0625 / max(cosine, 0.001));
+            thinTransmission *= primeThinVisibility(cosine, record.positive, record.negative);
         } else {
             fresnel *= 1.0 - dielectricFresnel(cosine, from.x, to.x);
-            moment += distance * (from.yzw - to.yzw);
-            if (distance > last) {
-                last = distance;
-                terminal = to.yzw;
-            }
+            primeVisibilityBoundaryMoment(distance, from, to, moment, last, terminalSigma,
+                                          terminalIor);
         }
     }
+    terminalMedium = float4(terminalIor, terminalSigma);
     return query.CommittedStatus() == COMMITTED_TRIANGLE_HIT
                    ? float3(0)
-                   : fresnel * exp(-max(float3(0), moment + terminal * limit));
+                   : thinTransmission * fresnel *
+                             exp(-max(float3(0), moment + terminalSigma * limit));
+}
+
+public float3 traceTransmittance(TraceScene resources, float3 origin, float3 direction, uint seed,
+                                 float limit, float4 startingMedium) {
+    float4 terminalMedium;
+    return traceTransmittance(resources, origin, direction, seed, limit, startingMedium,
+                              terminalMedium);
 }
 
 // Atmosphere clipmap: closest blocker without surface reconstruction. Alpha uses the
@@ -226,8 +236,9 @@ public float3 evaluateLocalLight(TraceScene resources, SurfacePoint receiver, Li
     float limit = length(segment);
     if (limit == 0)
         return float3(0);
-    return traceTransmittance(resources, begin, segment / limit, coverageSeed, limit, medium) *
-           light.radiance;
+    return primeVisibleEmitterRadiance(
+            light.radiance,
+            traceTransmittance(resources, begin, segment / limit, coverageSeed, limit, medium));
 }
 public float3 evaluateLocalLight(TraceScene resources, SurfacePoint receiver, LightSample light,
                                  uint coverageSeed, float4 medium, out float pdf) {

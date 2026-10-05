@@ -34,6 +34,34 @@ static double brightness(const Vector<float, 3> &v) {
            std::max(double(v.z), 0.) * .0593;
 }
 int main() {
+    // Actual production address/mask helpers, with independent raster/weight oracles.
+    // FG stays in the final swapchain's top-left space; only the intermediate UI flips.
+    for (unsigned height : {1u, 2u, 9u, 540u, 1080u})
+        for (unsigned y = 0; y < height; ++y)
+            for (bool bottomUp : {false, true}) {
+                const unsigned ui = mdCpuUiRow_0(y, height, bottomUp);
+                require(ui == (bottomUp ? height - y - 1 : y),
+                        "present UI row matches SDR surface blit");
+                require(mdCpuUiRow_0(ui, height, bottomUp) == y, "row conversion is an involution");
+            }
+    for (unsigned iw : {1u, 2u, 8u, 9u})
+        for (unsigned ih : {1u, 3u, 8u})
+            for (unsigned ow : {1u, 5u, 8u, 17u})
+                for (unsigned oh : {1u, 3u, 8u, 19u})
+                    for (unsigned y = 0; y < oh; ++y)
+                        for (unsigned x = 0; x < ow; ++x) {
+                            const float sx = (float(x) + .5f) * (float(iw) / float(ow)) - .5f;
+                            const float sy = (float(y) + .5f) * (float(ih) / float(oh)) - .5f;
+                            const float fx = sx - std::floor(sx), fy = sy - std::floor(sy);
+                            const double weights[] = {(1. - fx) * (1. - fy), fx * (1. - fy),
+                                                      (1. - fx) * fy, fx * fy};
+                            const auto mask = mdCpuRrFootprint_0({sx, sy});
+                            for (unsigned i = 0; i < 4; ++i)
+                                require(bool(mask & (1u << i)) == (weights[i] > 0.),
+                                        "RR fallback checks exactly positive raw interpolation support");
+                        }
+    require(mdCpuRrFootprint_0({4.f, 4.f}) == 1,
+            "DLAA invalid neighbour cannot expand raw fallback");
     for (float previous : {-16.f, -1.f, 0.f, 8.f, 16.f})
         for (float target : {-16.f, -1.f, 0.f, 8.f, 16.f})
             for (float dt : {0.f, 0.001f, 0.1f, 0.5f, 2.f, 100.f}) {

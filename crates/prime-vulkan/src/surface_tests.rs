@@ -559,6 +559,12 @@ fn gpu_cross_bilateral_uvs_match_original_source_triangles_from_four_sides() {
 fn gpu_optical_boundaries_match_beer_lambert_and_fresnel_from_both_sides_and_inside() {
     use prime_scene::surface::{Medium, Optics, SurfaceFace, SurfaceMesh};
     let mut renderer = Renderer::new().unwrap();
+    renderer
+        .configure(RenderSettings {
+            native_noisy_output: true,
+            ..Default::default()
+        })
+        .unwrap();
     let camera = Camera {
         position: [2., 2., 0.],
         forward: [0., 0., 1.],
@@ -828,15 +834,15 @@ fn gpu_optical_visibility_preserves_coverage_and_absorption_with_blocker_reorder
         let f = ((ior - 1.) / (ior + 1.)).powi(2);
         for (i, value) in baseline.iter().enumerate() {
             let boundaries = if i % 4 < 2 { 2 } else { 1 };
-            let distance = if thin {
-                boundaries as f32 * 0.0625
-            } else {
-                boundaries as f32
-            };
-            let transmission = if thin { (1. - f) / (1. + f) } else { 1. - f };
             for channel in 0..3 {
-                let expected =
-                    transmission.powi(boundaries) * (-medium.extinction[channel] * distance).exp();
+                let expected = if thin {
+                    let a = (-medium.extinction[channel] * 0.0625).exp();
+                    let transmission = (1. - f).powi(2) * a / (1. - (f * a).powi(2));
+                    transmission.powi(boundaries)
+                } else {
+                    (1. - f).powi(boundaries)
+                        * (-medium.extinction[channel] * boundaries as f32).exp()
+                };
                 assert!(
                     (value[channel] - expected).abs() < 2e-6,
                     "ior={ior} thin={thin} ray={i} value={value:?} expected={expected}"
@@ -855,6 +861,333 @@ fn gpu_optical_visibility_preserves_coverage_and_absorption_with_blocker_reorder
                         );
                     }
                 }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "shader-tests")]
+fn physics_optical_sheet(
+    z: f32,
+    negative: prime_scene::surface::Medium,
+    positive: prime_scene::surface::Medium,
+    thin: bool,
+    front_from_below: bool,
+) -> prime_scene::surface::SurfaceFace {
+    use prime_scene::surface::{Optics, SurfaceFace};
+    let mut positions = [
+        [-32., -32., z],
+        [32., -32., z],
+        [32., 32., z],
+        [-32., 32., z],
+    ];
+    if front_from_below {
+        positions.reverse();
+    }
+    let mut face = SurfaceFace::from_quad(CompiledQuad {
+        positions,
+        uvs: [[0.5; 2]; 4],
+        color: [1.; 4],
+        texture_id: 0,
+        flags: 0,
+    });
+    face.media = [7, u32::from(positive.ior != 1.)];
+    face.optics = Some(Optics {
+        negative,
+        positive,
+        ior_textures: [None; 2],
+        transmit: true,
+        thin,
+    });
+    face
+}
+
+#[cfg(feature = "shader-tests")]
+fn physics_optical_query(
+    context: &Arc<Context>,
+    mut faces: Vec<prime_scene::surface::SurfaceFace>,
+    input: &[u32],
+    mode: u32,
+    reverse: bool,
+) -> Vec<[f32; 12]> {
+    use prime_scene::surface::SurfaceMesh;
+    if reverse {
+        faces.reverse();
+    }
+    let mut scene = Scene {
+        epoch: 1,
+        revision: 1,
+        ..Default::default()
+    };
+    scene
+        .ready_terrain
+        .insert(Cell::containing([0.; 3]).unwrap());
+    // Source meshes require uniform material flags. Keep the ordinary emitter and optical
+    // boundaries in separate meshes while publishing one scene/TLAS/light tree.
+    let mut groups = std::collections::BTreeMap::<u32, Vec<_>>::new();
+    for face in faces {
+        groups.entry(face.flags()).or_default().push(face);
+    }
+    let mut groups = groups.into_iter().collect::<Vec<_>>();
+    if reverse {
+        groups.reverse();
+    }
+    for (i, (flags, faces)) in groups.into_iter().enumerate() {
+        scene.meshes.insert(
+            (i as u64 + 1, flags),
+            SceneMesh {
+                revision: 1,
+                flags,
+                origin: [0.; 3],
+                triangles: MeshGeometry::Surfaces(Arc::new(
+                    SurfaceMesh::from_resolved(1, faces).unwrap(),
+                )),
+            },
+        );
+    }
+    let mut geometry = Geometry::new(
+        context,
+        (&scene).into(),
+        Arc::new(prime_scene::workers::CpuWorkers::new(1).unwrap()),
+    )
+    .unwrap();
+    geometry
+        .prepare_dynamic(
+            context,
+            &scene,
+            &InstanceScene::default(),
+            0,
+            &mut cpu_profile::FrameCpu::default(),
+        )
+        .unwrap();
+    crate::shader_tests::run(
+        context,
+        prime_shader_tests::optics(),
+        input,
+        input.len(),
+        [mode, (input.len() / 12) as u32],
+        Some(&geometry),
+    )
+    .as_chunks::<12>()
+    .0
+    .iter()
+    .map(|row| row.map(f32::from_bits))
+    .collect()
+}
+
+#[cfg(feature = "shader-tests")]
+fn physics_fresnel(cosine: f64, outside: f64, inside: f64) -> f64 {
+    if outside == inside {
+        return 0.;
+    }
+    let sin2 = (outside / inside).powi(2) * (1. - cosine * cosine).max(0.);
+    if sin2 >= 1. {
+        return 1.;
+    }
+    let internal = (1. - sin2).sqrt();
+    let rs = (outside * cosine - inside * internal) / (outside * cosine + inside * internal);
+    let rp = (inside * cosine - outside * internal) / (inside * cosine + outside * internal);
+    0.5 * (rs * rs + rp * rp)
+}
+
+#[cfg(feature = "shader-tests")]
+fn physics_red_glass(ior: f32) -> prime_scene::surface::Medium {
+    // Independent source-calibration arithmetic: encoded over-white -> EOTF -> 2020 -> -ln.
+    let linear = [
+        1.,
+        ((0.6_f64 + 0.055) / 1.055).powf(2.4),
+        ((0.6_f64 + 0.055) / 1.055).powf(2.4),
+    ];
+    let matrix = [
+        [0.627403896, 0.329283038, 0.043313066],
+        [0.069097289, 0.919540395, 0.011362316],
+        [0.016391439, 0.088013308, 0.895595253],
+    ];
+    prime_scene::surface::Medium {
+        ior,
+        extinction: matrix
+            .map(|row| -(row.into_iter().zip(linear).map(|(a, b)| a * b).sum::<f64>()).ln() as f32),
+    }
+}
+
+#[cfg(feature = "shader-tests")]
+#[test]
+#[ignore = "windowless authored low-IOR thin glass/water endpoints, RGB series and TIR"]
+fn gpu_physical_thin_glass_uses_authored_inside_below_water_ior() {
+    use prime_scene::surface::Medium;
+    let context = Context::new().unwrap();
+    let glass = physics_red_glass(((1_f64 + 0.02_f64.sqrt()) / (1. - 0.02_f64.sqrt())) as f32);
+    let water = Medium {
+        ior: 1.333,
+        extinction: [0.2916, 0.04444, 0.010182],
+    };
+    assert!(glass.ior < water.ior);
+    // This is the published boundary-contact contract: negative material, positive water.
+    let pane = physics_optical_sheet(1., glass, water, true, true);
+    let mut input = Vec::new();
+    for cosine in [1_f32, 0.5, 0.05] {
+        for back in [false, true] {
+            let z_direction = if back { -cosine } else { cosine };
+            input.extend(
+                [
+                    0.,
+                    0.,
+                    if back { 2. } else { 0. },
+                    3. / cosine,
+                    (1. - cosine * cosine).sqrt(),
+                    0.,
+                    z_direction,
+                    water.ior,
+                ]
+                .map(f32::to_bits),
+            );
+            input.extend(
+                [
+                    water.extinction[0],
+                    water.extinction[1],
+                    water.extinction[2],
+                    0.,
+                ]
+                .map(f32::to_bits),
+            );
+        }
+    }
+    let result = physics_optical_query(&context, vec![pane], &input, 3, false);
+    for (i, row) in result.iter().enumerate() {
+        let cosine = [1_f64, 0.5, 0.05][i / 2];
+        let f = physics_fresnel(cosine, f64::from(water.ior), f64::from(glass.ior));
+        let internal =
+            1. - (1. - cosine * cosine) / (f64::from(glass.ior) / f64::from(water.ior)).powi(2);
+        assert_eq!(row[3], 1., "physical optical hit");
+        assert_eq!(
+            row[4..8],
+            [glass.ior, water.ior, 1., if i % 2 == 0 { 1. } else { 0. }]
+        );
+        assert_eq!(
+            row[8..12],
+            [
+                water.ior,
+                water.extinction[0],
+                water.extinction[1],
+                water.extinction[2]
+            ],
+            "thin does not change terminal medium"
+        );
+        for channel in 0..3 {
+            let expected = if internal <= 0. {
+                0.
+            } else {
+                let a = (-f64::from(glass.extinction[channel]) * 0.0625 / internal.sqrt()).exp();
+                (1. - f).powi(2) * a / (1. - (f * a).powi(2))
+                    * (-f64::from(water.extinction[channel])
+                        * f64::from(f32::from_bits(input[i * 12 + 3])))
+                    .exp()
+            };
+            assert!(
+                (f64::from(row[channel]) - expected).abs() < 1e-5,
+                "ray={i} channel={channel} actual={} expected={expected}",
+                row[channel]
+            );
+        }
+    }
+}
+
+#[cfg(feature = "shader-tests")]
+#[test]
+#[ignore = "windowless finite-emitter working color through actual colored glass boundaries"]
+fn gpu_finite_light_combines_emission_and_beer_in_working_color() {
+    use prime_scene::surface::{Emission, Medium, SurfaceFace};
+    let context = Context::new().unwrap();
+    let glass = physics_red_glass(1.5);
+    let mut emitter = SurfaceFace::from_quad(CompiledQuad {
+        positions: [[-1., -1., 3.], [-1., 1., 3.], [1., 1., 3.], [1., -1., 3.]],
+        uvs: [[0.5; 2]; 4],
+        color: [1.; 4],
+        texture_id: 0,
+        flags: 0,
+    });
+    emitter.emission = Emission {
+        radiance: [1., 0., 0.],
+        textured: false,
+        two_sided: true,
+    };
+    let faces = vec![
+        physics_optical_sheet(1., glass, Medium::default(), false, true),
+        physics_optical_sheet(2., glass, Medium::default(), false, false),
+        emitter,
+    ];
+    let input = [0_f32, 0., 0., 5., 0., 0., 1., 1., 0., 0., 0., 0.].map(f32::to_bits);
+    for reverse in [false, true] {
+        let row = physics_optical_query(&context, faces.clone(), &input, 2, reverse)[0];
+        assert!(row[3].is_finite() && row[3] > 0. && row[7] == 1. && row[11] > 0.);
+        assert_eq!(row[4..7], [1., 0., 0.]);
+        let distance =
+            (f64::from(row[8]).powi(2) + f64::from(row[9]).powi(2) + f64::from(row[10]).powi(2))
+                .sqrt();
+        let cosine = f64::from(row[10]) / distance;
+        let visibility_fresnel =
+            (1. - physics_fresnel(cosine, 1., 1.5)) * (1. - physics_fresnel(cosine, 1.5, 1.));
+        for (channel, working_red) in [0.627403896, 0.069097289, 0.016391439]
+            .into_iter()
+            .enumerate()
+        {
+            let expected = working_red
+                * visibility_fresnel
+                * (-f64::from(glass.extinction[channel]) / cosine).exp();
+            assert!(
+                (f64::from(row[channel]) - expected).abs() < 2e-5,
+                "reverse={reverse} channel={channel} actual={} expected={expected}",
+                row[channel]
+            );
+        }
+    }
+}
+
+#[cfg(feature = "shader-tests")]
+#[test]
+#[ignore = "windowless unordered thick moments and farthest full terminal medium"]
+fn gpu_visibility_terminal_medium_is_farthest_thick_boundary() {
+    use prime_scene::surface::Medium;
+    let context = Context::new().unwrap();
+    let air = Medium::default();
+    let water = Medium {
+        ior: 1.333,
+        extinction: [0.2916, 0.04444, 0.010182],
+    };
+    let glass = physics_red_glass(1.5);
+    let faces = vec![
+        physics_optical_sheet(2., water, air, false, true),
+        physics_optical_sheet(5., water, air, false, false),
+        physics_optical_sheet(7., glass, air, false, true),
+    ];
+    let mut input = Vec::new();
+    for limit in [7.5_f32, 10., 20.] {
+        input.extend([0., 0., 0., limit, 0., 0., 1., 1., 0., 0., 0., 0.].map(f32::to_bits));
+    }
+    for reverse in [false, true] {
+        let result = physics_optical_query(&context, faces.clone(), &input, 1, reverse);
+        for (i, row) in result.iter().enumerate() {
+            assert_eq!(
+                row[8..12],
+                [
+                    glass.ior,
+                    glass.extinction[0],
+                    glass.extinction[1],
+                    glass.extinction[2]
+                ]
+            );
+            let fresnel = (1. - physics_fresnel(1., 1., f64::from(water.ior))).powi(2)
+                * (1. - physics_fresnel(1., 1., f64::from(glass.ior)));
+            let limit = f64::from(f32::from_bits(input[i * 12 + 3]));
+            for channel in 0..3 {
+                let expected = fresnel
+                    * (-f64::from(water.extinction[channel]) * 3.
+                        - f64::from(glass.extinction[channel]) * (limit - 7.))
+                        .exp();
+                assert!(
+                    (f64::from(row[channel]) - expected).abs() < 3e-6,
+                    "reverse={reverse} ray={i} channel={channel}"
+                );
             }
         }
     }

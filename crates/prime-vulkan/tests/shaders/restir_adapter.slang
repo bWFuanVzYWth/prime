@@ -77,6 +77,11 @@ import "service/bsdf/contract/sample.slang";
                                       ? restirDirectReplayData(resources, primary, wo)
                                       : fullReplay;
     float sourceGeometry = reservoir.reconnectionJacobian;
+    if (pass.reserved1 == 5u) {
+        // Actual generated source/replay, then an independently shorter/longer target
+        // proposal budget. Keep the same single shift body and the original RNG stream.
+        resources.frame.displayExtra.z = asfloat(pass.reserved0);
+    }
     PrecomputedShiftData shifted = restirShift(resources, primary, wo, reservoir, replay);
     float4 *rows = parameters.accumulation + id.x * 8;
     rows[0] = float4(reservoir.integrand, reservoir.weight);
@@ -100,7 +105,7 @@ import "service/bsdf/contract/sample.slang";
     if (pass.reserved1 == 4) {
         // Preserve actual generated-source coverage separately from the synthetic clone.
         rows[7] = generatedSource;
-    } else if (pass.reserved1 != 0) {
+    } else if (pass.reserved1 == 1u || pass.reserved1 == 2u) {
         rows[4] = float4(sourceGeometry, 0, 0, 0);
         rows[5] = rows[6] = rows[7] = float4(0);
         uint rcLength = uint(reservoir.pathFlags.rcVertexLength());

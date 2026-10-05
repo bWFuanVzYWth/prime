@@ -4,6 +4,7 @@ import "display/prime_drt.slang";
 import "math/color.slang";
 import "reconstruct/rr_format.slang";
 import "reconstruct/rr_status.slang";
+import "display/image_space.slang";
 
 #if PRIME_LINEAR_OUTPUT
 [[vk::binding(4, 0)]] [[vk::image_format("rgba32f")]] RWTexture2D<float4> outputImage;
@@ -44,10 +45,11 @@ bool resolvedFootprint(float2 position) {
     int2 limit = int2(display.dimensions.xy) - 1;
     int2 lo = clamp(int2(floor(position)), int2(0), limit);
     int2 hi = clamp(int2(floor(position)) + 1, int2(0), limit);
+    uint mask = primeRrFootprintMask(position);
     return primeRrGuideComplete(guideUnresolved[lo]) &&
-           primeRrGuideComplete(guideUnresolved[int2(hi.x, lo.y)]) &&
-           primeRrGuideComplete(guideUnresolved[int2(lo.x, hi.y)]) &&
-           primeRrGuideComplete(guideUnresolved[hi]);
+           ((mask & 2u) == 0u || primeRrGuideComplete(guideUnresolved[int2(hi.x, lo.y)])) &&
+           ((mask & 4u) == 0u || primeRrGuideComplete(guideUnresolved[int2(lo.x, hi.y)])) &&
+           ((mask & 8u) == 0u || primeRrGuideComplete(guideUnresolved[hi]));
 }
 
 [shader("compute")][numthreads(8, 8, 1)] void main(uint3 id : SV_DispatchThreadID) {

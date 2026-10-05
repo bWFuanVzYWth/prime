@@ -178,6 +178,7 @@ python scripts/test-restir-math.py --slangc "$env:VULKAN_SDK/Bin/slangc.exe"
 # 生产配置与输出去相关纯函数转C++执行，再与独立数学oracle比较；需要clang++
 python scripts/test-restir-config.py --slangc "$env:VULKAN_SDK/Bin/slangc.exe"
 python scripts/test-restir-rr-decorrelation.py --slangc "$env:VULKAN_SDK/Bin/slangc.exe"
+python scripts/test-transport-physics.py --slangc "$env:VULKAN_SDK/Bin/slangc.exe"
 cargo test -p prime_vulkan --features shader-tests --lib --locked restir::tests
 
 # 真实 GPU：generation/replay/shift、两种光源方式、离线均值、历史边界与借用提交

@@ -89,6 +89,7 @@ impl StaticDirectory {
         if count == 0 {
             return Err("Empty static directory range".into());
         }
+        let previous_count = self.entries.get(&key).map_or(0, |entry| entry.count);
         self.reserve(key, count, count)?;
         let entry = self.entries.get(&key).unwrap();
         self.bytes.resize(self.records.end as usize, [0; BYTES]);
@@ -96,6 +97,13 @@ impl StaticDirectory {
             let at = entry.first as usize + i;
             if self.bytes[at] != *row {
                 self.bytes[at] = *row;
+                self.dirty_records.push(at);
+            }
+        }
+        for index in count..previous_count {
+            let at = (entry.first + index) as usize;
+            if self.bytes[at] != [0; BYTES] {
+                self.bytes[at] = [0; BYTES];
                 self.dirty_records.push(at);
             }
         }
@@ -160,6 +168,13 @@ impl StaticDirectory {
                 self.records = records;
                 entry.first = first;
                 entry.capacity = capacity;
+            }
+            for index in count..entry.count {
+                let at = (entry.first + index) as usize;
+                if self.bytes[at] != [0; BYTES] {
+                    self.bytes[at] = [0; BYTES];
+                    self.dirty_records.push(at);
+                }
             }
             entry.count = count;
             entry
@@ -270,6 +285,35 @@ mod tests {
     use super::*;
     fn cell(x: f64) -> Cell {
         Cell::containing([x, 0., 0.]).unwrap()
+    }
+    #[test]
+    fn shrinking_a_stable_tail_clears_current_and_alias_rows_without_moving_prefix() {
+        let mut directory = StaticDirectory::default();
+        let key = cell(0.);
+        directory.reserve_stable(key, 2, 2).unwrap();
+        directory
+            .publish(key, &[[1; BYTES], [2; BYTES]], empty_instance())
+            .unwrap();
+        let alias = directory.slot(key).unwrap().1;
+        directory
+            .publish(cell(64.), &[[9; BYTES]], empty_instance())
+            .unwrap();
+        directory.reserve_stable(key, 3, 3).unwrap();
+        directory
+            .publish(key, &[[3; BYTES], [4; BYTES], [5; BYTES]], empty_instance())
+            .unwrap();
+        let first = directory.slot(key).unwrap().1;
+        directory.reserve_stable(key, 1, 12).unwrap();
+        directory
+            .publish(key, &[[6; BYTES]], empty_instance())
+            .unwrap();
+        assert_eq!(directory.slot(key).unwrap().1, first);
+        assert_eq!(directory.bytes[first as usize], [6; BYTES]);
+        assert_eq!(directory.bytes[alias as usize], [6; BYTES]);
+        assert_eq!(directory.bytes[first as usize + 1], [0; BYTES]);
+        assert_eq!(directory.bytes[first as usize + 2], [0; BYTES]);
+        assert_eq!(directory.bytes[alias as usize + 1], [0; BYTES]);
+        assert_eq!(directory.slot(cell(64.)).unwrap().1, 3);
     }
     #[test]
     fn stable_directory_growth_keeps_old_prefix_aliases_until_cell_unload() {

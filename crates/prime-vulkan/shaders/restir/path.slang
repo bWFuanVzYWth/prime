@@ -32,6 +32,7 @@ import "restir/scene.slang";
 import "restir/reservoir.slang";
 import "restir/rng.slang";
 import "restir/config.slang";
+import "restir/history_support.slang";
 __exported import "restir/types.slang";
 import "ray_query.slang";
 import "math/color.slang";
@@ -187,7 +188,8 @@ PathReservoir restirGeneratePath<T : IRestirPrimaryObserver>(RestirScene scene, 
         }
         float3 view = -direction;
         if (bounce == 0) {
-            medium = hit.thin ? float4(1, 0, 0, 0) : hit.incident;
+            // RA-011: a physical thin sheet starts in its authored outside medium.
+            medium = hit.thin ? primeThinOutsideMedium(hit) : hit.incident;
             primaryFootprint = restirPrimaryFootprint(scene, hit, view);
         }
         float3 attenuation = opticalFeatures != 0
@@ -240,6 +242,8 @@ PathReservoir restirGeneratePath<T : IRestirPrimaryObserver>(RestirScene scene, 
                 ris.rcNextVertexBounceSeed = neeSeed;
                 ris.pathFlags.tryInsertBounceTypesBeforeRcVertex(segment.previous.data & 0x3fu,
                                                                  true);
+                // RA-011: NEE-at-RC caches a shadow estimate in this incident medium.
+                ris.pathFlags.insertSuffixNonVacuum(!restirMediumIsVacuum(medium));
             } else if (selected && rc.pathFlags.rcVertexLength() == RESTIR_MAX_RC_LENGTH) {
                 restirForcedNeeVertex(ris, light, hit, view, bounce);
             }
@@ -280,6 +284,8 @@ PathReservoir restirGeneratePath<T : IRestirPrimaryObserver>(RestirScene scene, 
                     uint((scatter.eventFlags & PRIME_BSDF_EVENT_DISCRETE) != 0) |
                             (uint((scatter.eventFlags & PRIME_BSDF_EVENT_TRANSMISSION) != 0) << 1),
                     true);
+            // RA-011: record the actual sampled suffix medium, not the RC's material label.
+            rc.pathFlags.insertSuffixNonVacuum(!restirMediumIsVacuum(sampled.medium));
             sourcePdf *= lastScatterPdf * sampleLastPdf;
             rc.rcThroughput = float3(1);
         }
@@ -299,7 +305,8 @@ PathReservoir restirGeneratePath<T : IRestirPrimaryObserver>(RestirScene scene, 
         origin = spawnRay(hit.surface, direction);
     }
     PathReservoir reservoir = PathReservoir::createFromRisState(ris, seed, float4(0));
-    reservoir.finalizeReservoirWeight();
+    if (scene.config.reuse.w == 1u)
+        reservoir.finalizeReservoirWeight();
     reservoir.M = 1;
     finalRngState = sg.rng;
     return reservoir;
@@ -325,8 +332,13 @@ public PathReservoir restirGenerate<T : IRestirPrimaryObserver>(RestirScene scen
         residual += pathResidual;
         if (count == 1u)
             return path;
-        SampleGenerator mergeRandom = SampleGenerator(endRng);
-        aggregate.merge(path.integrand, 1.0, path, mergeRandom, 1.0);
+        // RA-015: initialize from the first raw path without a selection draw.
+        if (i == 0u)
+            aggregate = path;
+        else {
+            SampleGenerator mergeRandom = SampleGenerator(endRng);
+            restirAddFreshRaw(aggregate, path, mergeRandom);
+        }
     }
     residual /= float(count);
     restirFinalizeFresh(aggregate, count);
@@ -361,6 +373,7 @@ public bool restirUpdateSuffix(RestirScene scene, SurfaceHit rcHit, float3 rcVie
         reservoir.reconnectionWi = light.direction;
         reservoir.lightPdf = light.pdf;
         reservoir.pathFlags.insertLightType(light.type);
+        reservoir.pathFlags.insertSuffixNonVacuum(!restirMediumIsVacuum(incomingMedium));
         return true;
     }
     float3 direction = reservoir.reconnectionWi;
@@ -375,6 +388,7 @@ public bool restirUpdateSuffix(RestirScene scene, SurfaceHit rcHit, float3 rcVie
     float4 medium = rcHit.optical && !rcHit.thin && transmission
                             ? rcHit.transmitted
                             : restirIncident(rcHit, incomingMedium);
+    reservoir.pathFlags.insertSuffixNonVacuum(!restirMediumIsVacuum(medium));
     float3 origin = spawnRay(rcHit.surface, direction);
     float3 previousPosition = rcHit.surface.position;
     float previousPdf = restirDirectCompetitionPdf(rcHit.optical, transmission, evaluated.pdf);
@@ -453,7 +467,7 @@ public RestirReplayData restirDirectReplayData(RestirScene scene, RestirPrimary 
     if (!primary.hit.isValid())
         return result;
     SurfaceHit hit = restirLoadHit(scene, primary.hit, primaryWo, primary.coverageSeed);
-    result.medium = hit.thin ? float4(1, 0, 0, 0) : hit.incident;
+    result.medium = hit.thin ? primeThinOutsideMedium(hit) : hit.incident;
     float3 attenuation = opticalFeatures != 0
                                  ? exp(-result.medium.yzw *
                                        length(hit.surface.position - scene.frame.position.xyz))
@@ -475,7 +489,7 @@ public RestirReplayData restirReplay(RestirScene scene, RestirPrimary primary, f
     uint previousFlags = 0;
     float previousPdf = 0, scatterPdf = 1;
     bool previousRough = false;
-    float4 medium = hit.thin ? float4(1, 0, 0, 0) : hit.incident;
+    float4 medium = hit.thin ? primeThinOutsideMedium(hit) : hit.incident;
     float primaryFootprint = restirPrimaryFootprint(scene, hit, primaryWo);
     SampleGenerator sg = SampleGenerator(reservoir.initRandomSeed);
     float distanceThreshold, roughnessThreshold;

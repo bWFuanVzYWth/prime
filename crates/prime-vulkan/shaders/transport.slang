@@ -63,7 +63,7 @@ public float3 traceSample(TraceScene resources, AtmEnvironment environment,
             coneWidth += coneSpread * length(surface.position - origin);
             if (opticalFeatures != 0) {
                 if (bounce == 0)
-                    medium = hit.thin ? float4(1, 0, 0, 0) : hit.incident;
+                    medium = hit.thin ? primeThinOutsideMedium(hit) : hit.incident;
                 throughput *= exp(-medium.yzw * length(surface.position - origin));
             }
             if (dot(surface.normal, direction) > 0)
@@ -72,6 +72,9 @@ public float3 traceSample(TraceScene resources, AtmEnvironment environment,
                 primaryDistance =
                         medium.x == 1.0 ? length(surface.position - frame.position.xyz) : 0.0;
             }
+            // Preserve primary/aerial distance before terminating the lighting consumer.
+            if (all(throughput == float3(0)))
+                break;
             float3 albedo = sourceToWorking(saturate(hit.sourceColor.rgb));
             float3 normal =
                     dot(hit.shadingNormal, direction) > 0 ? -hit.shadingNormal : hit.shadingNormal;
@@ -81,9 +84,7 @@ public float3 traceSample(TraceScene resources, AtmEnvironment environment,
                                       (hit.materialFlags & 1) != 0, (hit.materialFlags & 2) != 0,
                                       hit.materialThin, optical, -direction);
             incident = optical && !thin ? hit.incident : medium;
-            transmitted =
-                    hit.thin ? (hit.incident.x > hit.transmitted.x ? hit.incident : hit.transmitted)
-                             : hit.transmitted;
+            transmitted = hit.thin ? primeThinInsideMedium(hit) : hit.transmitted;
             {
                 float lightPdf = previousPdf == 0 || lightFeatures == 0
                                          ? 0

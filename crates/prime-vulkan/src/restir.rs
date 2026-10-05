@@ -182,8 +182,9 @@ impl Pipelines {
         layout: vk::PipelineLayout,
         settings: RestirSettings,
         rr_statistics: bool,
+        duplicates: bool,
     ) -> Result<(), String> {
-        if settings.duplicate_map || settings.debug_view == 1 {
+        if duplicates {
             for (target, bytes) in [
                 (&mut self.sample_ids, prime_shaders::restir_sample_ids()),
                 (
@@ -496,6 +497,7 @@ pub(super) struct State {
     scratch: Option<Scratch>,
     history: History,
     pub temporal_this_frame: bool,
+    pub duplicate_this_frame: bool,
     pub dynamic_update_this_frame: bool,
     pub rr_statistics_this_frame: bool,
     lighting_changed: bool,
@@ -527,6 +529,7 @@ impl State {
             scratch: None,
             history: Default::default(),
             temporal_this_frame: false,
+            duplicate_this_frame: false,
             dynamic_update_this_frame: false,
             rr_statistics_this_frame: false,
             lighting_changed: false,
@@ -638,18 +641,25 @@ impl State {
         let pixels = self.scratch.as_ref().unwrap().layout.pixels;
         let rr_consumer = realtime
             && !spatial_only
+            && settings.history_length != 0
             && self.history.valid
             && reconstruction
             && settings.rr_decorrelation
             && settings.rr_mode as u32 != 0
             && settings.rr_factor > 0.0;
-        self.auxiliary
-            .prepare(context, pixels, settings, rr_consumer)?;
+        self.duplicate_this_frame = super::restir_aux::duplicate_producer(settings, realtime);
+        self.auxiliary.prepare(
+            context,
+            pixels,
+            settings,
+            rr_consumer,
+            self.duplicate_this_frame,
+        )?;
         let source_thresholds = super::restir_profiles::thresholds(settings);
         self.profiles.prepare(
             context,
             pixels,
-            (realtime && !spatial_only && self.history.valid)
+            (realtime && !spatial_only && settings.history_length != 0 && self.history.valid)
                 .then_some(self.history.source_thresholds),
             source_thresholds,
         )?;
@@ -658,7 +668,8 @@ impl State {
         // RA-014, docs/restir-adaptations.md: disable the whole temporal pass group on the
         // host. Spatial still writes a complete result, so accepted bank/camera commits
         // remain valid for immediate reuse when this diagnostic is switched off.
-        self.temporal_this_frame = realtime && !spatial_only && self.history.valid;
+        self.temporal_this_frame =
+            realtime && !spatial_only && settings.history_length != 0 && self.history.valid;
         self.dynamic_update_this_frame = self.temporal_this_frame
             && (self.lighting_changed || identity.revision != self.history.revision);
         let rr_output = rr_consumer && self.temporal_this_frame;

@@ -12,6 +12,18 @@ impl SurfaceCompiler {
         revision: u64,
         geometry: &TerrainGeometry,
     ) -> Result<Option<SurfaceMesh>, String> {
+        self.resolve_terrain(revision, geometry)?
+            .map(TerrainSurfaces::finish)
+            .transpose()
+    }
+
+    /// Resolve the same terrain semantics without building a light tree which a
+    /// stable-slot consumer would immediately discard before reordering faces.
+    pub fn resolve_terrain(
+        &mut self,
+        revision: u64,
+        geometry: &TerrainGeometry,
+    ) -> Result<Option<TerrainSurfaces>, String> {
         // A closed input that cannot change needs no expanded CPU/GPU representation.
         // This scan borrows the producer pages and exits on the first candidate. It also
         // avoids manufacturing rich records for ordinary non-grid model geometry.
@@ -158,11 +170,9 @@ impl SurfaceCompiler {
             rectangles::append(&mut faces, &quads[index], None);
         }
         faces.extend(self.merge_resolved(other)?);
-        let lights = Arc::new(LightTree::build(&mut faces)?);
-        Ok(Some(SurfaceMesh {
+        Ok(Some(TerrainSurfaces {
             revision,
             quads: faces,
-            lights,
             stats,
         }))
     }

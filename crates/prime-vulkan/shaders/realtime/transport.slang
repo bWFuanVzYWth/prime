@@ -93,6 +93,10 @@ public float3 primeTraceLanding<Distance>(TraceScene resources, AtmLighting envi
             coneWidth += parameters.lighting.z * distance;
             if (opticalFeatures != 0)
                 throughput *= exp(-medium.yzw * distance);
+            // The reflected-distance observer above has already consumed this query.
+            // Only lighting remains in K2; all RGB components must be dead to stop it.
+            if (all(throughput == float3(0)))
+                break;
             if (dot(surface.normal, direction) > 0.0)
                 surface.normal = -surface.normal;
             float3 albedo = sourceToWorking(saturate(hit.sourceColor.rgb));
@@ -103,9 +107,7 @@ public float3 primeTraceLanding<Distance>(TraceScene resources, AtmLighting envi
                                       hit.materialThin, hit.optical, -direction);
             thin = hit.thin;
             incident = hit.optical && !thin ? hit.incident : medium;
-            transmitted =
-                    thin ? (hit.incident.x > hit.transmitted.x ? hit.incident : hit.transmitted)
-                         : hit.transmitted;
+            transmitted = thin ? primeThinInsideMedium(hit) : hit.transmitted;
             float lightPdf = previousPdf == 0.0 || lightFeatures == 0
                                      ? 0.0
                                      : emissiveHitPdf(resources, hit, previous);

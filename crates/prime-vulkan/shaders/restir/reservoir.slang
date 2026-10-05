@@ -63,6 +63,7 @@ public struct HitInfo {
         bits 18..19  : light type                    (2 bits)
         bits 20..25  : "before rc-vertex" sub-bits   (6 bits, see below)
         bits 26..30  : "after  rc-vertex" sub-bits   (5 bits, see below; no BSDF-indexing bit)
+        bit  31      : Prime cached suffix starts in a non-vacuum medium
 
     The 6-bit "before-rc" packed payload (`kBouncePackedBeforeRcMask`) is laid out as:
         bit 0 (= 20) : isDelta
@@ -101,6 +102,15 @@ public struct ReSTIRPathFlags {
     public static const uint kBSDFComponentMask = 0x7; // 3 bits, used by both before/after.
 
     public uint flags = 0;
+
+    // RA-011, docs/restir-adaptations.md: source-cache support in the unused top bit.
+    // The 80B reservoir layout is unchanged; this is not an exact medium fingerprint.
+    public[mutating] void insertSuffixNonVacuum(bool enabled) {
+        flags = (flags & 0x7fffffffu) | (uint(enabled) << 31);
+    }
+    public bool suffixNonVacuum() {
+        return (flags >> 31) != 0u;
+    }
 
     public[mutating] void tryInsertBounceTypesBeforeRcVertex(uint data, bool doInsert) {
         flags &= doInsert ? ~(kBouncePackedBeforeRcMask << kBouncePackedBeforeRcShift) : 0xffffffff;

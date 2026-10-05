@@ -89,11 +89,18 @@ public struct SurfaceHit {
     public bool optical;
     public bool thin;
     public bool materialThin;
+    public bool physicalFront; // Original boundary orientation, before selecting a coating.
     public float3 shadingNormal;
     public float4 normalSample;
     public float4 specularSample;
     public uint materialFlags;
 };
+public float4 primeThinInsideMedium(SurfaceHit hit) {
+    return primeThinInsideMedium(hit.physicalFront, hit.incident, hit.transmitted);
+}
+public float4 primeThinOutsideMedium(SurfaceHit hit) {
+    return primeThinOutsideMedium(hit.physicalFront, hit.incident, hit.transmitted);
+}
 uint hash(uint x) {
     x ^= x >> 16;
     x *= 0x7feb352d;
@@ -105,25 +112,42 @@ float4 texel(StructuredBuffer<uint> texels, uint address) {
     uint packed = texels[address];
     return float4(packed & 255, (packed >> 8) & 255, (packed >> 16) & 255, packed >> 24) / 255.0;
 }
-float4 sampleLevel(StructuredBuffer<uint4> textures, StructuredBuffer<uint> texels, uint index,
-                   float2 uv, bool sprite) {
-    uint4 image = textures[index * 4];
-    float2 local = sprite ? saturate(uv) : frac(uv);
-    uint2 pixel = min(uint2(local * float2(image.yz)), image.yz - 1);
-    // Whole textures are packed rows; only sprite views need the backing-image stride.
-    uint stride = sprite ? image.w & 0x7fffffff : image.y;
-    uint at = pixel.y * stride + pixel.x;
-    float4 color = texel(texels, image.x + at);
-    if (sprite) {
-        uint4 extra = textures[index * 4 + 1];
-        float blend = asfloat(extra.w);
-        if (blend > 0.0) {
-            float4 next = texel(texels, extra.x + at);
+struct TextureLevelSample {
+    uint4 image;
+    uint stride;
+    uint next;
+    float blend;
+    bool sprite;
+};
+TextureLevelSample prepareTextureLevel(StructuredBuffer<uint4> textures, uint index, uint4 image,
+                                       bool sprite) {
+    TextureLevelSample result;
+    result.image = image;
+    result.sprite = sprite;
+    result.stride = sprite ? result.image.w & 0x7fffffff : result.image.y;
+    uint4 extra = sprite ? textures[index * 4 + 1] : uint4(0);
+    result.next = extra.x;
+    result.blend = asfloat(extra.w);
+    return result;
+}
+float4 samplePreparedLevel(StructuredBuffer<uint> texels, TextureLevelSample level, float2 uv) {
+    float2 local = level.sprite ? saturate(uv) : frac(uv);
+    uint2 pixel = min(uint2(local * float2(level.image.yz)), level.image.yz - 1);
+    uint at = pixel.y * level.stride + pixel.x;
+    float4 color = texel(texels, level.image.x + at);
+    if (level.sprite) {
+        if (level.blend > 0.0) {
+            float4 next = texel(texels, level.next + at);
             // MC 26.x interpolates all RGBA channels into an RGBA8_UNORM atlas.
-            color = floor(lerp(color, next, blend) * 255.0 + 0.5) / 255.0;
+            color = floor(lerp(color, next, level.blend) * 255.0 + 0.5) / 255.0;
         }
     }
     return color;
+}
+float4 sampleLevel(StructuredBuffer<uint4> textures, StructuredBuffer<uint> texels, uint index,
+                   float2 uv, bool sprite) {
+    return samplePreparedLevel(
+            texels, prepareTextureLevel(textures, index, textures[index * 4], sprite), uv);
 }
 public float4 sampleTexture(StructuredBuffer<uint4> textures, StructuredBuffer<uint> texels,
                             uint texture, float2 uv, float lod) {
@@ -209,20 +233,24 @@ public MaterialSample materialSource(TraceScene resources, uint texture, float2 
 }
 // Continuous channels use their own mip chain. Fresnel and subsurface categories always
 // retain the point-filtered base-level source identity, as in the original access service.
-float4 linearMaterialLevel(TraceScene resources, uint texture, float2 uv) {
-    uint4 image = resources.textures[texture * 4];
-    float2 position = uv * float2(image.yz) - 0.5;
+public float4 primeLinearMaterialLevel(StructuredBuffer<uint4> textures,
+                                       StructuredBuffer<uint> texels, uint texture, float2 uv) {
+    uint4 image = textures[texture * 4];
+    bool sprite = surfaceFeatures >= 2 && (image.w & 0x80000000) != 0;
+    TextureLevelSample level = prepareTextureLevel(textures, texture, image, sprite);
+    float2 position = uv * float2(level.image.yz) - 0.5;
     float2 lo = floor(position);
     float2 f = frac(position);
-    float4 a = sampleTexture(resources.textures, resources.texels, texture,
-                             (lo + float2(0.5, 0.5)) / float2(image.yz), 0.0);
-    float4 b = sampleTexture(resources.textures, resources.texels, texture,
-                             (lo + float2(1.5, 0.5)) / float2(image.yz), 0.0);
-    float4 c = sampleTexture(resources.textures, resources.texels, texture,
-                             (lo + float2(0.5, 1.5)) / float2(image.yz), 0.0);
-    float4 d = sampleTexture(resources.textures, resources.texels, texture,
-                             (lo + float2(1.5, 1.5)) / float2(image.yz), 0.0);
+    // Metadata/frame/stride are identical for all four neighbors. Preserve each original
+    // normalized UV calculation and RGBA8 animation quantization before interpolation.
+    float4 a = samplePreparedLevel(texels, level, (lo + float2(0.5, 0.5)) / float2(level.image.yz));
+    float4 b = samplePreparedLevel(texels, level, (lo + float2(1.5, 0.5)) / float2(level.image.yz));
+    float4 c = samplePreparedLevel(texels, level, (lo + float2(0.5, 1.5)) / float2(level.image.yz));
+    float4 d = samplePreparedLevel(texels, level, (lo + float2(1.5, 1.5)) / float2(level.image.yz));
     return lerp(lerp(a, b, f.x), lerp(c, d, f.x), f.y);
+}
+float4 linearMaterialLevel(TraceScene resources, uint texture, float2 uv) {
+    return primeLinearMaterialLevel(resources.textures, resources.texels, texture, uv);
 }
 public float4 linearMaterial(TraceScene resources, uint texture, float2 uv, float lod) {
     uint4 extra = resources.textures[texture * 4 + 1];
@@ -519,6 +547,7 @@ public SurfaceHit resolveSurfaceHit(TraceScene resources, SurfaceRecord record, 
                         : 0xffffffffu;
     hit.incident = front ? record.positive : record.negative;
     hit.transmitted = front ? record.negative : record.positive;
+    hit.physicalFront = front;
     hit.optical = opticalFeatures != 0 && (record.identity.w & 128) != 0;
     hit.thin = opticalFeatures != 0 && (record.identity.w & 64) != 0;
     hit.materialThin = primePbrSourceThinWalled(hit.thin, record.triangle.flags,

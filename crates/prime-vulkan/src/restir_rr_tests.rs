@@ -281,7 +281,21 @@ impl Fixture {
             .unwrap();
         let context = self.renderer.context.clone();
         let raw = self.renderer.pipeline.take().unwrap();
-        let rr = self.rr.take().unwrap();
+        let mut rr = self.rr.take().unwrap();
+        // This fixture swaps an RR pipeline after native preparation. Apply the
+        // production lazy-pipeline contract to that pipeline before dispatching
+        // the actual state's optional producers; the raw pipeline owns its own.
+        let state = self.renderer.restir.as_ref().unwrap();
+        rr.restir
+            .as_mut()
+            .unwrap()
+            .ensure_optional(
+                rr.layout,
+                self.renderer.settings.restir,
+                state.rr_statistics_this_frame,
+                state.duplicate_this_frame,
+            )
+            .unwrap();
         let set = rr.descriptors[0];
         let copies: Vec<_> = [0, 2, 3, 7, 8, 9, 23]
             .into_iter()

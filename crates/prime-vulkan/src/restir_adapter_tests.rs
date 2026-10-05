@@ -22,6 +22,328 @@ fn self_shift(renderer: &Renderer, count: u32) -> Vec<[u32; 32]> {
     run_probe(renderer, count, code, [count, 0, 0, 0])
 }
 
+#[test]
+#[ignore = "requires windowless Vulkan; actual new-budget source and old-budget inverse support"]
+fn gpu_restir_inverse_budget_support_rejects_only_unsupported_actual_sources() {
+    let config = RenderSettings {
+        bounces: 6,
+        sun: 1. / 256.,
+        sky: 1. / 256.,
+        ..restir_tests::settings(RenderMode::Offline)
+    };
+    let mut renderer = restir_tests::renderer(config);
+    let fixture = normal_measure_scene(1, None, false, true);
+    renderer.render(&fixture, &camera(), 3, 3, 0).unwrap();
+    let code = prime_shader_tests::restir_adapter_tree();
+    let source = run_probe(&renderer, 4096, code, [4096, 0, 6, 5]);
+    let artifact = std::env::var_os("PRIME_RESTIR_PROBE_ARTIFACT").map(std::path::PathBuf::from);
+    let mut unsupported_direct = 0;
+    for budget in [1u32, 2, 6, 12] {
+        let rows = run_probe(&renderer, 4096, code, [4096, 0, budget, 5]);
+        if let Some(path) = &artifact {
+            std::fs::create_dir_all(path).unwrap();
+            let bytes: Vec<_> = rows
+                .iter()
+                .flatten()
+                .flat_map(|word| word.to_le_bytes())
+                .collect();
+            std::fs::write(path.join(format!("budget-{budget}.bin")), bytes).unwrap();
+        }
+        let mut active = 0;
+        let mut unsupported = 0;
+        let mut supported_positive = 0;
+        for (row, original) in rows.iter().zip(&source) {
+            assert_eq!(
+                &row[..4],
+                &original[..4],
+                "source changed with target budget"
+            );
+            assert_eq!(&row[12..16], &original[12..16]);
+            let values = row.map(f32::from_bits);
+            if values[3] <= 0. || row[..3].iter().all(|word| *word == 0) {
+                continue;
+            }
+            active += 1;
+            let path_length = (row[12] >> 16) & 255;
+            let nee = row[12] & 1 != 0;
+            let fits = path_length + u32::from(!nee) < budget;
+            if !fits {
+                unsupported += 1;
+                assert_eq!(&row[4..8], &[0; 4], "unsupported inverse: {budget} {row:?}");
+                if (row[12] >> 8) & 255 == 1 {
+                    unsupported_direct += 1;
+                }
+            } else if values[7] > 0. && values[4..7].iter().any(|value| *value > 0.) {
+                supported_positive += 1;
+            }
+            assert!(values[4..8].iter().all(|value| value.is_finite()));
+            if budget == 6 {
+                assert_eq!(&row[4..8], &original[4..8], "unchanged supported inverse");
+            }
+        }
+        eprintln!(
+            "budget={budget} active={active} unsupported={unsupported} supported_positive={supported_positive}"
+        );
+        assert!(active > 32 && supported_positive > 8);
+        if budget == 1 {
+            assert!(unsupported > 8);
+        }
+    }
+    assert!(
+        unsupported_direct > 8,
+        "must reach the actual RC1 inverse bypass"
+    );
+}
+
+fn medium_crossing_scene(explicit_source_water: bool) -> Scene {
+    let water = Medium {
+        ior: 1.5,
+        extinction: [0.03, 0.07, 0.11],
+    };
+    let mut left = face(0.);
+    left.geometry.positions[1][0] = 8.;
+    left.geometry.positions[2][0] = 8.;
+    left.optics = Some(Optics {
+        negative: if explicit_source_water {
+            water
+        } else {
+            Medium::default()
+        },
+        positive: water,
+        ior_textures: [None; 2],
+        transmit: false,
+        thin: false,
+    });
+    if explicit_source_water {
+        // An authored in-water opaque primary, independent of hardware-facing side.
+        // The default author configuration remains a distinct changed-medium witness.
+        left.media = [7, 7];
+    }
+    let mut right = face(0.);
+    right.geometry.positions[0][0] = 8.;
+    right.geometry.positions[3][0] = 8.;
+    let mut rear = face(6.);
+    rear.geometry.positions.reverse();
+    let mut boundary = face(0.);
+    boundary.geometry.positions = [[8., 0., -1.], [8., 16., -1.], [8., 16., 8.], [8., 0., 8.]];
+    boundary.geometry.texture_id = 7;
+    boundary.optics = Some(Optics {
+        negative: water,
+        positive: Medium::default(),
+        ior_textures: [None; 2],
+        transmit: true,
+        thin: false,
+    });
+    let mut left_lamp = lamp();
+    for position in &mut left_lamp.geometry.positions {
+        position[0] -= 10.;
+    }
+    let mut fixture = scene(
+        1 + u64::from(explicit_source_water),
+        vec![left, right, rear, boundary, lamp(), left_lamp],
+    );
+    let mut glass = texture(1, 1, vec![255; 4]);
+    glass.material = Some(Arc::new(TextureMaterial {
+        specular: Some(texture(1, 1, vec![255, 10, 0, 0])),
+        ..Default::default()
+    }));
+    fixture.textures.insert(7, glass);
+    fixture
+}
+
+#[test]
+#[ignore = "requires windowless Vulkan; actual static medium crossing and source-suffix cache support"]
+fn gpu_restir_static_connection_terminal_medium_and_suffix_cache_match_fresh() {
+    let mut config = restir_tests::settings(RenderMode::Realtime);
+    config.sun = 1. / 256.;
+    config.sky = 1. / 256.;
+    config.restir_spatial_only = true;
+    config.restir.spatial_reuse = false;
+    config.restir.duplicate_map = false;
+    config.restir.decoupled_shading = false;
+    let mut renderer = restir_tests::renderer(config);
+    let artifact = std::env::var_os("PRIME_RESTIR_PROBE_ARTIFACT").map(std::path::PathBuf::from);
+    let width = 31;
+    let height = 17;
+    let count = width * height;
+    let code = prime_shader_tests::restir_medium_support_tree();
+    let mut ambiguity_coverage = 0;
+    let mut actual_nonvacuum_sources = 0;
+    let mut source_cache_invariants = 0;
+    let mut changed_medium_caches = 0;
+    for explicit_source_water in [false, true] {
+        let fixture = medium_crossing_scene(explicit_source_water);
+        let label = if explicit_source_water {
+            "water"
+        } else {
+            "default"
+        };
+        for (sequence, source_x, delta) in [(0, 2., 12_f32), (1, 14., -12_f32)] {
+            let mut source_camera = camera();
+            source_camera.position[0] = source_x;
+            source_camera.vertical_fov_radians = 0.16;
+            renderer
+                .render(&fixture, &source_camera, width, height, sequence)
+                .unwrap();
+            let automatic = run_probe(&renderer, count, code, [count, 0, delta.to_bits(), 0]);
+            let fresh = run_probe(&renderer, count, code, [count, 0, delta.to_bits(), 1]);
+            if let Some(path) = &artifact {
+                std::fs::create_dir_all(path).unwrap();
+                for (consumer, rows) in [("automatic", &automatic), ("fresh", &fresh)] {
+                    let bytes: Vec<_> = rows
+                        .iter()
+                        .flatten()
+                        .flat_map(|word| word.to_le_bytes())
+                        .collect();
+                    std::fs::write(
+                        path.join(format!("medium-{label}-{source_x}-{consumer}.bin")),
+                        bytes,
+                    )
+                    .unwrap();
+                }
+            }
+            let mut observed = 0;
+            let mut crossing_positive = 0;
+            let mut ambiguous_positive = 0;
+            let mut nonvacuum_sources = 0;
+            let mut cache_invariants = 0;
+            let mut medium_cache_changes = 0;
+            let mut maximum_error = 0_f64;
+            for (row, oracle) in automatic.iter().zip(&fresh) {
+                assert_eq!(
+                    &row[..4],
+                    &oracle[..4],
+                    "the same actual source must reach both consumers"
+                );
+                if row[0] & 4 == 0 {
+                    continue;
+                }
+                observed += 1;
+                let value = row.map(f32::from_bits);
+                let reference = oracle.map(f32::from_bits);
+                assert!(
+                    value[4..16]
+                        .iter()
+                        .all(|value| value.is_finite() && *value >= 0.)
+                );
+                assert!(row[0] & (1 << 8 | 1 << 9) != 0, "declared starting medium");
+                let starts_water = row[0] & (1 << 8) != 0;
+                let crossing = row[0] & 1 != 0;
+                let target_water = value[20] < 8.;
+                let terminal_water = if crossing { target_water } else { starts_water };
+                let expected_medium = if terminal_water {
+                    [1.5, 0.03, 0.07, 0.11]
+                } else {
+                    [1., 0., 0., 0.]
+                };
+                if value[8..11].iter().all(|value| *value > 0.) {
+                    for (actual, expected) in [value[11], value[12], value[13], value[14]]
+                        .into_iter()
+                        .zip(expected_medium)
+                    {
+                        assert!((actual - expected).abs() < 1e-6, "terminal {row:?}");
+                    }
+                    let p: [f64; 3] = std::array::from_fn(|i| f64::from(value[16 + i]));
+                    let q: [f64; 3] = std::array::from_fn(|i| f64::from(value[20 + i]));
+                    let sign = (q[2] - p[2]).signum();
+                    // All observed opaque endpoints are horizontal. Reconstruct both safe
+                    // endpoints independently in f64 before the authored x=8 volume split.
+                    let dz = q[2] - p[2] - sign * f64::from(value[24] + value[25]);
+                    let length =
+                        ((q[0] - p[0]).powi(2) + (q[1] - p[1]).powi(2) + dz.powi(2)).sqrt();
+                    let fraction = if !crossing {
+                        if starts_water { 1. } else { 0. }
+                    } else {
+                        // A crossed authored boundary determines both segment media.
+                        // Its from/to pair overrides the caller's initial fallback;
+                        // only a segment with no boundary uses replay.medium throughout.
+                        let t = (8. - p[0]) / (q[0] - p[0]);
+                        if p[0] < 8. { t } else { 1. - t }
+                    };
+                    let water_length = length * fraction;
+                    for (a, b, difference) in [(0, 1, 0.03_f64 - 0.07), (1, 2, 0.07_f64 - 0.11)] {
+                        let actual = f64::from(value[8 + a]) / f64::from(value[8 + b]);
+                        let expected = (-difference * water_length).exp();
+                        assert!((actual / expected - 1.).abs() < 3e-4, "Beer ratio {row:?}");
+                    }
+                }
+                if row[0] & 1 != 0 && value[7] > 0. {
+                    crossing_positive += 1;
+                }
+                if row[0] & 2 != 0 && value[7] > 0. {
+                    ambiguous_positive += 1;
+                }
+                assert_eq!(value[7] > 0., reference[7] > 0., "support must match fresh");
+                if value[7] > 0. {
+                    assert_eq!(row[0] & (1 << 7) != 0, row[1] & (1 << 31) != 0);
+                    nonvacuum_sources += usize::from(row[1] & (1 << 31) != 0);
+                    let source_observed = row[0] & (1 << 3) != 0;
+                    let same_side = row[0] & (1 << 5) != 0;
+                    let same_wi = oracle[0] & (1 << 6) != 0;
+                    let same_medium = [value[3], value[19], value[29], value[30]]
+                        .into_iter()
+                        .zip(value[11..15].iter().copied())
+                        .all(|(a, b)| a == b);
+                    assert_eq!(same_medium, row[0] & (1 << 4) != 0);
+                    // Source-cache equality requires measured incoming medium, opaque
+                    // facing and fixed suffix Wi. Physical region alone is insufficient.
+                    let invariant = source_observed && same_side && same_wi && same_medium;
+                    let changed_medium = source_observed && same_side && same_wi && !same_medium;
+                    cache_invariants += usize::from(invariant);
+                    let mut cache_changed = false;
+                    for (old, refreshed) in [value[15], value[23], value[31]]
+                        .into_iter()
+                        // Compare with the actual forced refresh, including the
+                        // vacuum-to-vacuum cases that automatically reuse old RGB.
+                        .zip([reference[26], reference[27], reference[28]])
+                    {
+                        let error =
+                            (old - refreshed).abs() / old.abs().max(refreshed.abs()).max(1e-8);
+                        cache_changed |= error >= 1e-3;
+                        if invariant {
+                            assert!(error < 1e-3, "same-medium source incident cache: {row:?}");
+                        }
+                    }
+                    medium_cache_changes += usize::from(changed_medium && cache_changed);
+                }
+                for (a, b) in value[4..8].iter().zip(&reference[4..8]) {
+                    let error =
+                        f64::from((a - b).abs()) / f64::from(a.abs().max(b.abs()).max(1e-8));
+                    maximum_error = maximum_error.max(error);
+                    assert!(
+                        error < 1e-3,
+                        "automatic cache must match fresh: {row:?} {oracle:?}"
+                    );
+                }
+            }
+            ambiguity_coverage += ambiguous_positive;
+            actual_nonvacuum_sources += nonvacuum_sources;
+            source_cache_invariants += cache_invariants;
+            changed_medium_caches += medium_cache_changes;
+            eprintln!(
+                "medium author={label} source_x={source_x} observed={observed} crossing_positive={crossing_positive} ambiguous_positive={ambiguous_positive} actual_nonvacuum_sources={nonvacuum_sources} source_cache_invariants={cache_invariants} changed_medium_caches={medium_cache_changes} max_relative={maximum_error}"
+            );
+            assert!(
+                observed > 16 && crossing_positive > 8,
+                "actual static-crossing coverage"
+            );
+        }
+    }
+    assert!(
+        ambiguity_coverage > 8,
+        "must refresh actual ambiguous connections"
+    );
+    assert!(actual_nonvacuum_sources > 8, "actual source bit31 coverage");
+    assert!(
+        source_cache_invariants > 8,
+        "complete measured source-cache premises"
+    );
+    assert!(
+        changed_medium_caches > 8,
+        "actual changed-medium cache coverage"
+    );
+}
+
 pub(super) fn run_probe(
     renderer: &Renderer,
     count: u32,

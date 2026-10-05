@@ -1,6 +1,7 @@
 #language slang 2026
 module "transport/direct.slang";
 import "pbr.slang";
+import "pbr/delta.slang";
 import "bsdf/full/energy.slang";
 import "ray_query.slang";
 import "atmosphere/lighting.slang";
@@ -19,6 +20,10 @@ public void primeTransportDirect(TraceScene resources, AtmLighting environment,
                                  PrimePbrVertex material, float3 direction, float4 medium,
                                  float4 incident, float4 transmitted, bool thin, float3 throughput,
                                  inout float3 accumulated) {
+    // A whole discrete closure has no continuous NEE response. Keep its original Full
+    // continuation sampler and independent random domains in the caller.
+    if (primePbrVertexIsDiscreteOnly(material, incident, transmitted))
+        return;
     uint domain = 1 + 4 * bounce;
     bool optical = primePbrVertexIsDielectric(material);
     float3 view = -direction;
@@ -35,19 +40,19 @@ public void primeTransportDirect(TraceScene resources, AtmLighting environment,
         float3 radiance =
                 evaluateLocalLight(resources, surface, light, sampler.bits1D(lightDomain + 3),
                                    lightMedium, optical, pdf);
-        if (pdf > 0 && !primeCanSkipZeroNee(radiance, pdf, throughput,
-                                            primePathHasContinuation(bounce, budget))) {
+        if (pdf > 0 &&
+            !primeCanSkipZeroNee(radiance, pdf, throughput,
+                                 primePathHasContinuation(bounce, budget)) &&
+            primeGeometricEvaluationSupport(hasNormal, surface.normal, normal, view, lightDirection,
+                                            optical)) {
             BsdfEvaluation evaluated = primeEvaluatePbrVertex(
                     energy, material, view, lightDirection, incident, transmitted);
-            if (!primeGeometricEvaluationSupport(hasNormal, surface.normal, normal, view,
-                                                 lightDirection, optical))
-                evaluated = primeInvalidBsdfEvaluation();
             float bsdfPdf = evaluated.pdf;
             float weightedInversePdf = primePathHasContinuation(bounce, budget)
                                                ? primePowerHeuristicOverPdfValue(pdf, bsdfPdf)
                                                : 1.0 / pdf;
-            accumulated += throughput * primeTripleProduct(linear709ToWorking(radiance),
-                                                           evaluated.response, weightedInversePdf);
+            accumulated += throughput *
+                           primeTripleProduct(radiance, evaluated.response, weightedInversePdf);
         }
     }
     float3 sunDirection = atmSampleSun(environment, sampler.sample2D(1024 + bounce));
@@ -60,12 +65,11 @@ public void primeTransportDirect(TraceScene resources, AtmLighting environment,
                     sampler.bits1D(domain + 1), 100000.0,
                     optical && !thin && dot(surface.normal, sunDirection) < 0 ? transmitted
                                                                               : medium);
-            if (any(visibility > 0.0)) {
+            if (any(visibility > 0.0) &&
+                primeGeometricEvaluationSupport(hasNormal, surface.normal, normal, view,
+                                                sunDirection, optical)) {
                 BsdfEvaluation evaluated = primeEvaluatePbrVertex(
                         energy, material, view, sunDirection, incident, transmitted);
-                if (!primeGeometricEvaluationSupport(hasNormal, surface.normal, normal, view,
-                                                     sunDirection, optical))
-                    evaluated = primeInvalidBsdfEvaluation();
                 float bsdfPdf = evaluated.pdf;
                 float weightedInversePdf =
                         primePathHasContinuation(bounce, budget)

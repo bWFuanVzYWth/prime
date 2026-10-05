@@ -404,7 +404,7 @@ impl Fixture {
             .collect();
         let constants =
             Buffer::new(context, 144, vk::BufferUsageFlags::UNIFORM_BUFFER, true).unwrap();
-        let scratch = realtime::Scratch::new(context, extent, true).unwrap();
+        let scratch = realtime::Scratch::new(context, extent, true, true).unwrap();
         let pixels = (extent[0] * extent[1]) as usize;
         let reports = Buffer::new(
             context,

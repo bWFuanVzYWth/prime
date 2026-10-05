@@ -174,6 +174,7 @@ pub(super) struct Geometry {
     pub static_bases: Buffer,
     light_sampler: crate::light_sampler::LightSampler,
     next_light_key: u64,
+    light_publication: u64,
     has_surfaces: bool,
     has_compounds: bool,
     has_optics: bool,
@@ -294,6 +295,7 @@ impl Geometry {
             )?,
             light_sampler: crate::light_sampler::LightSampler::new(context),
             next_light_key: 1,
+            light_publication: 0,
             has_surfaces: false,
             has_compounds: false,
             has_optics: false,
@@ -601,6 +603,8 @@ impl Geometry {
             );
         }
         let mut lights_changed = self.anchor != scene.anchor;
+        let full_light_snapshot = self.epoch != scene.epoch;
+        let mut changed_light_keys = BTreeSet::new();
         let mut instance_flags_changed = self.omm_dirty;
         let owner = self.resources.clone();
         let mut resources = owner.borrow_mut();
@@ -729,11 +733,41 @@ impl Geometry {
         let mut compile_trace = prime_diagnostics::scope("geom.compile");
         compile_trace.fail();
         compile_trace.count("cells", plan.geometry.len() as u64);
+        let old_packing: BTreeMap<_, _> = plan
+            .geometry
+            .iter()
+            .filter_map(|update| {
+                self.clusters
+                    .get(&update.key)?
+                    .history_packing
+                    .as_ref()
+                    .map(|packing| (update.key, packing))
+            })
+            .collect();
+        let stable_history = self.stable_history;
+        let mut jobs: Vec<_> = std::mem::take(&mut plan.geometry)
+            .into_iter()
+            .map(|update| (update, None))
+            .collect();
         self.workers.batches_mut(
             &mut self.surface_compilers,
-            &mut plan.geometry,
+            &mut jobs,
             |compiler, updates| {
-                for update in updates {
+                for (update, packing) in updates {
+                    if stable_history {
+                        let compiled = update
+                            .geometries
+                            .iter()
+                            .map(|geometry| compiler.resolve_terrain(scene.revision, geometry))
+                            .collect::<Result<Vec<_>, _>>()?;
+                        *packing = Some(static_history::StaticPacking::prepare_compiled(
+                            update,
+                            old_packing.get(&update.key).copied(),
+                            scene.revision,
+                            compiled,
+                        )?);
+                        continue;
+                    }
                     for geometry in &mut update.geometries {
                         let Some(mesh) = compiler.compile_terrain(scene.revision, geometry)? else {
                             continue;
@@ -754,16 +788,17 @@ impl Geometry {
         compile_trace.succeed();
         drop(compile_trace);
         let mut prepared_packing = BTreeMap::new();
-        if self.stable_history {
-            for update in &mut plan.geometry {
-                let old = self
-                    .clusters
-                    .get(&update.key)
-                    .and_then(|cluster| cluster.history_packing.as_ref());
-                let packing = static_history::StaticPacking::prepare(update, old, scene.revision)?;
-                prepared_packing.insert(update.key, packing);
+        for (update, packing) in jobs {
+            if update.geometries.is_empty() {
+                plan.removed.push(update.key);
+            } else {
+                if let Some(packing) = packing {
+                    prepared_packing.insert(update.key, packing);
+                }
+                plan.geometry.push(update);
             }
         }
+        drop(old_packing);
         let mut material_trace = prime_diagnostics::scope("geom.material");
         material_trace.fail();
         self.static_occlusion_changed |= !plan.removed.is_empty()
@@ -809,7 +844,10 @@ impl Geometry {
                     *total -= value;
                 }
                 for page in old.light_pages.iter().flatten() {
-                    lights_changed |= self.light_sources.remove(&page.key).is_some();
+                    if self.light_sources.remove(&page.key).is_some() {
+                        lights_changed = true;
+                        changed_light_keys.insert(page.key);
+                    }
                 }
                 old.acceleration.retire(&mut self.builds);
                 for micromap in old.micromaps {
@@ -880,7 +918,10 @@ impl Geometry {
                     *total -= value;
                 }
                 for page in old.light_pages.iter().flatten() {
-                    lights_changed |= self.light_sources.remove(&page.key).is_some();
+                    if self.light_sources.remove(&page.key).is_some() {
+                        lights_changed = true;
+                        changed_light_keys.insert(page.key);
+                    }
                 }
                 old.acceleration.retire(&mut self.builds);
                 for micromap in old.micromaps {
@@ -915,6 +956,11 @@ impl Geometry {
                         && let Some(identity) = &mut self.history_identity
                     {
                         identity.relocate_static_quads(previous, first, old_count)?;
+                    }
+                    if old_count > count
+                        && let Some(identity) = &mut self.history_identity
+                    {
+                        identity.remove_static(first + count, old_count - count);
                     }
                 }
             }
@@ -1246,6 +1292,7 @@ impl Geometry {
                     self.light_sources
                         .insert(page.key, (key.origin(), page.clone()));
                     lights_changed = true;
+                    changed_light_keys.insert(page.key);
                 }
                 self.clusters.insert(key, cluster);
             }
@@ -1281,13 +1328,19 @@ impl Geometry {
             let mut lights_trace = prime_diagnostics::scope("geom.lights");
             lights_trace.fail();
             lights_trace.count("pages", self.light_sources.len() as u64);
-            let sources = self
-                .light_sources
-                .iter()
-                .map(|(&key, (origin, page))| (key, (*origin, page.as_ref())))
-                .collect();
-            self.light_sampler
-                .update(context, scene.anchor, &sources, &mut self.uploads)?;
+            self.light_publication = self
+                .light_publication
+                .checked_add(1)
+                .ok_or("Light publication revision exhausted")?;
+            self.light_sampler.update(
+                context,
+                scene.anchor,
+                &self.light_sources,
+                self.light_publication,
+                &changed_light_keys,
+                full_light_snapshot,
+                &mut self.uploads,
+            )?;
             lights_trace.succeed();
         }
         let mut directory_trace = prime_diagnostics::scope("geom.dir");

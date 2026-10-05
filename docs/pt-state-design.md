@@ -53,9 +53,9 @@ K2 与 Offline 在阴影查询之后才建立短时 ONB 和 Full 支持子域状
 
 ## 实时交接记录与独立 guide
 
-当前raw每内部像素分配176B scratch：七个16B common SoA planes（112B）、两个16B optical planes（32B）、独立 prefix/原空气段（16B）和 FP32 tail（16B）。RR额外保留四个common planes存放64B companion guide seed，总计240B/内部像素。landing固定使用common planes0..6，依次保存位置/偏移、几何法线/bounce与状态、baseColor/roughness、着色法线/control、入射方向/cone、当前 medium、beta/etaScale；RR companion位于planes7..10。opaque 不读写 optical planes；physical-thin 的 incident 等于 medium，只需 transmitted；厚 optical 分别保留 medium、incident、transmitted。预留容量不因本帧 opaque 占比变化，逻辑访问量与容量分开核算。
+有光学能力的场景，raw每内部像素分配176B scratch：七个16B common SoA planes（112B）、两个16B optical planes（32B）、独立 prefix/原空气段（16B）和 FP32 tail（16B）。RR额外保留四个common planes存放64B companion guide seed，总计240B/内部像素。Geometry 对整个 resident 场景证明无 optics 时，raw/RR 均只分配七个 common plane 与 prefix/tail，共144B/内部像素，不保留 optical/companion 容量；该能力与实际 shader specialization 同源，布局变化按完成证明替换 scratch，不请求历史重置。landing固定使用common planes0..6，依次保存位置/偏移、几何法线/bounce与状态、baseColor/roughness、着色法线/control、入射方向/cone、当前 medium、beta/etaScale；光学 RR companion位于planes7..10。opaque 不读写 optical planes；physical-thin 的 incident 等于 medium，只需 transmitted；厚 optical 分别保留 medium、incident、transmitted。布局不按本帧可见 opaque 占比猜能力，逻辑访问量与容量分开核算。
 
-scratch 使用 GPU buffer device address，不把整个分配暴露成可能超过 `maxStorageBufferRange` 的 SSBO；分配大小、16B plane 对齐和 `plane*count+pixel` 的32位索引上限按实际7或11个common planes在边界检查。raw原生1920×1080容量约364.95 MB；RR原生1920×1080约497.66 MB，Performance的960×540约124.42 MB，均为十进制MB，不含图像、对齐和SDK私有资源。raw depth/normal诊断另按需分配16B/像素，不进入K2；RR的R8状态为1B/内部像素，新增全图RG16F specular motion为4B/内部像素。完整图像账由[重建文档](reconstruction.md)维护。
+scratch 使用 GPU buffer device address，不把整个分配暴露成可能超过 `maxStorageBufferRange` 的 SSBO；分配大小、16B plane 对齐和 `plane*count+pixel` 的32位索引上限按实际7或11个common planes在边界检查。有 optics 时 raw原生1920×1080容量约364.95 MB；RR原生1920×1080约497.66 MB，Performance的960×540约124.42 MB。无 optics 时 raw/RR 原生均约298.60 MB、RR Performance约74.65 MB。以上均为十进制MB，不含图像、对齐和SDK私有资源；容量降低不等于稳态带宽或帧率收益。raw depth/normal诊断另按需分配16B/像素，不进入K2；RR的R8状态为1B/内部像素，新增全图RG16F specular motion为4B/内部像素。完整图像账由[重建文档](reconstruction.md)维护。
 
 K1的规范主guide几何与照明路径独立：optical优先实际IOR可透射方向，真实TIR和conductor走反射；它不消费Fresnel抽样、response/PDF、Beer、beta、roulette或光贡献。首纯delta透明面可透射时同时建立独立R guide，主交点和材质只解析一次。照明选中的R或T事件直接采用对应guide生产者给出的方向和安全起点共享公共查询，另一条guide保存到companion planes；因此guide查询不依赖照明分支中的重复浮点运算，也不会缺少未选分支的终点。
 
@@ -80,13 +80,15 @@ K1/K2/post分别采用128B、80B、112B push接口和各自实际资源视图。
 
 specular 分类 G/B 使用当前帧 mip0 点采样身份；可靠的 CPU 全域证明可用于去掉不可能的分支。specular 连续 R/A 按实际 UV/LOD 过滤后量化、解码；normal atlas A 则保存过滤后的分布粗糙度，并参与有效粗糙度组合。非线性解码与过滤一般不能交换顺序，不能将“类别可预先规范化”推广为“所有纹理解码都可前移”。
 
+同一 bilinear level 的不可变 image/stride/frame/blend metadata 只解析一次，四个邻点保持原 normalized UV、sprite clamp/whole-texture repeat、每 texel RGBA8 动画量化及两层 lerp 顺序。它不改为硬件过滤，不跨 LOD/资源代次缓存；独立旧/新实现逐位对照覆盖 clamp/repeat 和动画混合。普通 blocker 的阴影 candidate 只有原物理 optical bit 有消费者时才准备 boundary IOR；最近交点仍保留真实介质解析。
+
 CPU 证明必须说明生产者、覆盖域、未知情况和失效路径。当前可见像素、单帧动画或旧资源代次不能证明整个 resident 场景没有某种材质；不能证明时使用通用路径。增加 CPU 扫描、复制、缓存和重编译也有成本，须分别评估稳态、加载与更新，不把 GPU 节省无条件视作整帧收益。
 
 ## 必须保持的语义与可复用简化
 
 物理介质端点来自选择着色涂层之前的原边界；selected shading material 决定表面 BSDF。physical thin 与 material thin 的用途不同，不能合并成一个未经证明的分类。有限灯的 BSDF 方向基于原表面位置，阴影 segment 使用两端安全偏移后的点；改变其中一条方向不能顺带改变另一条。
 
-局部灯源颜色与 RGB visibility 在原线性 BT.709 域相乘，之后才执行非对角的工作空间转换；这个乘法不能任意移过矩阵。保持 alpha/coverage、光源实际 PMF、完整混合 PDF、MIS、薄壁/TIR、介质、随机域及 roulette 契约。有连续散射的末预算顶点仍消费NEE与对应MIS，只省去没有下一跳消费者的采样和roulette；K1纯delta前缀没有连续NEE消费者。源输入规范化不能证明 BSDF response/PDF、方向、eta、throughput 或最终 radiance 有限；实际结果清洗继续在其消费者边界执行。
+局部灯源先从线性 BT.709 转为 working RGB，再乘同域 extinction 产生的 RGB visibility；普通 PT 与 ReSTIR 的 NEE/BSDF-emitter 采用同一顺序，不能把彩色 Beer 乘法移过非对角颜色矩阵。保持 alpha/coverage、光源实际 PMF、完整混合 PDF、MIS、薄壁/TIR、介质、随机域及 roulette 契约。有连续散射的末预算顶点仍消费NEE与对应MIS，只省去没有下一跳消费者的采样和roulette；整闭包纯delta顶点没有连续NEE消费者。源输入规范化不能证明 BSDF response/PDF、方向、eta、throughput 或最终 radiance 有限；实际结果清洗继续在其消费者边界执行。
 
 当前源码显式结束或删除生产路径不消费的字段、参数、默认构造和不可达拓扑，而不把支持边界藏在编译器 DCE 中。生产窄构造与旧完整 OpenPBR 支持子域 API 复用同一数学核；厚壁 SSS 扩展单独保留 Lite 数学；通用库的合法能力不因生产暂未接入而删除。AO、height、porosity 或 generic 默认字段的源码简化不自动证明 GPU 加速；packed 纹理仍可能执行同一次事务。
 
@@ -108,7 +110,7 @@ Tree沿用空间median拓扑，GPU节点为24B位置/功率/child/后代数，�
 
 ReSTIR每帧仍生成新初始路径并执行沿途NEE，时间/空间重连接还会在目的接收点重算端点PDF；历史复用不消除这些选灯工作。测量分别报告普通PT和ReSTIR，区分遍历深度、选光求值、实际query数量及完整GPU阶段。物理寄存器或spill差异须由实际活跃变体证明，SPIR-V尺寸/静态指令数不足以归因整帧差距。
 
-几何层无灯源变化时早退，不做稳态灯表上传。实际发布按稳定key比较当前面积倒数、路径及世界根，同时重新编码48B页描述中的当前nodes/emitter BDA和静态quad映射；相同根或灯数不能证明旧GPU地址仍有效。CPU规划先推进而分配、staging或提交录制失败时，下次重试全量补发未完成的引用/世界/header范围。旧shader读取与transfer写入使用现有队列屏障，旧buffer和上传租约按最后消费者及完成证明退休；宿主实际提交失败继续隔离session，不当作取消或完成。
+几何层无灯源变化时早退，不做稳态灯表上传。几何 owner 发布单调 revision 和闭合 changed-key 集合，连续局部更新仅校验变化页的实际面积倒数/路径/root，并重写对应48 B页描述中的当前 nodes/emitter BDA 和静态 quad 映射；相同根或灯数不能证明旧GPU地址仍有效。首次、epoch/anchor变化、publication漏号及失败走完整快照，world成员/root变化重建相应完整世界路径。CPU规划先推进而分配、staging或提交录制失败时，下次重试全量补发未完成的引用/世界/header范围。旧shader读取与transfer写入使用现有队列屏障，旧buffer和上传租约按最后消费者及完成证明退休；宿主实际提交失败继续隔离session，不当作取消或完成。
 
 正式验证固定原生1920×1080、场景、种子、画质与预算，分别观察初始化/更新和稳态CPU/GPU、完整帧与离群值。小样板选光、CPU构树和局部数学结果不能外推游戏帧率或收敛；不为收益不足的变体保留长期维护路径。
 

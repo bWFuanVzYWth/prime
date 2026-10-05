@@ -104,7 +104,10 @@ int2 previousPixel(RestirScene resources, RestirPrimary primary, SurfaceHit hit,
                      restirHistoryHitValid(resources, history.reconnectionHit))) {
                     mask.data = 1u;
                     candidateMask =
-                            uint(parameters.current[offset].pathFlags.rcVertexLength() > 1) |
+                            uint(parameters.current[offset].pathFlags.rcVertexLength() > 1 &&
+                                 restirPathFitsBudget(
+                                         parameters.current[offset].pathFlags,
+                                         asuint(parameters.previousFrame.displayExtra.z))) |
                             uint(parameters.history[previousOffset].pathFlags.rcVertexLength() > 1)
                                     << 1;
                 }

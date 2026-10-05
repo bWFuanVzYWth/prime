@@ -36,6 +36,7 @@ import "restir/reservoir.slang";
 import "restir/rng.slang";
 import "restir/pairwise.slang";
 import "restir/config.slang";
+import "restir/history_support.slang";
 
 PrecomputedShiftData temporalShift(RestirScene resources, RestirPrimary primary, float3 wo,
                                    inout PathReservoir source, uint replayAddress,
@@ -63,8 +64,11 @@ PrecomputedShiftData temporalShift(RestirScene resources, RestirPrimary primary,
                               : 0u;
     temporal.M = min(restirDuplicateMCap(parameters.config, duplicates), temporal.M);
     uint stride = parameters.config.queue.y;
-    float canonicalWeight;
-    {
+    float canonicalWeight = 1.0;
+    // RA-009: a new-budget-only path has zero inverse target density. Avoid its
+    // prefix/direct replay altogether; keep the independently supported forward donor.
+    if (restirPathFitsBudget(canonical.pathFlags,
+                             asuint(parameters.previousFrame.displayExtra.z))) {
         // The original temporal pass computes each direction here, without a full-screen
         // precompute write/read. Its inverse mapping must not mutate the canonical source.
         PathReservoir inverseSource = canonical;

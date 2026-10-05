@@ -1235,13 +1235,20 @@ impl Renderer {
                 .map_or([width, height], |rr| rr.input_extent());
             let output = self.output.as_mut().unwrap();
             let reconstruction = self.reconstruction.is_some();
+            let optics = self
+                .geometry
+                .as_ref()
+                .is_some_and(|g| g.shader_variant() >= 4);
             if output.scratch.as_ref().is_none_or(|scratch| {
-                scratch.extent != extent || scratch.reconstruction != reconstruction
+                scratch.extent != extent
+                    || scratch.reconstruction != reconstruction
+                    || scratch.optics != optics
             }) {
                 output.scratch = Some(realtime::Scratch::new(
                     &self.context,
                     extent,
                     reconstruction,
+                    optics,
                 )?);
             }
             output.scratch.as_mut().unwrap().set_diagnostic(
@@ -1441,6 +1448,7 @@ impl Renderer {
             pipeline.layout,
             self.settings.restir,
             self.restir.as_ref().unwrap().rr_statistics_this_frame,
+            self.restir.as_ref().unwrap().duplicate_this_frame,
         )
     }
 
@@ -1793,7 +1801,7 @@ impl Renderer {
                         self.realtime_barrier(command);
                     }
                 }
-                if state.settings.duplicate_map || state.settings.debug_view == 1 {
+                if state.duplicate_this_frame {
                     self.realtime_barrier(command);
                     bind(passes.sample_ids, 1, sample, rounds);
                     self.context.device.cmd_dispatch(

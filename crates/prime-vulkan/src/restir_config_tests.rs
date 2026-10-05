@@ -9,6 +9,106 @@ use std::collections::{HashMap, HashSet};
 const WIDTH: u32 = 31;
 const HEIGHT: u32 = 17;
 
+#[test]
+#[ignore = "requires windowless Vulkan; H0 and Offline must omit unused duplicate producers"]
+fn gpu_restir_zero_history_and_offline_duplicate_consumers() {
+    let fixture = multiple_light_scene(1);
+    let mut zero = config_settings();
+    zero.restir.history_length = 0;
+    let mut spatial = zero;
+    spatial.restir.history_length = 20;
+    spatial.restir_spatial_only = true;
+    let mut zero = renderer(zero);
+    let mut spatial = renderer(spatial);
+    for sequence in 0..3 {
+        for current in [&mut zero, &mut spatial] {
+            current
+                .render(&fixture, &camera(), WIDTH, HEIGHT, sequence)
+                .unwrap();
+        }
+        let state = zero.restir.as_ref().unwrap();
+        assert!(!state.temporal_this_frame && !state.duplicate_this_frame);
+        assert!(state.accepted_history().0); // H0 does not request a reset.
+        assert!(state.auxiliary_for_test().sample_ids.is_none());
+        assert!(spatial.restir.as_ref().unwrap().duplicate_this_frame);
+        assert_eq!(
+            temporal_snapshot_words(&zero, WIDTH, HEIGHT),
+            temporal_snapshot_words(&spatial, WIDTH, HEIGHT)
+        );
+    }
+    let mut dormant = config_settings();
+    dormant.restir.history_length = 0;
+    dormant.restir.distance_threshold *= 2.;
+    zero.configure(dormant).unwrap();
+    zero.render(&fixture, &camera(), WIDTH, HEIGHT, 3).unwrap();
+    assert_eq!(
+        word(&uniform(&zero), 524) & 8,
+        0,
+        "H0 threshold edits have no old-chart consumer"
+    );
+    assert_eq!(address(&uniform(&zero), 688), 0);
+    let resumed = config_settings();
+    zero.configure(resumed).unwrap();
+    for sequence in 4..6 {
+        zero.render(&fixture, &camera(), WIDTH, HEIGHT, sequence)
+            .unwrap();
+        let state = zero.restir.as_ref().unwrap();
+        assert!(state.temporal_this_frame && state.duplicate_this_frame);
+        assert!(state.accepted_history().0);
+        assert!(state.auxiliary_for_test().duplicate_counts.is_some());
+        let (records, linear) = temporal_snapshot_words(&zero, WIDTH, HEIGHT);
+        finite_output(&records, &linear);
+        let ready = word(&uniform(&zero), 524) >> 2 & 1;
+        assert_eq!(
+            ready,
+            u32::from(sequence > 4),
+            "a newly allocated map needs its first accepted producer"
+        );
+    }
+    let mut offline = config_settings();
+    offline.mode = RenderMode::Offline;
+    let mut disabled = offline;
+    disabled.restir.duplicate_map = false;
+    let mut enabled = renderer(offline);
+    let mut disabled = renderer(disabled);
+    for sequence in 0..2 {
+        let a = enabled
+            .render(&fixture, &camera(), WIDTH, HEIGHT, sequence)
+            .unwrap();
+        let b = disabled
+            .render(&fixture, &camera(), WIDTH, HEIGHT, sequence)
+            .unwrap();
+        assert_eq!(a, b);
+        assert_eq!(
+            restir_tests::linear_history(&enabled, WIDTH, HEIGHT),
+            restir_tests::linear_history(&disabled, WIDTH, HEIGHT)
+        );
+        let state = enabled.restir.as_ref().unwrap();
+        assert!(!state.duplicate_this_frame && !state.accepted_history().0);
+        assert!(state.auxiliary_for_test().sample_ids.is_none());
+        assert_eq!(
+            enabled
+                .pipeline
+                .as_ref()
+                .unwrap()
+                .restir
+                .as_ref()
+                .unwrap()
+                .duplicate_map,
+            vk::Pipeline::null()
+        );
+    }
+    offline.restir.debug_view = 1;
+    enabled.configure(offline).unwrap();
+    enabled
+        .render(&fixture, &camera(), WIDTH, HEIGHT, 2)
+        .unwrap();
+    let state = enabled.restir.as_ref().unwrap();
+    assert!(state.duplicate_this_frame);
+    assert!(state.auxiliary_for_test().duplicate_counts.is_some());
+    assert!(!state.accepted_history().0);
+}
+
 fn config_settings() -> RenderSettings {
     // Route real FP32 radiance to binding24 for inspection. Display exposure is
     // independent and is never used in the estimator comparisons below.

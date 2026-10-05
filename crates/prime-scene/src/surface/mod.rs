@@ -205,6 +205,25 @@ pub struct SurfaceMesh {
     pub lights: Arc<LightTree>,
     pub stats: CompileStats,
 }
+
+/// Resolved terrain faces before their final primitive order is chosen. This is
+/// not a published mesh: canonical emitter IDs are assigned only by `finish`.
+pub struct TerrainSurfaces {
+    pub revision: u64,
+    pub quads: Vec<SurfaceFace>,
+    pub stats: CompileStats,
+}
+impl TerrainSurfaces {
+    pub fn finish(mut self) -> Result<SurfaceMesh, String> {
+        let lights = Arc::new(LightTree::build(&mut self.quads)?);
+        Ok(SurfaceMesh {
+            revision: self.revision,
+            quads: self.quads,
+            lights,
+            stats: self.stats,
+        })
+    }
+}
 impl SurfaceMesh {
     pub(crate) fn ior_textures(&self) -> impl Iterator<Item = u32> + '_ {
         self.quads.iter().flat_map(|face| {
