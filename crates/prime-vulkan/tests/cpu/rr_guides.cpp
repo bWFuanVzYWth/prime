@@ -213,6 +213,28 @@ static void pixel_motion_contracts() {
 }
 
 int main() {
+    const F3 normal{0, 0, 1};
+    require(rrCpuMaterialWeight_0({0.5f, 0.5f, 0.5f}, {0.5f, 0.5f, 0.5f}, {}, {}, 0) == 1,
+            "constant material leaves geometry kernel unchanged");
+    require(rrCpuMaterialWeight_0({1, 0, 0}, {0, 1, 0}, {}, {}, 0) < 1e-8f,
+            "coplanar material edges constrain spatial denoising");
+    require(rrCpuMaterialWeight_0({}, {}, {}, {}, 1) < 1e-8f,
+            "roughness-only boundaries constrain spatial denoising without extra image reads");
+    require(close(rrCpuSpatialWeight_0({0, 0}, 3, 3, normal, normal, true, true), 1),
+            "spatial kernel preserves a constant surface");
+    require(rrCpuSpatialWeight_0({1, 0}, 3, 3, normal, normal, true, true) > 0.7f,
+            "same-surface neighbours contribute to variance reduction");
+    require(rrCpuSpatialWeight_0({1, 0}, 3, 4, normal, normal, true, true) < 1e-8f,
+            "spatial denoise rejects depth discontinuities");
+    require(rrCpuSpatialWeight_0({1, 0}, 3, 3, normal, {1, 0, 0}, true, true) == 0,
+            "spatial denoise preserves normal edges");
+    require(rrCpuSpatialWeight_0({0, 0}, 3, 3, normal, normal, true, false) == 0,
+            "spatial denoise cannot bleed foreground into background");
+    const float skyDepth = std::numeric_limits<float>::max();
+    require(rrCpuSpatialWeight_0({1, 0}, skyDepth, skyDepth, {}, {}, false, false) > 0.7f,
+            "sky kernel does not require a fabricated surface normal");
+    require(rrCpuSpatialWeight_0({1, 0}, skyDepth, 3, {}, normal, false, false) == 0,
+            "sky and finite surface remain separate");
     // An independent double affine oracle covers translation, reflection, shear and nonuniform scale.
     const F3 vertices[] = {{0.25f, -1, 2}, {3, 0.5f, -4}, {-2, 5, 0.125f}};
     const F4 transforms[][3] = {{{1, 0, 0, 1.25f}, {0, 1, 0, -2}, {0, 0, 1, 10}},

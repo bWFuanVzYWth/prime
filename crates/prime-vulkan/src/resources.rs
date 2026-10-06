@@ -185,6 +185,7 @@ unsafe fn micromap_support(
 pub(super) struct Context {
     _instance: Arc<InstanceOwner>,
     pub device: Device,
+    pipeline_cache: crate::pipeline_cache::PipelineCache,
     pub physical: vk::PhysicalDevice,
     pub acceleration: ash::khr::acceleration_structure::Device,
     pub opacity_micromap: Option<OpacityMicromapSupport>,
@@ -234,6 +235,7 @@ impl Drop for Context {
             if self.host.is_none() {
                 let _ = self.device.device_wait_idle();
             }
+            self.pipeline_cache.finish(&self.device);
             if let Some(profile) = &self.profile
                 && profile.query_pool != vk::QueryPool::null()
             {
@@ -247,6 +249,21 @@ impl Drop for Context {
     }
 }
 impl Context {
+    /// Pipeline construction shares one device cache; frame dispatches never touch it.
+    /// # Safety
+    /// Same create-info requirements as vkCreateComputePipelines on this device.
+    pub unsafe fn create_compute_pipelines(
+        &self,
+        infos: &[vk::ComputePipelineCreateInfo<'_>],
+    ) -> Result<Vec<vk::Pipeline>, (Vec<vk::Pipeline>, vk::Result)> {
+        unsafe { self.pipeline_cache.create_compute(&self.device, infos) }
+    }
+
+    /// Checkpoint at initialization only. Context teardown also saves late-created variants.
+    pub fn save_pipeline_cache(&self) {
+        self.pipeline_cache.save(&self.device);
+    }
+
     /// Counts Context-owned memory, including retired allocations. Host/SDK memory is external.
     pub(super) fn allocate_memory(
         &self,
@@ -539,9 +556,12 @@ impl Context {
             let opacity_micromap =
                 micromap_support(&owner.instance, physical, &device, omm_enabled);
             eprintln!("[Prime PT] OMM device capability enabled={omm_enabled}");
+            let pipeline_cache =
+                crate::pipeline_cache::PipelineCache::new(&device, &owner.instance, physical);
             Ok(Arc::new(Self {
                 _instance: owner,
                 device,
+                pipeline_cache,
                 physical,
                 opacity_micromap,
                 acceleration: acceleration_loader,
@@ -670,9 +690,12 @@ impl Context {
             let opacity_micromap =
                 micromap_support(&owner.instance, physical, &device, capabilities & 1 != 0);
             eprintln!("[Prime PT] Host OMM enabled={}", opacity_micromap.is_some());
+            let pipeline_cache =
+                crate::pipeline_cache::PipelineCache::new(&device, &owner.instance, physical);
             Ok(Arc::new(Self {
                 _instance: owner,
                 device,
+                pipeline_cache,
                 physical,
                 acceleration,
                 opacity_micromap,
@@ -2132,6 +2155,7 @@ mod host_tests {
                 }),
                 device,
                 physical: vk::PhysicalDevice::null(),
+                pipeline_cache: crate::pipeline_cache::PipelineCache::disabled(),
                 acceleration,
                 opacity_micromap: None,
                 streamline_capable: false,

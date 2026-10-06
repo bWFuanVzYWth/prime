@@ -3,6 +3,119 @@ use prime_scene::scene::{SceneMesh, Texture, Triangle};
 use prime_scene::settings::DiagnosticView;
 
 #[test]
+#[ignore = "requires Vulkan; windowless production linear display after FG becomes unavailable"]
+fn gpu_frozen_linear_route_writes_host_after_fg_disabled() {
+    use prime_scene::workers::CpuWorkers;
+    let context = Context::new().unwrap();
+    let settings = RenderSettings {
+        stars: 0.0,
+        auto_exposure_compensation: 0.0,
+        native_noisy_output: true,
+        frame_generation: true,
+        ..Default::default()
+    };
+    let mut renderer = Renderer::from_context(
+        context.clone(),
+        settings,
+        Arc::new(CpuWorkers::new(1).unwrap()),
+    )
+    .unwrap();
+    let extent = [19, 13];
+    let mut output = Output::new(&context, extent[0], extent[1], RenderMode::Realtime).unwrap();
+    // Model the resources and bound destination chosen while FG was the only linear consumer.
+    output
+        .prepare_display(&context, RenderMode::Realtime, true, false, true)
+        .unwrap();
+    let linear = output.linear.as_ref().unwrap().image;
+    let image = output.image.as_ref().unwrap().image;
+    let view = output.image.as_ref().unwrap().view;
+    let readback = output.readback.as_ref().unwrap().buffer;
+    renderer.output = Some(output);
+    renderer.linear_display = Some(display_pipeline::LinearDisplay::new(&context).unwrap());
+    // There is no supported SDK FG now. Recomputing the route here would skip the host write.
+    assert!(!renderer.frame_generation_active());
+    assert!(!renderer.needs_linear_display());
+    let mut recorded = Ok(());
+    context
+        .submit_named("frozen_linear_route_after_fg_failure", |command| unsafe {
+            context.device.cmd_clear_color_image(
+                command,
+                linear,
+                vk::ImageLayout::GENERAL,
+                &vk::ClearColorValue {
+                    float32: [0.25, 0.125, 0.5, 1.0],
+                },
+                &[target::color_range()],
+            );
+            context.device.cmd_clear_color_image(
+                command,
+                image,
+                vk::ImageLayout::GENERAL,
+                &vk::ClearColorValue { float32: [0.0; 4] },
+                &[target::color_range()],
+            );
+            recorded = renderer.record_display(command, 0, view, false, true);
+            context.device.cmd_pipeline_barrier(
+                command,
+                vk::PipelineStageFlags::COMPUTE_SHADER,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::DependencyFlags::empty(),
+                &[vk::MemoryBarrier::default()
+                    .src_access_mask(vk::AccessFlags::SHADER_WRITE)
+                    .dst_access_mask(vk::AccessFlags::TRANSFER_READ)],
+                &[],
+                &[],
+            );
+            context.device.cmd_copy_image_to_buffer(
+                command,
+                image,
+                vk::ImageLayout::GENERAL,
+                readback,
+                &[vk::BufferImageCopy::default()
+                    .image_subresource(
+                        vk::ImageSubresourceLayers::default()
+                            .aspect_mask(vk::ImageAspectFlags::COLOR)
+                            .layer_count(1),
+                    )
+                    .image_extent(vk::Extent3D {
+                        width: extent[0],
+                        height: extent[1],
+                        depth: 1,
+                    })],
+            );
+            context.device.cmd_pipeline_barrier(
+                command,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::PipelineStageFlags::HOST,
+                vk::DependencyFlags::empty(),
+                &[vk::MemoryBarrier::default()
+                    .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+                    .dst_access_mask(vk::AccessFlags::HOST_READ)],
+                &[],
+                &[],
+            );
+        })
+        .unwrap();
+    recorded.unwrap();
+    let bytes = renderer
+        .output
+        .as_ref()
+        .unwrap()
+        .readback
+        .as_ref()
+        .unwrap()
+        .read(extent[0] as usize * extent[1] as usize * 4)
+        .unwrap();
+    let expected = &bytes[..4];
+    assert_eq!(
+        expected[3], 255,
+        "The frozen route did not write the host target"
+    );
+    assert!(expected[..3].iter().all(|v| *v > 0));
+    assert!(bytes.chunks_exact(4).all(|pixel| pixel == expected));
+}
+
+#[test]
 #[ignore = "requires Vulkan with synchronization validation; renderer resource ownership and real host submission"]
 fn gpu_resource_prepare_world_reset_and_quality_reuse() {
     use prime_scene::{settings::ReconstructionQuality, workers::CpuWorkers};

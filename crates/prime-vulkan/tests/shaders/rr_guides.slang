@@ -2,6 +2,7 @@
 module rr_guides_test;
 import "reconstruct/rr_guides.slang";
 import "reconstruct/rr_status.slang";
+import "reconstruct/spatial_denoise.slang";
 import "math/rigid_motion.slang";
 import "reconstruct/visible_guides.slang";
 import "math/color.slang";
@@ -11,6 +12,19 @@ import "bsdf/full/math/microfacet_energy.slang";
 
 StructuredBuffer<float4> inputs;
 RWStructuredBuffer<float4> outputs;
+
+public float rrCpuMaterialWeight(float3 centerDiffuse, float3 sampleDiffuse, float3 centerSpecular,
+                                 float3 sampleSpecular, float roughnessDifference = 0.0) {
+    return primeSpatialMaterialWeight(centerDiffuse, sampleDiffuse, centerSpecular, sampleSpecular,
+                                      roughnessDifference);
+}
+
+public float rrCpuSpatialWeight(float2 offset, float centerDepth, float sampleDepth,
+                                float3 centerNormal, float3 sampleNormal, bool centerForeground,
+                                bool sampleForeground) {
+    return primeSpatialDenoiseWeight(offset, centerDepth, sampleDepth, centerNormal, sampleNormal,
+                                     centerForeground, sampleForeground);
+}
 
 public float3 rrCpuRigid(float3 v0, float3 v1, float3 v2, float2 bary, float4 row0, float4 row1,
                          float4 row2) {
@@ -145,5 +159,8 @@ public PrimeDenoiseAlbedos rrCpuAlbedos(float3 base, float3 optical, float rough
             float4(rrCpuRigid(a.xyz, float3(1, 0, 0), float3(0, 1, 0), a.xy, float4(1, 0, 0, 0),
                               float4(0, 1, 0, 0), float4(0, 0, 1, 0)),
                    1);
-    outputs[7 * id.x + 6] = float4(rrCpuForeground(a.w) ? 1.0 : 0.0, rrCpuDeviceDepth(a.z), 0, 0);
+    outputs[7 * id.x + 6] =
+            float4(rrCpuForeground(a.w) ? 1.0 : 0.0, rrCpuDeviceDepth(a.z),
+                   rrCpuSpatialWeight(a.xy, a.z, a.w, float3(0, 0, 1), float3(0, 0, 1), true, true),
+                   rrCpuMaterialWeight(a.xyz, float3(0.5), float3(0), float3(0)));
 }

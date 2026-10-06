@@ -696,13 +696,17 @@ fn gpu_restir_rr_production_guides_and_resolve_images() {
     );
     let unresolved = fixture.run(&glass(7), &instances, [0.125, -0.25], 11, 1);
     unresolved.finite();
-    assert!(unresolved.channels[7].iter().all(|status| status & 1 != 0));
+    assert!(
+        unresolved.channels[7]
+            .iter()
+            .all(|status| status & 3 == 0 && status & 64 != 0)
+    );
     for channel in [2, 8] {
         assert!(
             unresolved
                 .values(channel)
                 .iter()
-                .all(|motion| *motion == 0.0)
+                .all(|motion| motion.abs() <= 2e-4)
         );
     }
     let dynamic_scene = scene(9, vec![]);
@@ -715,12 +719,18 @@ fn gpu_restir_rr_production_guides_and_resolve_images() {
     );
     dynamic.finite();
     assert!(
-        dynamic.channels[7].iter().all(|status| *status == 11),
-        "unknown accepted pose must remain a per-pixel pending guide"
+        dynamic.channels[7].iter().all(|status| *status == 40),
+        "unknown accepted pose retains surface information with explicit approximate motion"
     );
-    for channel in [2, 8, 10] {
-        assert!(dynamic.values(channel).iter().all(|value| *value == 0.0));
+    for channel in [2, 8] {
+        assert!(
+            dynamic
+                .values(channel)
+                .iter()
+                .all(|value| value.abs() <= 2e-4)
+        );
     }
+    assert!(dynamic.values(10).iter().all(|value| *value == 0.0));
 }
 
 #[test]

@@ -332,7 +332,7 @@ fn named_frame_and_settings_validate_semantics_without_a_wire_roundtrip() {
         reconstruction_quality: 3,
         terrain_batches_per_frame: 1,
         stars: 1.0,
-        auto_exposure_compensation: 0.6,
+        auto_exposure_compensation: 0.75,
         hdr: 0,
         hdr_reference_white: 0,
         frame_generation: 0,
@@ -370,6 +370,13 @@ fn named_frame_and_settings_validate_semantics_without_a_wire_roundtrip() {
     assert_eq!(
         RenderSettings::from_abi(&settings).unwrap(),
         RenderSettings::default()
+    );
+    settings.auto_exposure_compensation = 0.6;
+    assert_eq!(
+        RenderSettings::from_abi(&settings)
+            .unwrap()
+            .auto_exposure_compensation,
+        0.6
     );
     settings.light_sampling = 1;
     assert_eq!(

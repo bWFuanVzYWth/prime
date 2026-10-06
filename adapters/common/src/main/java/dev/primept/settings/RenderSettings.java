@@ -19,7 +19,7 @@ public final class RenderSettings {
         SUN_EV("lighting.sun_ev_quarters", -32, 32, 0),
         SKY_EV("lighting.sky_ev_quarters", -32, 32, 0),
         STARS("lighting.stars_percent", 0, 400, 100),
-        AUTO_EXPOSURE("display.auto_exposure_percent", 0, 100, 60),
+        AUTO_EXPOSURE("display.auto_exposure_percent", 0, 100, 75),
         HDR("display.hdr", 0, 1, 0),
         HDR_WHITE("display.hdr_reference_white_nits", 0, 10000, 0),
         FRAME_GENERATION("render.frame_generation", 0, 1, 0),

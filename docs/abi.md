@@ -191,7 +191,7 @@ flags 的 bit0 表示已在这台逻辑设备启用 `VK_EXT_opacity_micromap` �
 | reconstruction_quality | 0 DLAA、1 Quality、2 Balanced、3 Performance默认、4 UltraPerformance |
 | terrain_batches_per_frame | 1–128默认1，每批4×4×4 section |
 | stars | `[0,4]`，默认1；独立于sky强度 |
-| auto_exposure_compensation | `[0,1]`，默认0.6；0关闭，其余为旧算法的补偿强度，并非EV |
+| auto_exposure_compensation | `[0,1]`，默认0.75；0关闭，其余为旧算法的补偿强度，并非EV |
 | hdr / hdr_reference_white | 0/1请求；0自动参考白，否则1–10000 nit；实际启用需surface及标定支持 |
 | frame_generation | 0/1请求，默认0；实时RR、早期interposer及实际SDK支持全部成立才准备 |
 | light_sampling | 1功率距离Tree；旧0/2规范化为Tree，未知值拒绝；无运行时采样器切换 |

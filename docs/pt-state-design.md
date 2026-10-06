@@ -24,7 +24,7 @@ flowchart TD
     OFF --> HISTORY["逐样本在线均值、显示、宿主目标"]
 ```
 
-K1 的 delta 循环只消费当前交点、窄离散数学、Beer、发光/环境端点、照明预算和 roulette；没有能量 LUT、完整 closure、局部灯/太阳 NEE 或阴影查询。遇到首个非纯 delta 顶点即发布 landing；粗糙首面只做一次主查询及表面/guide 准备，不构造透明条件 pair。RR变体的guide尾声通过窄方向能量helper消费LUT，不建立通用BSDF状态；raw变体不执行独立guide遍历。
+K1 的 delta 照明计算只消费当前交点、窄离散数学、Beer、发光/环境端点、照明预算和 roulette；不构造完整 closure、局部灯/太阳 NEE 或阴影查询。RR的备用guide候选独立消费方向能量，首透明接口复用相同候选已求值的能量，避免再次访问LUT。遇到首个非纯 delta 顶点即发布 landing；粗糙首面只做一次主查询及表面/guide 准备，不构造透明条件 pair。RR变体的guide尾声通过窄方向能量helper消费LUT，不建立通用BSDF状态；raw变体不执行独立guide遍历。
 
 K2 的交接点是 landing 的 coverage、纹理/材质解析、该段 Beer、cone 推进与发光已经完成，NEE 尚未执行。首轮直接读取 canonical 表面与全局路径状态，不重复求交、纹理、吸收或发光；以后各轮恢复求交—发光/MIS—局部灯—太阳—续接的原顺序。K1 前驱全部为离散事件，因此 landing 发光的连续 MIS 竞争 PDF 为零，不跨阶段保存 previous position/PDF。K2 首次续接之后才建立它们。
 
@@ -63,7 +63,9 @@ K1的规范主guide几何与照明路径独立：optical优先实际IOR可透射
 
 每个seed为四个16B plane、共64B：query origin/coneWidth、direction/当前IOR、PSR quaternion、PSR仿射translation/控制字。深度占控制字低8位，其余位保存PSR计数、反射奇偶、motion-known、折射/interface、seed及反射/companion身份；它没有物理前点、extinction、beta、etaScale、PDF、radiance或材质副本。PSR本身为32B仿射状态，使用真实物理反射平面，不累计安全偏移。一次seed写入/读出的逻辑请求为128B/需保存的guide；两条都分离时各计一次。这不是实际DRAM测量，内存复用也不保证驱动消除跨遍历寄存器保存，须检查实际load/store与活跃值。
 
-每条guide使用独立深度计数及同值预算N，不因照明roulette、零beta或吸收全黑而结束。第N次查询得到非delta或真实escape仍正常完成；仍需续接则标为unresolved，几何非法也不冒充稳定终点。内部R8状态低两位分别表示主/反射guide失败或待完成，值4表示K1拥有显式反射motion；K1及post每帧完整发布，display只检查低两位。未知motion写有限零配合本帧raw覆盖，不依赖SDK无效哨兵，也不保证SDK内部历史或空间滤波隔离。PSR终点平面、折射/天空近似及动态对应边界由[重建文档](reconstruction.md)维护。
+每条guide使用独立深度计数及同值预算N，不因照明roulette、零beta或吸收全黑而结束。第N次查询得到非delta或真实escape仍正常完成。首次可用delta接口在已有guide图像中留下候选：保留最少光学变换的首个可用表面；首次运动接口已使后续光学链对应未知，不逐跳用下游接口替换它，正常终点覆盖候选。预算耗尽使用已访问候选作为明确的表面/预算代理，不增加查询、不假称发现了终点。未知运动保留真实深度、法线与albedo，优先相机重投影，再使用有限零，独立标记运动近似。R8低两位仍表示输入失败/待完成，4为显式反射motion，8为物理前景，16/32/64分别为表面/运动/预算近似，128是K1内部候选。SDK正常且输入可用时显示RR；SDK不可用/安全失败或确实非法输入用空间滤波，不直接输出含噪洞。这些内部状态不是SDK validity/responsivity mask，也不保证SDK内部历史隔离；PSR及对应边界由[重建文档](reconstruction.md)维护。
+
+候选复用原有图像，不新增跨查询SurfaceHit/BSDF、GPU容量、dispatch或barrier。不透明像素保持原一次guide发布；纯delta前缀首次候选增加方向能量求值和约36B/有效像素的逻辑图像写入，后续候选只检查状态，实际DRAM流量与寄存器未知。软件降噪在原RR显示pass内使用最多25个输入邻居，以前景、深度、法线、粗糙度和diffuse/specular albedo限制混色；只有软件路径或非法guide消费邻域，正常RR显示不增加这项读取。原生软件路径仍有guide图像与查询成本、没有SDK私有重建资源，不能与显式raw诊断成本混同。正式验收比较候选覆盖率、透明长尾及整帧CPU/GPU；数学/小图像测试不证明帧率提升。
 
 K1/K2/post分别采用128B、80B、112B push接口和各自实际资源视图。K1不接局部灯/阴影模块，K2不接相机/PSR/prefix/aerial/显示状态，post不接场景几何或BSDF。RR的144B相机uniform包含当前/前相机及抖动/历史有效性；post用主depth和非零反射距离构造局部虚拟点，零距离非天空像素复用K1主motion，补全全图specular motion并保留K1显式R guide结果。该复用只增加每个适用内部像素4B的逻辑读取，使用现有图像、描述符与阶段屏障，不增加容量或pass；实际DRAM成本未测量。距离不再作为SDK tag，不需要为普通粗糙像素追加查询。RR在post线性合成及aerial之后调用SDK并显示；raw post直接完成显示。阶段间及跨帧复用使用同队列屏障，相机常量按完成槽复用，尺寸/模式更换和释放依最后使用serial的完成证明，不引入稳态CPU wait或额外提交。
 

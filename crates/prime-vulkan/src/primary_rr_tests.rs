@@ -1130,8 +1130,8 @@ fn gpu_primary_rr_images_are_stable_across_lighting_seeds_and_roulette() {
         }
         let exhausted = fixture.run(camera(), camera(), [0.0; 2], 70, minimum_budget - 1);
         assert!(
-            exhausted.0[6].iter().all(|v| v & 3 != 0),
-            "unresolved delta boundary must be marked"
+            exhausted.0[6].iter().all(|v| v & 3 == 0 && v & 64 != 0),
+            "budget exhaustion retains a complete, explicitly approximate surface"
         );
         for index in [1, 7] {
             assert!(
@@ -1218,12 +1218,12 @@ fn gpu_primary_rr_post_completes_rough_pixel_reflection_motion() {
     }
     let invalid = fixture.run_with_distance(current, previous, [0.0; 2], 91, 1, Some(-1.0));
     assert!(
-        invalid.0[6].iter().all(|status| *status == 10),
-        "invalid distance only invalidates reflection completion"
+        invalid.0[6].iter().all(|status| *status == 40),
+        "invalid distance uses primary motion and marks its approximation"
     );
     assert!(
-        invalid.channel(7).iter().all(|motion| *motion == 0.0),
-        "finite fallback rather than unsupported invalid-MV marker"
+        invalid.channel(7) == invalid.channel(1),
+        "missing reflection distance preserves the actual primary motion"
     );
 }
 
@@ -1231,13 +1231,9 @@ fn gpu_primary_rr_post_completes_rough_pixel_reflection_motion() {
 #[ignore = "windowless production RR mask: symmetric partial completion, TIR, reset and unknown dynamic motion"]
 fn gpu_primary_rr_partial_completion_tir_reset_and_dynamic_contracts() {
     let context = Context::new().unwrap();
-    for (name, scene, expected_status) in [
-        ("transmission_pending_reflection_done", water(0.0), 13u8),
-        (
-            "transmission_done_reflection_pending",
-            slow_reflection(),
-            14u8,
-        ),
+    for (name, scene) in [
+        ("transmission_budget_proxy", water(0.0)),
+        ("reflection_budget_proxy", slow_reflection()),
     ] {
         let fixture = Fixture::new(&context, &scene, [17, 9]);
         let baseline = fixture.run(camera(), camera(), [0.125, -0.25], 0, 2);
@@ -1245,7 +1241,9 @@ fn gpu_primary_rr_partial_completion_tir_reset_and_dynamic_contracts() {
         for seed in 0..32 {
             let actual = fixture.run(camera(), camera(), [0.125, -0.25], seed, 2);
             assert!(
-                actual.0[6].iter().all(|status| *status == expected_status),
+                actual.0[6]
+                    .iter()
+                    .all(|status| status & 3 == 0 && status & 64 != 0),
                 "{name}: {:?}",
                 actual.0[6]
             );
@@ -1263,7 +1261,8 @@ fn gpu_primary_rr_partial_completion_tir_reset_and_dynamic_contracts() {
                     actual
                         .channel(index)
                         .iter()
-                        .all(|motion| motion.is_finite() && motion.abs() <= 2e-5)
+                        .all(|motion| motion.is_finite() && motion.abs() <= 2e-4),
+                    "{name}: static observed-interface camera proxy, channel {index}"
                 );
             }
         }
@@ -1319,8 +1318,7 @@ fn gpu_primary_rr_partial_completion_tir_reset_and_dynamic_contracts() {
         );
     }
 
-    // One actual dynamic instance without previous transforms: unknown correspondence is a
-    // finite placeholder with pending state, never the unsupported -65504 SDK image marker.
+    // Unknown object motion retains the observed surface with a marked camera-motion proxy.
     let scene = realtime_tests::scene(7, vec![]);
     let mut instances = InstanceScene {
         epoch: scene.epoch,
@@ -1365,12 +1363,30 @@ fn gpu_primary_rr_partial_completion_tir_reset_and_dynamic_contracts() {
     let fixture = Fixture::with_instances(&context, &scene, [17, 9], &instances);
     let actual = fixture.run(camera(), camera(), [0.0; 2], 101, 1);
     assert!(
-        actual.0[6].iter().all(|status| *status == 11),
-        "unknown primary motion also prevents reflection proxy completion"
+        actual.0[6].iter().all(|status| *status == 40),
+        "unknown primary motion preserves complete geometry and marks only motion approximation"
+    );
+    assert!(
+        actual
+            .channel(0)
+            .iter()
+            .all(|depth| (*depth - 3.0).abs() < 1e-5)
     );
     for index in [1, 7] {
-        assert!(actual.channel(index).iter().all(|motion| *motion == 0.0));
+        assert!(
+            actual
+                .channel(index)
+                .iter()
+                .all(|motion| motion.abs() <= 2e-4)
+        );
     }
+    // No object correspondence is available, but the observed depth supplies camera parallax.
+    let mut previous = camera();
+    previous.position[0] -= 0.1;
+    let moved_camera = fixture.run(camera(), previous, [0.0; 2], 102, 1);
+    moved_camera.resolved();
+    assert!(moved_camera.0[6].iter().all(|status| *status == 40));
+    moved_camera.planar_motion(camera(), previous, [17, 9], [3.0; 2], [0.0; 2]);
 }
 
 #[test]
@@ -1446,13 +1462,14 @@ fn gpu_primary_rr_rigid_motion_uses_only_accepted_corresponding_poses() {
         0.05,
     ];
     let pending = |snapshot: &Snapshot| {
-        assert!(snapshot.0[6].iter().all(|status| *status == 11));
+        assert!(snapshot.0[6].iter().all(|status| *status == 40));
         for channel in [1, 7] {
             assert!(
                 snapshot
                     .channel(channel)
                     .iter()
-                    .all(|motion| *motion == 0.0)
+                    .all(|motion| motion.abs() <= 2e-4),
+                "camera proxy allows FP32 physical hit/anchor roundoff, channel {channel}"
             );
         }
     };
@@ -1621,13 +1638,14 @@ fn gpu_primary_rr_exact_local_translation_uses_accepted_barycentric_corresponden
     let mut scene = realtime_tests::scene(7, vec![]);
     scene.anchor = anchor;
     let pending = |snapshot: &Snapshot| {
-        assert!(snapshot.0[6].iter().all(|status| *status == 11));
+        assert!(snapshot.0[6].iter().all(|status| *status == 40));
         for channel in [1, 7, 9] {
             assert!(
                 snapshot
                     .channel(channel)
                     .iter()
-                    .all(|motion| *motion == 0.0)
+                    .all(|motion| motion.abs() <= 2e-4),
+                "camera proxy allows FP32 physical hit/anchor roundoff, channel {channel}"
             );
         }
     };

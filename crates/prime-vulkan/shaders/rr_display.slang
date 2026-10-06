@@ -4,6 +4,7 @@ import "display/prime_drt.slang";
 import "math/color.slang";
 import "reconstruct/rr_format.slang";
 import "reconstruct/rr_status.slang";
+import "reconstruct/spatial_denoise.slang";
 import "display/image_space.slang";
 
 #if PRIME_LINEAR_OUTPUT
@@ -14,6 +15,8 @@ import "display/image_space.slang";
 [[vk::binding(10, 0)]] [[vk::image_format("rgba16f")]] readonly RWTexture2D<float4> noisyColor;
 [[vk::binding(11, 0)]] [[vk::image_format("r32f")]] readonly RWTexture2D<float> linearDepth;
 [[vk::binding(13, 0)]] [[vk::image_format("rgba16f")]] readonly RWTexture2D<float4> normalRoughness;
+[[vk::binding(14, 0)]] [[vk::image_format("rgba16f")]] readonly RWTexture2D<float4> diffuseAlbedo;
+[[vk::binding(15, 0)]] [[vk::image_format("rgba16f")]] readonly RWTexture2D<float4> specularAlbedo;
 [[vk::binding(18,
               0)]] [[vk::image_format("rgba16f")]] readonly RWTexture2D<float4> reconstructedColor;
 [[vk::binding(19, 0)]] [[vk::image_format("r8")]] readonly RWTexture2D<float> guideUnresolved;
@@ -41,6 +44,53 @@ float3 noisyUpsample(float2 position) {
     return noisyUpsampleRgba(position).rgb;
 }
 
+float4 spatialDenoise(float2 position) {
+    int2 limit = int2(display.dimensions.xy) - 1;
+    int2 center = clamp(int2(floor(position + 0.5)), int2(0), limit);
+    float depth = linearDepth[center];
+    float4 normal = normalRoughness[center];
+    float3 diffuse = diffuseAlbedo[center].rgb;
+    float3 specular = specularAlbedo[center].rgb;
+    bool foreground = primeRrForeground(guideUnresolved[center]);
+    float4 sum = float4(0.0);
+    float total = 0.0;
+    for (int y = -2; y <= 2; ++y) {
+        for (int x = -2; x <= 2; ++x) {
+            int2 sample = center + int2(x, y);
+            if (any(sample < 0) || any(sample > limit))
+                continue;
+            float4 sampleNormal = normalRoughness[sample];
+            float weight = primeSpatialDenoiseWeight(
+                    float2(sample) - position, depth, linearDepth[sample], normal.xyz,
+                    sampleNormal.xyz, foreground, primeRrForeground(guideUnresolved[sample]));
+            weight *= primeSpatialMaterialWeight(diffuse, diffuseAlbedo[sample].rgb, specular,
+                                                 specularAlbedo[sample].rgb,
+                                                 normal.w - sampleNormal.w);
+            if (!(weight > 0.0))
+                continue;
+            float4 color = noisyColor[sample];
+            sum += float4(primeRrFiniteHalfColor(color.rgb), saturate(color.a)) * weight;
+            total += weight;
+        }
+    }
+    // A malformed guide still receives spatial smoothing in its local foreground class.
+    // Real guide producers normally guarantee a positive self-weight.
+    if (!(total > 0.0)) {
+        for (int y = -1; y <= 1; ++y) {
+            for (int x = -1; x <= 1; ++x) {
+                int2 sample = center + int2(x, y);
+                if (any(sample < 0) || any(sample > limit) ||
+                    primeRrForeground(guideUnresolved[sample]) != foreground)
+                    continue;
+                float4 color = noisyColor[sample];
+                sum += float4(primeRrFiniteHalfColor(color.rgb), saturate(color.a));
+                total += 1.0;
+            }
+        }
+    }
+    return sum / max(total, 1.0e-12);
+}
+
 bool resolvedFootprint(float2 position) {
     int2 limit = int2(display.dimensions.xy) - 1;
     int2 lo = clamp(int2(floor(position)), int2(0), limit);
@@ -60,7 +110,7 @@ bool resolvedFootprint(float2 position) {
                     0.5;
 #if PRIME_LINEAR_OUTPUT
     float4 chosen = display.control.z != 0 && resolvedFootprint(source) ? reconstructedColor[id.xy]
-                                                                        : noisyUpsampleRgba(source);
+                                                                        : spatialDenoise(source);
     outputImage[id.xy] = float4(primeRrFiniteHalfColor(chosen.rgb),
                                 isfinite(chosen.a) ? saturate(chosen.a) : 1.0);
 #else
@@ -82,12 +132,11 @@ bool resolvedFootprint(float2 position) {
         break;
     }
     default: {
-        // A failed SDK evaluation has no valid output. The same-frame noisy input remains usable.
-        // Budget-exhausted/invalid guides never masquerade as a stable reconstructed surface.
-        // This is an engine output fallback; it makes no claim about NGX's private history.
+        // An unavailable SDK or malformed guide uses geometry-aware spatial denoising.
+        // Explicit noisy diagnostics above continue to show the actual sampled input.
         float3 linear = display.control.z != 0 && resolvedFootprint(source)
                                 ? reconstructedColor[id.xy].rgb
-                                : noisyUpsample(source);
+                                : spatialDenoise(source).rgb;
         PrimeDRTParameters parameters = {display.display.x, display.display.y, display.display.z,
                                          display.display.w, display.extra.x};
         value = primeDRT(linear709ToWorking(primeRrFiniteHalfColor(linear)), parameters);

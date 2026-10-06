@@ -48,8 +48,10 @@ impl HdrSurface {
         .collect::<Result<Vec<_>, _>>()?
         .try_into()
         .map_err(|_| "Invalid HDR dummy image count")?;
+        let present = HdrPresent::new(&context)?;
+        context.save_pipeline_cache();
         Ok(Self {
-            present: HdrPresent::new(&context)?,
+            present,
             dummy,
             context,
             initialized: false,

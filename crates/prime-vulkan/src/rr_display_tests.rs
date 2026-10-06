@@ -87,7 +87,7 @@ fn pipeline(context: &Arc<Context>) -> Pipeline {
         restir: None,
     };
     unsafe {
-        let bindings = [4, 10, 11, 13, 18, 19].map(|binding| {
+        let bindings = [4, 10, 11, 13, 18, 19, 14, 15].map(|binding| {
             vk::DescriptorSetLayoutBinding::default()
                 .binding(binding)
                 .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
@@ -120,7 +120,7 @@ fn pipeline(context: &Arc<Context>) -> Pipeline {
                     .max_sets(1)
                     .pool_sizes(&[vk::DescriptorPoolSize {
                         ty: vk::DescriptorType::STORAGE_IMAGE,
-                        descriptor_count: 6,
+                        descriptor_count: 8,
                     }]),
                 None,
             )
@@ -277,6 +277,8 @@ fn gpu_rr_display_fallback_upscale_and_orientation() {
         (INPUT, vk::Format::R16G16B16A16_SFLOAT),
         (OUTPUT, vk::Format::R16G16B16A16_SFLOAT),
         (INPUT, vk::Format::R8_UNORM),
+        (INPUT, vk::Format::R16G16B16A16_SFLOAT),
+        (INPUT, vk::Format::R16G16B16A16_SFLOAT),
     ]
     .into_iter()
     .map(|(extent, format)| Image::with_format(&context, extent[0], extent[1], format).unwrap())
@@ -301,6 +303,8 @@ fn gpu_rr_display_fallback_upscale_and_orientation() {
     upload(&context, &images[3], INPUT, &normals);
     upload(&context, &images[4], OUTPUT, &[0; 5 * 3 * 8]);
     upload(&context, &images[5], INPUT, &[0; 4]);
+    upload(&context, &images[6], INPUT, &normals);
+    upload(&context, &images[7], INPUT, &normals);
     let pipeline = pipeline(&context);
     let infos: Vec<_> = images
         .iter()
@@ -310,7 +314,7 @@ fn gpu_rr_display_fallback_upscale_and_orientation() {
                 .image_layout(vk::ImageLayout::GENERAL)]
         })
         .collect();
-    let writes: Vec<_> = [4, 10, 11, 13, 18, 19]
+    let writes: Vec<_> = [4, 10, 11, 13, 18, 19, 14, 15]
         .into_iter()
         .zip(&infos)
         .map(|(binding, info)| {
@@ -366,7 +370,7 @@ fn gpu_rr_display_fallback_upscale_and_orientation() {
     let unresolved = run(&context, &pipeline, &images[0], [0, 0, 1]);
     assert_eq!(
         unresolved, fallback,
-        "Unresolved guides must display current raw color even after successful RR"
+        "Malformed guides must use spatial denoising even after successful RR"
     );
     upload(&context, &images[5], INPUT, &[255, 0, 0, 0]);
     let mixed = run(&context, &pipeline, &images[0], [0, 0, 1]);
@@ -422,4 +426,41 @@ fn gpu_rr_display_fallback_upscale_and_orientation() {
     );
     assert_eq!(&dlaa[12..16], &dlaa_raw[12..16]);
     assert_ne!(&dlaa_raw[4..8], &dlaa_success[4..8]); // the adjacent consumer is observable
+
+    // Same-surface colors must be averaged rather than displayed directly. The previous
+    // fixture deliberately had depth discontinuities, which the filter must preserve.
+    let flat_depth: Vec<_> = [3.0f32; 4].into_iter().flat_map(f32::to_le_bytes).collect();
+    upload(&context, &images[2], INPUT, &flat_depth);
+    upload(&context, &images[5], INPUT, &[0; 4]);
+    let filtered = run(&context, &pipeline, &images[0], [0, 0, 0]);
+    assert!(
+        filtered[0] > fallback[0],
+        "same-surface neighbours reduce dark noise"
+    );
+    assert!(
+        filtered[56] < fallback[56],
+        "same-surface neighbours reduce bright noise"
+    );
+    // Alpha/visibility classes independently stop spatial bleed at a foreground silhouette.
+    upload(&context, &images[5], INPUT, &[8, 0, 0, 0]);
+    let silhouette = run(&context, &pipeline, &images[0], [0, 0, 0]);
+    assert_eq!(
+        &silhouette[..4],
+        &fallback[..4],
+        "foreground silhouette stays sharp"
+    );
+    upload(&context, &images[5], INPUT, &[0; 4]);
+    let mut material_edge = normals.clone();
+    let red: Vec<_> = [1.0f32, 0.0, 0.0, 0.5]
+        .into_iter()
+        .flat_map(|v| half(v).to_le_bytes())
+        .collect();
+    material_edge[..8].copy_from_slice(&red);
+    upload(&context, &images[6], INPUT, &material_edge);
+    let material = run(&context, &pipeline, &images[0], [0, 0, 0]);
+    assert_eq!(
+        &material[..4],
+        &fallback[..4],
+        "coplanar material edge stays sharp"
+    );
 }

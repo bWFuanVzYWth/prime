@@ -317,11 +317,11 @@ impl Renderer {
     ) -> Result<Self, String> {
         settings.validate()?;
         let cpu_profile = CpuProfile::default();
-        let mut reconstruction_error = None;
+        let reconstruction_error = None;
         let reconstruction = (settings.mode == RenderMode::Realtime
             && !settings.native_noisy_output)
-            .then(|| reconstruction::Reconstruction::new(&context, &mut reconstruction_error))
-            .flatten();
+            .then(|| reconstruction::Reconstruction::new(&context))
+            .transpose()?;
         let energy_lut = openpbr::EnergyLut::new(&context)?;
         let pipeline = Some(Pipeline::new(
             &context,
@@ -533,6 +533,7 @@ impl Renderer {
         if self.frame_generation_active() && self.fg_present.is_none() {
             self.fg_present = Some(hdr::FrameGenerationPresent::new(&self.context)?);
         }
+        self.context.save_pipeline_cache();
         Ok(())
     }
 
@@ -709,10 +710,7 @@ impl Renderer {
                 && !settings.native_noisy_output
             {
                 self.reconstruction_error = None;
-                self.reconstruction = reconstruction::Reconstruction::new(
-                    &self.context,
-                    &mut self.reconstruction_error,
-                );
+                self.reconstruction = Some(reconstruction::Reconstruction::new(&self.context)?);
             }
             self.pipeline = Some(Pipeline::new(
                 &self.context,
@@ -908,7 +906,7 @@ impl Renderer {
             self.atmosphere.as_ref().map_or(0, |a| a.aerial_t_updates),
             !self.settings.native_noisy_output && self.settings.mode == RenderMode::Realtime,
             self.context.streamline_capable,
-            self.reconstruction.as_ref().is_some_and(|rr| !rr.failed()),
+            self.reconstruction.as_ref().is_some_and(|rr| rr.ready()),
             rr_evaluated,
             rr_input[0],
             rr_input[1],
@@ -1188,7 +1186,7 @@ impl Renderer {
         };
         if let Some(rr) = &mut self.reconstruction {
             rr.set_history_reset_policy(self.settings.ignore_global_history_resets);
-            let prepared = rr.prepare(
+            rr.prepare(
                 slot,
                 *camera,
                 scene.anchor,
@@ -1198,31 +1196,7 @@ impl Renderer {
                 self.settings.reconstruction_quality,
                 completed,
                 self.settings.frame_generation,
-            );
-            if let Err(message) = prepared {
-                if !self.context.can_destroy() {
-                    return Err(message);
-                }
-                // No RR dispatch has been recorded in this frame. Prior pipeline/SDK work
-                // must retire before switching to the native-resolution direct pipeline.
-                self.context
-                    .wait_host_serial(*self.host_serials.iter().max().unwrap())?;
-                rr.storage_cold(StorageCold::RrSetupFailed);
-                drop(self.reconstruction.take());
-                drop(self.pipeline.take());
-                self.pipeline = Some(Pipeline::new(
-                    &self.context,
-                    self.settings.integrator,
-                    self.settings.mode,
-                    false,
-                    false,
-                    self.settings.light_sampling,
-                    &self.energy_lut,
-                )?);
-                self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
-                eprintln!("[Prime PT] DLSS RR setup failed; using native raw output: {message}");
-                self.reconstruction_error = Some(message);
-            }
+            )?;
         }
         if self.settings.integrator == Integrator::PathTrace
             && self.settings.mode == RenderMode::Realtime
@@ -1896,8 +1870,11 @@ impl Renderer {
         slot: usize,
         host: vk::ImageView,
         bottom_up: bool,
+        linear_output: bool,
     ) -> Result<(), String> {
-        if !self.needs_linear_display() {
+        // The destination was chosen before RR evaluated. SDK failure can disable FG
+        // during this recording, but the frame must still consume its bound linear image.
+        if !linear_output {
             return Ok(());
         }
         let output = self.output.as_ref().unwrap();
@@ -2285,7 +2262,7 @@ impl Renderer {
             }
             if recorded.is_ok() {
                 self.restir_debug_display(command, 0);
-                recorded = self.record_display(command, 0, view, false);
+                recorded = self.record_display(command, 0, view, false, linear_output);
             }
             let barrier = [vk::ImageMemoryBarrier::default()
                 .image(image)
@@ -2389,26 +2366,6 @@ impl Renderer {
             0
         };
         self.failed = true;
-        if self.reconstruction.as_ref().is_some_and(|rr| rr.failed()) {
-            // SDK failure is a frame-boundary transition, after prior submitted work retires.
-            self.context.wait_host_idle()?;
-            self.reconstruction_error = self
-                .reconstruction
-                .as_ref()
-                .and_then(|rr| rr.last_error().map(str::to_owned));
-            drop(self.reconstruction.take());
-            drop(self.pipeline.take());
-            self.pipeline = Some(Pipeline::new(
-                &self.context,
-                self.settings.integrator,
-                self.settings.mode,
-                false,
-                false,
-                self.settings.light_sampling,
-                &self.energy_lut,
-            )?);
-            self.descriptor_keys = [[0; 7]; FRAME_SLOTS];
-        }
         // A contained FFI panic must still release the recording scope.
         let _scope = HostRecordScope(self.context.clone());
         let result = self.record_host_frame(
@@ -2548,7 +2505,7 @@ impl Renderer {
             self.stage_timestamp(command, slot, GpuStage::Reconstruction, true);
         }
         self.restir_debug_display(command, slot);
-        self.record_display(command, slot, view, true)?;
+        self.record_display(command, slot, view, true, linear_output)?;
         unsafe {
             let after = [vk::MemoryBarrier::default()
                 .src_access_mask(vk::AccessFlags::SHADER_WRITE)

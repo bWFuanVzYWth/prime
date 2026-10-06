@@ -41,7 +41,7 @@ Java `ExclusiveTerrainCapture` 转录宿主事件并响应请求，`SectionSourc
 
 本轮原型接管地形。实体/方块实体、普通 item、Fabric Mesh 与粒子保留各自的源入口和实际姿态回调，使用 typed instance / dynamic 批次；它们不能从 section 状态页还原。纹理源、相机和宿主 Vulkan 特性/句柄继续由对应 Java 版本绑定。
 
-两个安装包包含公共层的同一编译产物和同一 `prime_engine`；`verifyNativeJars` 验证字节和精确版本约束。每版使用独立 `run/` 和存档。协议与宿主集成分别见 [ABI](abi.md) 和 [架构](architecture.md)。
+两个安装包包含公共层的同一编译产物和同一 `prime_engine`；`verifyNativeJars` 验证字节、Minecraft 精确适配边界与 Fabric 最低兼容版本。每版使用独立 `run/` 和存档。协议与宿主集成分别见 [ABI](abi.md) 和 [架构](architecture.md)。
 
 星图资产、设备端曝光、线性显示及 HDR/FG 输出由 `prime_vulkan` 的独立资源 owner 持有。Java 公共层保存设置和显示标定值，版本绑定负责 GLFW/SDL 的实际显示器身份及 surface/Present 事件；菜单 HDR fallback 使用小型 `HdrSurface`，无需构造场景或上传 PT 固定资产。Streamline bridge 接管 SDK 及其公开的输入消费者完成协议，不把宿主提交完成等同于 FG 完成。具体数学与所有权见[显示](display.md)和[重建](reconstruction.md)。
 

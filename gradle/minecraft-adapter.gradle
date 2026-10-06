@@ -6,6 +6,7 @@ def hostLibraryName = System.getProperty('os.name').toLowerCase(Locale.ROOT).sta
 base { archivesName = "prime-pt-mc-${minecraftVersion}" }
 dependencies {
     minecraft "com.mojang:minecraft:${minecraftVersion}"
+    // Compile reproducibly; packaged Fabric dependencies accept compatible newer releases.
     implementation "net.fabricmc:fabric-loader:${rootProject.loader_version}"
     implementation "net.fabricmc.fabric-api:fabric-api:${fabricApiVersion}"
     implementation project(':common')
@@ -27,6 +28,7 @@ def common = project(':common')
 // own Minecraft/Fabric classpath; version-specific bindings stay in the adapter.
 sourceSets.main.java.srcDir(rootProject.file('adapters/minecraft-shared/src/main/java'))
 sourceSets.test.java.srcDir(rootProject.file('adapters/minecraft-shared/src/testFixtures/java'))
+sourceSets.test.java.srcDir(rootProject.file('adapters/minecraft-shared/src/test/java'))
 sourceSets.test.compileClasspath += common.sourceSets.test.output
 sourceSets.test.runtimeClasspath += common.sourceSets.test.output
 tasks.named('compileTestJava') { dependsOn common.tasks.named('testClasses') }
@@ -36,6 +38,13 @@ sourceSets.main.resources.srcDirs(common.sourceSets.main.resources.srcDirs)
 tasks.named('jar') {
     dependsOn common.tasks.named('classes')
     from common.sourceSets.main.output.classesDirs
+}
+tasks.named('test') {
+    dependsOn tasks.named('jar')
+    systemProperty 'primept.test.adapterJar', tasks.named('jar').get().archiveFile.get().asFile.absolutePath
+    systemProperty 'primept.test.minecraftVersion', minecraftVersion
+    systemProperty 'primept.test.fabricApiVersion', fabricApiVersion
+    systemProperty 'primept.test.loaderVersion', rootProject.loader_version
 }
 // Common resources already enter the adapter's own allSource through the resource roots above.
 tasks.named('sourcesJar') { from common.sourceSets.main.allJava }

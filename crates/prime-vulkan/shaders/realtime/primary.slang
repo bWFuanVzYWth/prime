@@ -198,6 +198,8 @@ PrimePrimaryGuideSeed primePrimaryLighting<Guides, Environment>(
         PrimePrimaryGuideSeed nextGuide = primePrimaryEmptySeed();
         bool guideCanContinue = false;
         if (!guideDetached && !guideDone) {
+            guides.candidate(parameters, pixel, sampleUv, surface, material, direction, incident,
+                             transmitted, hit.previousPosition, hit.previousPositionKnown, psr);
             if (!continuation) {
                 guides.unresolved(pixel, psr.flags);
                 guideDone = true;
@@ -352,6 +354,8 @@ void primePrimaryGuideWalk<Guides>(TraceScene resources, PrimaryParameters param
                            transmitted, hit.previousPosition, hit.previousPositionKnown, seed.psr);
             return;
         }
+        guides.candidate(parameters, pixel, sampleUv, surface, material, seed.direction, incident,
+                         transmitted, hit.previousPosition, hit.previousPositionKnown, seed.psr);
         if (!primePathHasContinuation(bounce, parameters.config.y))
             break;
         PrimePbrGuideDirection next = primePbrDeltaGuideDirection(
@@ -421,6 +425,8 @@ public bool primeTraceGuidesFromPrimary<Guides>(TraceScene resources, PrimaryPar
                        transmitted, hit.previousPosition, hit.previousPositionKnown, psr);
         return true;
     }
+    guides.candidate(parameters, pixel, sampleUv, surface, material, direction, incident,
+                     transmitted, hit.previousPosition, hit.previousPositionKnown, psr);
     if (!primePathHasContinuation(0u, parameters.config.y)) {
         guides.unresolved(pixel, psr.flags);
         return false;

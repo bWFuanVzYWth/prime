@@ -44,6 +44,10 @@ struct Previous {
 pub(super) struct Reconstruction {
     context: Arc<Context>,
     runtime: Option<streamline::Runtime>,
+    // K1's FG guide writes are specialized when its pipeline is created. Keep their
+    // separate images valid even if an SDK failure later disables actual FG.
+    visible_guides_capable: bool,
+    failed_frame_generation_pending: bool,
     images: Option<Images>,
     constants: [Buffer; FRAME_SLOTS],
     previous: Option<Previous>,
@@ -54,58 +58,67 @@ pub(super) struct Reconstruction {
     descriptor_dirty: [bool; FRAME_SLOTS],
     epoch: Option<u64>,
     ignore_global_history_resets: bool,
+    sdk_evaluation_succeeded: bool,
+    pending_sdk_evaluation: bool,
 }
 
 impl Reconstruction {
-    pub fn new(context: &Arc<Context>, failure: &mut Option<String>) -> Option<Self> {
-        *failure = None;
-        if !context.streamline_capable {
-            *failure =
-                Some("DLSS RR device capability unavailable; using native raw output".into());
-            return None;
-        }
-        let create = || -> Result<Self, String> {
-            if !context.supports_storage_sampling(vk::Format::R8_UNORM) {
-                return Err(
-                    "DLSS RR guide completion mask requires sampled/storage R8_UNORM images".into(),
-                );
+    pub fn new(context: &Arc<Context>) -> Result<Self, String> {
+        for format in FORMATS.into_iter().chain([vk::Format::R8_UNORM]) {
+            if !context.supports_storage_sampling(format) {
+                return Err(format!(
+                    "Denoising requires sampled/storage {format:?} images"
+                ));
             }
-            let runtime = streamline::Runtime::new(context)?;
-            let constants = (0..FRAME_SLOTS)
-                .map(|_| Buffer::new(context, 144, vk::BufferUsageFlags::UNIFORM_BUFFER, true))
-                .collect::<Result<Vec<_>, _>>()?
-                .try_into()
-                .map_err(|_| "Invalid RR constants count")?;
-            Ok(Self {
-                context: context.clone(),
-                runtime: Some(runtime),
-                images: None,
-                constants,
-                previous: None,
-                current: None,
-                pending: None,
-                last_serial: 0,
-                error: None,
-                descriptor_dirty: [true; FRAME_SLOTS],
-                epoch: None,
-                ignore_global_history_resets: false,
-            })
+        }
+        let initialized = if context.streamline_capable {
+            streamline::Runtime::new(context)
+        } else {
+            Err("DLSS RR device capability unavailable".into())
         };
-        match create() {
-            Ok(result) => {
+        let (runtime, error) = match initialized {
+            Ok(runtime) => {
                 eprintln!("[Prime PT] Streamline DLSS Ray Reconstruction available; preset F");
-                Some(result)
+                (Some(runtime), None)
             }
             Err(message) => {
-                eprintln!("[Prime PT] DLSS RR unavailable; using raw output: {message}");
-                *failure = Some(message);
-                None
+                eprintln!("[Prime PT] DLSS RR unavailable; using spatial denoising: {message}");
+                (None, Some(message))
             }
-        }
+        };
+        let visible_guides_capable = runtime
+            .as_ref()
+            .is_some_and(|runtime| runtime.frame_generation_supported());
+        let constants = (0..FRAME_SLOTS)
+            .map(|_| Buffer::new(context, 144, vk::BufferUsageFlags::UNIFORM_BUFFER, true))
+            .collect::<Result<Vec<_>, _>>()?
+            .try_into()
+            .map_err(|_| "Invalid RR constants count")?;
+        Ok(Self {
+            context: context.clone(),
+            runtime,
+            visible_guides_capable,
+            failed_frame_generation_pending: false,
+            images: None,
+            constants,
+            previous: None,
+            current: None,
+            pending: None,
+            last_serial: 0,
+            error,
+            descriptor_dirty: [true; FRAME_SLOTS],
+            epoch: None,
+            ignore_global_history_resets: false,
+            sdk_evaluation_succeeded: false,
+            pending_sdk_evaluation: false,
+        })
     }
 
     pub fn failed(&self) -> bool {
         self.error.is_some()
+    }
+    pub fn ready(&self) -> bool {
+        self.runtime.is_some() && !self.failed()
     }
     pub fn last_error(&self) -> Option<&str> {
         self.error.as_deref()
@@ -114,7 +127,7 @@ impl Reconstruction {
         self.images
             .as_ref()
             .map_or((false, [0; 2], [0; 2]), |images| {
-                (self.previous.is_some(), images.input, images.output)
+                (self.sdk_evaluation_succeeded, images.input, images.output)
             })
     }
     pub fn set_history_reset_policy(&mut self, ignore: bool) {
@@ -130,12 +143,16 @@ impl Reconstruction {
         if !self.ignore_global_history_resets {
             self.previous = None;
             self.pending = None;
+            self.sdk_evaluation_succeeded = false;
+            self.pending_sdk_evaluation = false;
         }
     }
     pub fn storage_cold(&mut self, reason: StorageCold) {
         temporal_reset::record_storage(Backend::Rr, reason, self.previous.is_some());
         self.previous = None;
         self.pending = None;
+        self.sdk_evaluation_succeeded = false;
+        self.pending_sdk_evaluation = false;
     }
     pub fn invalidate_descriptors(&mut self) {
         self.descriptor_dirty.fill(true);
@@ -143,6 +160,8 @@ impl Reconstruction {
     /// The host proves actual ordered submission, independently of CPU recording.
     pub fn commit(&mut self) {
         self.previous = self.pending.take();
+        self.sdk_evaluation_succeeded = self.pending_sdk_evaluation;
+        self.pending_sdk_evaluation = false;
     }
     pub fn input_extent(&self) -> [u32; 2] {
         self.images.as_ref().unwrap().input
@@ -173,6 +192,8 @@ impl Reconstruction {
             self.context
                 .uncertain_submission
                 .store(true, std::sync::atomic::Ordering::Relaxed);
+        } else {
+            self.failed_frame_generation_pending = false;
         }
         result
     }
@@ -226,17 +247,21 @@ impl Reconstruction {
         completed: u64,
         frame_generation: bool,
     ) -> Result<(), String> {
+        if self.failed_frame_generation_pending {
+            // A prior accepted frame may still have independent Present consumers.
+            // Prove their completion before output preparation removes FG-only images.
+            self.suspend_frame_generation()?;
+            self.failed_frame_generation_pending = false;
+        }
         if self.epoch != Some(epoch) {
             if self.epoch.is_some() {
                 self.reset(GlobalReset::WorldEpochChanged);
             }
             self.epoch = Some(epoch);
         }
-        if self
-            .images
-            .as_ref()
-            .is_none_or(|images| images.output != output || images.quality != quality)
-        {
+        if self.images.as_ref().is_none_or(|images| {
+            images.output != output || self.ready() && images.quality != quality
+        }) {
             let replacing_images = self.images.is_some();
             // FG's consumer is independent of the host-world timeline.
             self.suspend_frame_generation()?;
@@ -244,7 +269,24 @@ impl Reconstruction {
             if self.last_serial > completed {
                 self.context.wait_host_serial(self.last_serial)?;
             }
-            let input = self.runtime.as_mut().unwrap().configure(output, quality)?;
+            let input = if self.ready() {
+                match self.runtime.as_mut().unwrap().configure(output, quality) {
+                    Ok(input) => input,
+                    Err(message) => {
+                        // Retain the SDK owner until its last consumer is proven complete.
+                        // A failed model is not retried on every frame or quality change.
+                        eprintln!(
+                            "[Prime PT] DLSS RR setup failed; using spatial denoising: {message}"
+                        );
+                        self.error = Some(message);
+                        self.reset(GlobalReset::RrFeatureReconfigured);
+                        self.storage_cold(StorageCold::RrSetupFailed);
+                        output
+                    }
+                }
+            } else {
+                output
+            };
             self.context.render_extent(input[0], input[1])?;
             let images = FORMATS
                 .into_iter()
@@ -275,11 +317,20 @@ impl Reconstruction {
             }
             self.storage_cold(StorageCold::RrFeatureReconfigured);
             eprintln!(
-                "[Prime PT] DLSS RR preset F {:?}: {}x{} -> {}x{}",
-                quality, input[0], input[1], output[0], output[1]
+                "[Prime PT] {} {:?}: {}x{} -> {}x{}",
+                if self.ready() {
+                    "DLSS RR preset F"
+                } else {
+                    "Spatial denoising"
+                },
+                quality,
+                input[0],
+                input[1],
+                output[0],
+                output[1]
             );
         }
-        let frame_generation = frame_generation && self.frame_generation_supported();
+        let frame_generation = frame_generation && self.visible_guides_capable;
         if self.images.as_ref().unwrap().visible.is_some() != frame_generation {
             self.suspend_frame_generation()?;
             if self.last_serial > completed {
@@ -326,14 +377,9 @@ impl Reconstruction {
             jitter,
             valid,
         ))?;
-        self.current = Some(streamline::Frame::new(
-            camera,
-            previous_camera,
-            aspect,
-            jitter,
-            !valid,
-            sequence,
-        ));
+        self.current = self.ready().then(|| {
+            streamline::Frame::new(camera, previous_camera, aspect, jitter, !valid, sequence)
+        });
         self.pending = Some(Previous { camera, anchor });
         Ok(())
     }
@@ -438,13 +484,15 @@ impl Reconstruction {
         bottom_up: bool,
         linear_output: bool,
     ) -> Result<(), String> {
+        // All images remain in use by the software path as well as by the SDK.
+        self.last_serial = serial;
+        self.pending_sdk_evaluation = false;
         self.barrier(command, true);
         let images = self.images.as_ref().unwrap();
         let mut success = false;
         // Keep the model and accepted camera history advancing together while guides
         // are displayed. A diagnostic view only changes the final display selection.
-        if !self.failed() {
-            self.last_serial = serial;
+        if self.ready() {
             let result = self.runtime.as_mut().unwrap().evaluate(
                 command,
                 self.current.as_ref().unwrap(),
@@ -456,25 +504,23 @@ impl Reconstruction {
             match result {
                 Ok(()) => {
                     success = true;
+                    self.pending_sdk_evaluation = true;
                     // Promotion occurs only at the actual host submission acceptance hook.
                 }
                 Err(failure) => {
                     self.error = Some(failure.message.clone());
+                    self.failed_frame_generation_pending = self.visible_guides_capable;
                     self.reset(GlobalReset::RrEvaluationFailed);
                     self.storage_cold(StorageCold::RrEvaluationFailed);
                     if failure.unsafe_recording {
                         return Err(failure.message);
                     }
                     eprintln!(
-                        "[Prime PT] DLSS RR evaluation failed; raw output restored: {}",
+                        "[Prime PT] DLSS RR evaluation failed; using spatial denoising: {}",
                         failure.message
                     );
                 }
             }
-        } else {
-            // A permanently failed model did not consume this camera. Raw fallback
-            // must not promote it as accepted SDK history.
-            self.pending = None;
         }
         self.barrier(command, false);
         let images = self.images.as_ref().unwrap();
@@ -556,5 +602,98 @@ impl Drop for Reconstruction {
                 std::mem::forget(runtime);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "requires Vulkan; windowless software denoising resource/history contract"]
+    fn gpu_software_denoising_retains_native_images_and_truthful_sdk_status() {
+        let context = Context::new().unwrap();
+        assert!(!context.streamline_capable);
+        let mut denoiser = Reconstruction::new(&context).unwrap();
+        assert!(!denoiser.ready());
+        assert!(!denoiser.frame_generation_supported());
+        assert!(denoiser.last_error().is_some());
+        let camera = crate::frame::tests::camera();
+        let extent = [19, 13];
+        denoiser
+            .prepare(
+                0,
+                camera,
+                [0.0; 3],
+                1,
+                extent,
+                0,
+                ReconstructionQuality::Performance,
+                u64::MAX,
+                false,
+            )
+            .unwrap();
+        assert_eq!(denoiser.diagnostics(), (false, extent, extent));
+        assert!(
+            denoiser.current.is_none(),
+            "No unused SDK frame in software mode"
+        );
+        let images = denoiser
+            .images
+            .as_ref()
+            .unwrap()
+            .images
+            .each_ref()
+            .map(|image| image.view);
+        // A real ordered queue submission precedes the same acceptance hook used by the host.
+        context
+            .submit_named("software_camera_acceptance", |_| {})
+            .unwrap();
+        denoiser.commit();
+        assert!(denoiser.previous.is_some());
+        assert_eq!(denoiser.diagnostics(), (false, extent, extent));
+        let moved = Camera {
+            position: [
+                camera.position[0] + 1.0,
+                camera.position[1],
+                camera.position[2],
+            ],
+            ..camera
+        };
+        denoiser
+            .prepare(
+                1,
+                moved,
+                [0.0; 3],
+                1,
+                extent,
+                1,
+                ReconstructionQuality::Quality,
+                u64::MAX,
+                false,
+            )
+            .unwrap();
+        assert_eq!(
+            denoiser
+                .images
+                .as_ref()
+                .unwrap()
+                .images
+                .each_ref()
+                .map(|image| image.view),
+            images,
+            "An unavailable SDK quality change must not reallocate native software images"
+        );
+        let constants = denoiser.constants[1].read(144).unwrap();
+        assert_eq!(
+            f32::from_le_bytes(constants[72..76].try_into().unwrap()),
+            1.0
+        );
+        assert_eq!(
+            f32::from_le_bytes(constants[..4].try_into().unwrap()),
+            camera.position[0],
+            "Software guides use the last accepted camera, independently of SDK success"
+        );
+        assert_eq!(denoiser.diagnostics(), (false, extent, extent));
     }
 }

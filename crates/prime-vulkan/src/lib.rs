@@ -40,6 +40,7 @@ mod pbr_delta_tests;
 mod pbr_tests;
 #[cfg(all(test, feature = "shader-tests"))]
 mod pbr_texture_tests;
+mod pipeline_cache;
 mod plan;
 #[cfg(all(test, feature = "shader-tests"))]
 mod primary_rr_tests;
@@ -431,13 +432,10 @@ impl Pipeline {
                     .module(shader.handle)
                     .name(c"main")
                     .specialization_info(&specialization);
-                let created = context.device.create_compute_pipelines(
-                    vk::PipelineCache::null(),
-                    &[vk::ComputePipelineCreateInfo::default()
+                let created =
+                    context.create_compute_pipelines(&[vk::ComputePipelineCreateInfo::default()
                         .stage(stage)
-                        .layout(result.layout)],
-                    None,
-                );
+                        .layout(result.layout)]);
                 Ok(match created {
                     Ok(pipelines) => pipelines[0],
                     Err((partial, e)) => {

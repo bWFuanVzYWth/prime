@@ -127,7 +127,8 @@ tasks.register('verifyNativeJars') {
                     new groovy.json.JsonSlurper().parse(it)
                 }
                 if (metadata.depends.minecraft != "=${adapter.minecraftVersion}") throw new GradleException("Wrong Minecraft constraint in ${archive}")
-                if (metadata.depends.'fabric-api' != "=${adapter.fabricApiVersion}") throw new GradleException("Wrong Fabric API constraint in ${archive}")
+                if (metadata.depends.'fabric-api' != ">=${adapter.fabricApiVersion}") throw new GradleException("Wrong Fabric API minimum in ${archive}")
+                if (metadata.depends.fabricloader != '>=0.19.0') throw new GradleException("Wrong Fabric Loader minimum in ${archive}")
                 logger.lifecycle("Verified ${archive.name}: Minecraft ${adapter.minecraftVersion}, common FFM classes, ${nativeBytes.length}-byte shared engine")
             }
         }

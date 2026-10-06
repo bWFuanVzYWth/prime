@@ -160,7 +160,7 @@ final class SettingsTest {
         assertEquals(3, PrimeSettings.reconstruction_quality(view(bytes)));
         assertEquals(1, PrimeSettings.terrain_batches_per_frame(view(bytes)));
         assertEquals(1f, PrimeSettings.stars(view(bytes)));
-        assertEquals(.6f, PrimeSettings.auto_exposure_compensation(view(bytes)));
+        assertEquals(.75f, PrimeSettings.auto_exposure_compensation(view(bytes)));
         assertEquals(0, PrimeSettings.hdr(view(bytes)));
         assertEquals(0, PrimeSettings.hdr_reference_white(view(bytes)));
         assertEquals(0, PrimeSettings.frame_generation(view(bytes)));
@@ -226,7 +226,7 @@ final class SettingsTest {
                 RenderSettings.Control.HDR, RenderSettings.Control.HDR_WHITE,
                 RenderSettings.Control.FRAME_GENERATION};
         int[] offsets = {76, 80, 84, 88, 92};
-        int[] expectedDefaults = {100, 60, 0, 0, 0};
+        int[] expectedDefaults = {100, 75, 0, 0, 0};
         var before = settingsBuffer();
         var after = settingsBuffer();
         for (int i = 0; i < controls.length; i++) {
@@ -236,7 +236,10 @@ final class SettingsTest {
                          () -> defaults.with(control, control.minimum - 1));
             assertThrows(IllegalArgumentException.class,
                          () -> defaults.with(control, control.maximum + 1));
-            for (int value : new int[] {control.minimum, control.maximum, control.initial}) {
+            int[] values = control == RenderSettings.Control.AUTO_EXPOSURE
+                                   ? new int[] {0, 60, 75, 100}
+                                   : new int[] {control.minimum, control.maximum, control.initial};
+            for (int value : values) {
                 var changed = defaults.with(control, value);
                 assertEquals(changed, SettingsFile.decode(SettingsFile.encode(changed)).settings());
                 for (boolean offline : new boolean[] {false, true}) {

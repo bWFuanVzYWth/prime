@@ -8,5 +8,5 @@
   "environment": "client",
   "entrypoints": { "client": ["dev.primept.PrimeClient"] },
   "mixins": ["primept.mixins.json"],
-  "depends": { "fabricloader": ">=0.19.0", "fabric-api": "=${fabricApiVersion}", "minecraft": "=${minecraftVersion}", "java": ">=25" }
+  "depends": { "fabricloader": ">=0.19.0", "fabric-api": ">=${fabricApiVersion}", "minecraft": "=${minecraftVersion}", "java": ">=25" }
 }

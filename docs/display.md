@@ -4,7 +4,7 @@
 
 ## 顺序与数据身份
 
-实时 raw post 生成线性 working 辐射亮度；RR selector 在输出分辨率选择本帧有效重建或 noisy fallback，保留线性 BT.709 和前景 coverage。需要自动曝光、HDR、有效帧生成或 RR 星图后合成时，结果进入 FP32 中间图，然后依次执行星图、曝光统计和最终显示。这些功能都不需要时保留原直接 SDR 显示入口。诊断视图使用原有直接预览，不把深度或法线当作辐射亮度。
+实时 raw post 生成线性 working 辐射亮度；降噪 selector 在输出分辨率选择本帧有效RR或空间滤波，保留线性 BT.709 和前景 coverage。需要自动曝光、HDR、有效帧生成或 RR 星图后合成时，结果进入 FP32 中间图，然后依次执行星图、曝光统计和最终显示。本帧是否走线性中间图在选择输出绑定时固定，SDK安全失败关闭FG不能让后续显示跳过已经写入的线性结果。这些功能都不需要时保留原直接 SDR 显示入口。诊断视图使用原有直接预览，不把深度或法线当作辐射亮度。
 
 Offline 的 FP32 在线均值留在原累积 buffer；曝光和显示直接借用其 BDA，不复制成全帧图像。显示读取本帧更新后的均值，手动曝光、色相、饱和度和 HDR 标定变化不清空累积。BDA 的有效性由 Rust 资源所有者证明，shader 用显式 u32 控制位选择 image/buffer 和曝光状态，不重新比较空指针，也不增加 `shaderInt64` 能力要求。
 
@@ -30,7 +30,7 @@ RR 后合成在 native 输出分辨率使用未 jitter 的相机方向。普通�
 
 算法沿用旧 Prime 的 256-bin histogram：亮度使用 working 系数 `(0.2627, 0.6780, 0.0593)`；log2 范围为 `[-16,20]`，有限零/负亮度按下限计入，非有限 RGB 不计入。每个 16×16 workgroup 分担 64×64 图像 tile，在共享内存计数后只把非空 bin 合并到全局 histogram。单线程更新按 `count/200` 从两尾各剔除 0.5%，使用剩余 bin 中心的平均 log 亮度及最小/最大值。
 
-完整目标 EV 为 `clamp(log2(0.16) − meanLog + sceneKeyBias, −16,16)`，其中 bias 保留旧场景亮度分布规则。`auto_exposure_compensation` 是从 EV 0 到完整目标的强度，范围 `[0,1]`、默认 0.6；0 关闭统计并让显示使用单位自动曝光。它不是额外 EV 偏置或开启开关。手动曝光仍是独立调整。
+完整目标 EV 为 `clamp(log2(0.16) − meanLog + sceneKeyBias, −16,16)`，其中 bias 保留旧场景亮度分布规则。`auto_exposure_compensation` 是从 EV 0 到完整目标的强度，范围 `[0,1]`、默认 0.75；0 关闭统计并让显示使用单位自动曝光。它不是额外 EV 偏置或开启开关。手动曝光仍是独立调整。
 
 当前 raw、RR 与 Offline 的生产 meter 都使用旧 `confidence=0` 分支，仅统计输出辐射亮度。未读取材质分类或 albedo，也不声称已经移植旧 diffuse/foliage 的反照率校正。对应数学 helper 保留用于独立验证和以后显式接入真实数据，不增加 guide LUT 或逐像素宿主求值。
 

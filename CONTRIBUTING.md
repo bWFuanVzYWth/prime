@@ -48,6 +48,8 @@ Windows 构建的 Streamline C++ 静态桥接需要 MSVC C++ 工具链；Streaml
 
 缓存自身的 CPU 单元测试为 `cargo test -p prime_shader_build --locked`；实际 Slang 缓存/失效/并发行为测试需显式执行 `cargo test -p prime_shader_build --locked -- --ignored --test-threads=1`，只编译小型夹具，不启动 GPU 或窗口。
 
+运行时 Vulkan 管线编译产物另由设备 cache 保存，默认位于 Windows `%LOCALAPPDATA%/PrimePT/pipeline-cache/v1`，不与构建阶段的 Slang 缓存混用。`PRIME_PIPELINE_CACHE` 可指定目录，`0` 可禁用；设备/驱动变更与损坏数据自动冷启动。其无窗口 CPU 行为验证为 `cargo test -p prime_vulkan --lib pipeline_cache --locked`，生命周期、校验和对照边界见[驱动管线缓存](docs/pipeline.md#驱动管线缓存)。
+
 ## 构建与发行包
 
 ```powershell
@@ -58,7 +60,7 @@ Windows 构建的 Streamline C++ 静态桥接需要 MSVC C++ 工具链；Streaml
 .\gradlew.bat verifyNativeJars
 ```
 
-`verifyNativeJars` 自动调用 `buildNative`，再分别构建两版 `nativeJar`。检查内嵌引擎、runtime DLL、公共桥接 class 和许可文件的字节，以及 Minecraft 和 Fabric API 精确版本约束。普通 `build` 不会生成可直接分发的 native JAR。
+`verifyNativeJars` 自动调用 `buildNative`，再分别构建两版 `nativeJar`。检查内嵌引擎、runtime DLL、公共桥接 class 和许可文件的字节，以及 Minecraft 精确适配边界、Fabric API/Loader 最低兼容版本。普通 `build` 不会生成可直接分发的 native JAR。
 
 产物位置：
 
@@ -211,7 +213,7 @@ cargo test -p prime_vulkan --features shader-tests --lib --locked gpu_rr_display
 
 `test-streamline-gpu.ps1` 在独立 Vulkan 1.2 设备上调用生产桥接和真实 SDK，不创建窗口；启用 validation 和同步验证，默认验证回调与 Minecraft 一样对 ERROR 返回 `VK_TRUE`。初始化检查不执行模型；完整检查执行 Performance / preset F 的 960×540 → 1920×1080 重建、等待完成并读回预填 NaN 的输出，检查 RGB 是否全部被有限非零值覆盖。两种检查均要求零 validation error，日志、SDK 锁定哈希和运行结果保存在独立 `artifacts/streamline-gpu/` 目录；API 返回成功或有效读回不能覆盖验证层失败。此合成输入测试不能替代实际游戏画质、呈现和性能验收。
 
-两版各用前文 `runClient` 命令手动验收：默认开启 RR、Performance（960×540 → 1920×1080），日志应出现 `DLSS RR preset F` 和实际输入/输出尺寸；依次切换五档、开关 RR、诊断/最终视图、实时/离线、原版/PT。覆盖相机平移/旋转、快速转头、遮挡显露、运动实体/粒子、细叶、水/玻璃、F3+T、退出/重进、窗口奇数尺寸/最小化/全屏。查 `sl`/`NGX` 错误与 Vulkan VUID，尤其观察动态无完整前态、厚折射代理与 guide 预算耗尽的画质边界。关闭 RR/不可用时应回到原生 raw；正常失败当帧也应覆盖整个输出。
+两版各用前文 `runClient` 命令手动验收：默认开启 RR、Performance（960×540 → 1920×1080），日志应出现 `DLSS RR preset F` 和实际输入/输出尺寸；依次切换五档、开关 RR、诊断/最终视图、实时/离线、原版/PT。覆盖相机平移/旋转、快速转头、遮挡显露、运动实体/粒子、细叶、水/玻璃、F3+T、退出/重进、窗口奇数尺寸/最小化/全屏。查 `sl`/`NGX` 错误与 Vulkan VUID，尤其观察动态无完整前态、厚折射代理与 guide 预算耗尽的画质边界。显式开启原生含噪诊断时仍显示 raw；SDK不可用/安全失败使用空间降噪，预算不足保留标记近似的已访问表面，不出现局部直接含噪洞。软件降噪只保证单帧空间平滑，不等价RR时域质量。命令状态不安全时仍遵守失败/退休契约。
 
 性能基准仍固定原生1920×1080：使用DLAA或关闭RR，固定场景、seed和射线预算记录CPU/GPU、稳态/更新与离群值；Performance等降低内部尺寸的结果另列，不称为原生1080p性能。重建同步/资源合同见[重建文档](docs/reconstruction.md)。
 

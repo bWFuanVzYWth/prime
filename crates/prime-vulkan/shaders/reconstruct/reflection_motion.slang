@@ -22,6 +22,11 @@ public void primeCompleteReflectionMotion(RrCamera camera, uint2 pixel, uint2 ex
                                                : float2(0.0),
                                        extent, motion);
     reflectionMotion[pixel] = valid ? motion : float2(0.0);
-    if (!valid)
-        statusImage[pixel] = float(status | PRIME_RR_REFLECTION_PENDING) / 255.0;
+    if (!valid) {
+        // Missing sampled distance or a failed virtual projection cannot invalidate the main
+        // surface. Its motion is a deterministic dense proxy for this reflection component.
+        reflectionMotion[pixel] = primaryMotion[pixel];
+        statusImage[pixel] =
+                float((status & ~PRIME_RR_REFLECTION_PENDING) | PRIME_RR_MOTION_PROXY) / 255.0;
+    }
 }

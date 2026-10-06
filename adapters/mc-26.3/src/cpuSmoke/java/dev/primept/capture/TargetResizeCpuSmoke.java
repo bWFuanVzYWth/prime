@@ -99,6 +99,17 @@ final class TargetResizeCpuSmoke {
             created.invoke(null, logical, extensions, features);
             check(!VulkanBootstrap.streamlineEnabled(backend),
                   "Physical support alone cannot enable Streamline");
+            check(VulkanBootstrap.isEnabled(backend),
+                  "Core denoising remains enabled without Streamline extensions");
+            Object denoisingFormats =
+                    field(VulkanBootstrap.class, "DENOISING_STORAGE_FORMATS").get(null);
+            features.remove(denoisingFormats);
+            status.set(null,
+                       statusConstructor.newInstance(101L, 0L, true, false, false, "pending"));
+            created.invoke(null, logical, extensions, features);
+            check(!VulkanBootstrap.isEnabled(backend),
+                  "Physical storage-format support alone cannot enable the denoising pipeline");
+            features.add(denoisingFormats);
             var streamlineExtensions =
                     (java.util.List<?>)field(VulkanBootstrap.class, "STREAMLINE_EXTENSIONS")
                             .get(null);
@@ -114,6 +125,14 @@ final class TargetResizeCpuSmoke {
             try (var stack = org.lwjgl.system.MemoryStack.stackPush()) {
                 var queryFeatures =
                         org.lwjgl.vulkan.VkPhysicalDeviceFeatures2.calloc(stack).sType$Default();
+                for (Object feature :
+                     (java.util.List<?>)field(VulkanBootstrap.class, "FEATURES").get(null))
+                    ((com.mojang.renderpearl.backend.vulkan.init.VulkanFeature)feature)
+                            .set(queryFeatures, true, stack);
+                check(queryFeatures.features().shaderStorageImageExtendedFormats(),
+                      "Core software denoising enables the actual storage-format feature");
+                check(!queryFeatures.features().shaderStorageImageWriteWithoutFormat(),
+                      "Core software denoising does not request Streamline-only formatless writes");
                 var sharedSynchronization =
                         (com.mojang.renderpearl.backend.vulkan.init.VulkanFeature)field(
                                 VulkanBootstrap.class, "SYNCHRONIZATION_2_FEATURE")
@@ -127,7 +146,7 @@ final class TargetResizeCpuSmoke {
                     nativeFeature.set(queryFeatures, true, stack);
                 }
                 check(queryFeatures.features().shaderStorageImageExtendedFormats(),
-                      "RR storage-image feature must set the actual core feature member");
+                      "RR retains the enabled core denoising storage-format feature");
                 check(queryFeatures.features().shaderStorageImageWriteWithoutFormat(),
                       "Streamline clear kernel requires the actual formatless storage-write feature");
                 check(!queryFeatures.features().shaderStorageImageReadWithoutFormat(),

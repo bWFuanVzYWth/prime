@@ -8,7 +8,7 @@
   "primept.settings.lighting.stars_percent": "星光强度",
   "primept.settings.lighting.stars_percent.tooltip": "NASA 深空星图的辐射亮度：0 关闭，100% 保留默认。随纬度和季节变化，独立于天空强度；冻结期间固定。",
   "primept.settings.display.auto_exposure_percent": "自动曝光",
-  "primept.settings.display.auto_exposure_percent.tooltip": "自动曝光补偿强度：0 关闭，默认 60%。手动曝光作为额外调整；冻结离线场景保持曝光，保留线性累积。",
+  "primept.settings.display.auto_exposure_percent.tooltip": "自动曝光补偿强度：0 关闭，默认 75%。手动曝光作为额外调整；冻结离线场景保持曝光，保留线性累积。",
   "primept.settings.display.hdr": "HDR",
   "primept.settings.display.hdr.tooltip": "请求 Windows scRGB HDR，需要当前显示器已开启 HDR 且 Vulkan 表面支持。不可用时保留 SDR；重新配置表面后生效。",
   "primept.settings.display.hdr_reference_white_nits": "HDR 白点",

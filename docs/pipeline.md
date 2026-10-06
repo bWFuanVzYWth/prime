@@ -27,6 +27,16 @@ Vulkan 1.2 已包含所需的 SPIR-V 1.4、descriptor indexing 和 buffer device
 
 Rust 通过 FFM 借用 instance、physical device、device、graphics queue 及 family index；它只销毁自己创建的资源，不能销毁宿主实例、设备、队列、主图像或宿主命令池。Java/宿主保持提交所有权，原生调用仍限于渲染线程。
 
+## 驱动管线缓存
+
+每个 Rust `Context` 建立一个 `VkPipelineCache`，PT/ReSTIR 的全部场景特化、实时主表面/post、重建显示、大气和其它显示 compute 管线在实际创建时共用它。当前 Prime 自建管线都是 compute；宿主与 Streamline 内部管线仍由各自 owner 管理。缓存仅复用驱动编译数据，不替代 SPIR-V、specialization、layout 或资源能力的真实创建参数，也不改变 shader 或采样语义。Vulkan 对非空 cache 的[复用和更新规则](https://docs.vulkan.org/refpages/latest/refpages/source/vkCreatePipelineCache.html)由驱动实现，存在文件不能证明每条管线命中。
+
+Windows 默认持久化到 `%LOCALAPPDATA%/PrimePT/pipeline-cache/v1`；无可用用户缓存目录时正常冷启动。`PRIME_PIPELINE_CACHE` 可以指定缓存目录，`0` 显式禁用。文件名按 vendor/device ID、driver/API version、宿主位宽及 device/driver/pipeline-cache UUID 的完整身份生成；文件内再次核验这些字段、格式版本、长度、SHA-256 和 Vulkan [version-one 32 B 头](https://docs.vulkan.org/refpages/latest/refpages/source/VkPipelineCacheHeaderVersionOne.html)。读取及快照上限为 256 MiB，超限或损坏内容不传驱动。旧设备/驱动、缺失/不可读取文件和驱动拒绝初始数据都可冷启动；驱动拒绝数据时重试空 cache，cache 本身创建失败则继续用空句柄建管线。这个身份边界是保守的跨运行复用条件，shader 更新后的实际条目是否仍可用继续由完整 create info 决定。
+
+固定资源首次准备及之后实际新增管线时 checkpoint，关闭时保存最终快照；普通帧没有新增管线时仅检查 dirty 标志，不加锁、不查询驱动或读写文件。checkpoint 失败只记录日志，此后不逐帧重试，关闭时再尝试一次。写入使用同目录独立临时文件、完整写入和 `sync_all` 后的原子替换；替换失败保留旧文件并清理本次临时文件，不先删旧文件。多个进程/owner 的竞争写入允许失败或由最后一次成功写入覆盖，不合并磁盘缓存，但成功发布的文件始终完整；已有合法文件不会被失败写入清空。
+
+创建、快照和销毁通过 cache owner 的宿主互斥保护，不与修改该对象的调用并发；最后的 `Context` owner 按现有退休/完成证明释放 cache，再释放自己的 command pool 或 owned device，未证明完成的失败 owner 继续隔离。cache 本身没有 GPU 帧载荷，不增加 pass、barrier、队列提交或稳态 CPU wait。初始化的文件读写、哈希、driver snapshot 与 CPU 副本仍有真实加载成本；当前实现不声明已测量的启动/进入世界加速或帧率收益。对照须固定硬件/驱动/工具链和相同场景、设置、种子与原生 1920×1080，分别观察冷/热缓存的建管线及整个启动/加载耗时，与稳态 CPU/GPU 时间分开。
+
 ## 渲染器所有权与切换
 
 世界渲染后端由渲染线程上的单个 `RendererSlot` 管理，按名称注册资源工厂。工厂只建立轻量 owner，实际资源创建在 `start()`；旧 owner 完成 `close()` 后才能启动新 owner。当前注册原版、路径追踪和 ReSTIR PT Enhanced 三个后端。Prime 禁用时不接管原版生命周期，包括使用 OpenGL 的原版客户端。

@@ -964,7 +964,7 @@ fn pbr_spirv_bindings_match_full_production_and_lite_reference() {
         (
             "RR display",
             prime_shaders::rr_display(),
-            &[4, 10, 11, 13, 18, 19],
+            &[4, 10, 11, 13, 14, 15, 18, 19],
             &[],
             &[],
         ),
@@ -978,7 +978,7 @@ fn pbr_spirv_bindings_match_full_production_and_lite_reference() {
         (
             "RR linear",
             prime_shaders::rr_linear(),
-            &[4, 10, 18, 19],
+            &[4, 10, 11, 13, 14, 15, 18, 19],
             &[],
             &[],
         ),

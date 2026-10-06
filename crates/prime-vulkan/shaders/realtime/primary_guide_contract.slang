@@ -18,6 +18,9 @@ public interface IPrimaryGuides {
     void interfaceSpecular(uint2 pixel, PrimePbrVertex material, float3 view, float4 incident,
                            float4 transmitted);
     void reflectionPending(uint2 pixel);
+    void candidate(PrimaryParameters camera, uint2 pixel, float2 sampleUv, SurfacePoint surface,
+                   PrimePbrVertex material, float3 direction, float4 incident, float4 transmitted,
+                   float3 previousPosition, bool previousPositionKnown, PrimePrimaryPsr psr);
     void surface(PrimaryParameters camera, uint2 pixel, float2 sampleUv, SurfacePoint surface,
                  PrimePbrVertex material, float3 direction, float4 incident, float4 transmitted,
                  float3 previousPosition, bool previousPositionKnown, PrimePrimaryPsr psr);
@@ -39,6 +42,10 @@ public struct NoPrimaryGuides : IPrimaryGuides {
     public void interfaceSpecular(uint2 pixel, PrimePbrVertex material, float3 view,
                                   float4 incident, float4 transmitted) {}
     public void reflectionPending(uint2 pixel) {}
+    public void candidate(PrimaryParameters camera, uint2 pixel, float2 sampleUv,
+                          SurfacePoint surface, PrimePbrVertex material, float3 direction,
+                          float4 incident, float4 transmitted, float3 previousPosition,
+                          bool previousPositionKnown, PrimePrimaryPsr psr) {}
     public void surface(PrimaryParameters camera, uint2 pixel, float2 sampleUv,
                         SurfacePoint surface, PrimePbrVertex material, float3 direction,
                         float4 incident, float4 transmitted, float3 previousPosition,

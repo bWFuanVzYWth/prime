@@ -259,13 +259,9 @@ fn create(
         stage = stage.specialization_info(&specialization);
     }
     match unsafe {
-        context.device.create_compute_pipelines(
-            vk::PipelineCache::null(),
-            &[vk::ComputePipelineCreateInfo::default()
-                .stage(stage)
-                .layout(layout)],
-            None,
-        )
+        context.create_compute_pipelines(&[vk::ComputePipelineCreateInfo::default()
+            .stage(stage)
+            .layout(layout)])
     } {
         Ok(created) => Ok(created[0]),
         Err((partial, e)) => {

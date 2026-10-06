@@ -33,6 +33,10 @@ public struct TestEnvironment : IPrimaryEnvironment {
     }
 };
 public struct TestGuides : IPrimaryGuides {
+    public void candidate(PrimaryParameters camera, uint2 pixel, float2 sampleUv,
+                          SurfacePoint surface, PrimePbrVertex material, float3 direction,
+                          float4 incident, float4 transmitted, float3 previousPosition,
+                          bool previousPositionKnown, PrimePrimaryPsr psr) {}
     public bool enabled() {
         return true;
     }

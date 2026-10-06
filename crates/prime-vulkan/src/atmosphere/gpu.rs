@@ -260,18 +260,15 @@ impl Compute {
                     .device
                     .create_shader_module(&vk::ShaderModuleCreateInfo::default().code(&spirv), None)
                     .map_err(|e| error("Create atmosphere shader", e))?;
-                let built = context.device.create_compute_pipelines(
-                    vk::PipelineCache::null(),
-                    &[vk::ComputePipelineCreateInfo::default()
+                let built =
+                    context.create_compute_pipelines(&[vk::ComputePipelineCreateInfo::default()
                         .layout(result.layout)
                         .stage(
                             vk::PipelineShaderStageCreateInfo::default()
                                 .stage(vk::ShaderStageFlags::COMPUTE)
                                 .module(module)
                                 .name(c"main"),
-                        )],
-                    None,
-                );
+                        )]);
                 context.device.destroy_shader_module(module, None);
                 match built {
                     Ok(pipelines) => result.pipelines.extend(pipelines),

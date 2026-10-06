@@ -8,7 +8,7 @@
   "primept.settings.lighting.stars_percent": "Stars",
   "primept.settings.lighting.stars_percent.tooltip": "NASA Deep Star Maps radiance: 0 disables, 100% keeps the default. Follows latitude and season independently of sky strength; fixed while frozen.",
   "primept.settings.display.auto_exposure_percent": "Auto Exposure",
-  "primept.settings.display.auto_exposure_percent.tooltip": "Automatic exposure compensation strength: 0 disables, default 60%. Manual exposure remains an additional adjustment. Frozen offline scenes retain their exposure; linear accumulation is preserved.",
+  "primept.settings.display.auto_exposure_percent.tooltip": "Automatic exposure compensation strength: 0 disables, default 75%. Manual exposure remains an additional adjustment. Frozen offline scenes retain their exposure; linear accumulation is preserved.",
   "primept.settings.display.hdr": "HDR",
   "primept.settings.display.hdr.tooltip": "Request scRGB HDR on Windows when HDR is enabled for the current display and the Vulkan surface supports it. Unsupported surfaces keep SDR. Takes effect after surface reconfiguration.",
   "primept.settings.display.hdr_reference_white_nits": "HDR White",

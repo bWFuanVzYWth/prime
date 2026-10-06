@@ -35,7 +35,11 @@ public final class VulkanBootstrap {
             List.of(KHRAccelerationStructure.VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
                     KHRDeferredHostOperations.VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
                     KHRRayQuery.VK_KHR_RAY_QUERY_EXTENSION_NAME);
+    // Dense guides use R8/R16/RG16 storage images even when the NVIDIA SDK is unavailable.
+    private static final VulkanFeature DENOISING_STORAGE_FORMATS = new VulkanFeature(
+            VulkanFeatureSets.VK10_FEATURES_STRUCT, "shaderStorageImageExtendedFormats");
     private static final List<VulkanFeature> FEATURES = List.of(
+            DENOISING_STORAGE_FORMATS,
             new VulkanFeature(VulkanFeatureSets.VK12_FEATURES_STRUCT, "bufferDeviceAddress",
                               VkPhysicalDeviceVulkan12Features.BUFFERDEVICEADDRESS),
             new VulkanFeature(VulkanFeatureSets.VK12_FEATURES_STRUCT, "scalarBlockLayout",
@@ -70,8 +74,6 @@ public final class VulkanBootstrap {
                               VkPhysicalDeviceVulkan12Features.TIMELINESEMAPHORE),
             new VulkanFeature(VulkanFeatureSets.VK12_FEATURES_STRUCT, "descriptorIndexing",
                               VkPhysicalDeviceVulkan12Features.DESCRIPTORINDEXING),
-            new VulkanFeature(VulkanFeatureSets.VK10_FEATURES_STRUCT,
-                              "shaderStorageImageExtendedFormats"),
             // Streamline's Vulkan clear kernel requires this beyond slGetFeatureRequirements.
             new VulkanFeature(VulkanFeatureSets.VK10_FEATURES_STRUCT,
                               "shaderStorageImageWriteWithoutFormat"));
@@ -148,10 +150,11 @@ public final class VulkanBootstrap {
                     missing.add("accelerationStructure");
                 if (!query.rayQuery())
                     missing.add("rayQuery");
+                if (!available.features().shaderStorageImageExtendedFormats())
+                    missing.add("shaderStorageImageExtendedFormats");
                 opacityMicromap &= micromap.micromap();
                 streamline &= synchronization.synchronization2() && address.timelineSemaphore() &&
                               address.descriptorIndexing() &&
-                              available.features().shaderStorageImageExtendedFormats() &&
                               available.features().shaderStorageImageWriteWithoutFormat();
 
                 var count = stack.mallocInt(1);
@@ -209,12 +212,12 @@ public final class VulkanBootstrap {
         status = new Status(previous.physical, device.address(), true, opacityMicromap, streamline,
                             "");
         LOGGER.info(
-                "Prime PT enabled rayQuery, accelerationStructure, bufferDeviceAddress and scalarBlockLayout on Minecraft's Vulkan device");
+                "Prime PT enabled rayQuery, accelerationStructure, bufferDeviceAddress, scalarBlockLayout and denoising storage formats on Minecraft's Vulkan device");
         LOGGER.info("Prime PT opacity micromaps: {}",
                     opacityMicromap ? "enabled" : "unavailable; alpha test fallback");
         LOGGER.info("Prime PT Streamline device capabilities: {}",
                     streamline ? "enabled; DLSS RR runtime support will be checked on attach"
-                               : "unavailable; noisy output fallback");
+                               : "unavailable; software denoising remains available");
     }
 
     public static boolean isEnabled(VulkanDevice device) {
