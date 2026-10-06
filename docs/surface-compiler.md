@@ -69,7 +69,7 @@ Java 转录真实 sprite 身份、atlas bounds、帧尺寸、原始帧序列/时
 
 26.2/26.3 的宿主 shader 对编码域 RGBA 四个通道插值并写入 UNORM8；Rust 按源 tick/时长生成相同的千分位进度，GPU 插值后按 UNORM8 舍入。着色按主像素射线锥估计 mip，层内最近点、层间线性；coverage 与灯支持域固定 mip0，因此不会随查询类型改变几何覆盖。射线锥不包含粗糙反弹的扩散，此过滤是明确的近似，不声称与光栅导数逐像素相同。动画按源帧传入的 game time 推进，离线冻结不更新。
 
-有效 `format=lab-pbr/1.3` 包的 `_n/_s` 原图由 Java 读取，在 Rust 生成规范 mip 和辅助动画。连续通道层内/层间线性过滤；normal 分布保持 GGX 平均长度，specular 的分类 G/B 在生产固定当前帧 mip0 点样。非金属 authored SSS 中，optical thin 或 cutout SSS 使用 Full thin-material 的有色双半球反射/透射；其余 thick 分支单独保留历史 Lite 白色 diffuse transmission，介质身份不变。thick 分支是低阶近似，不执行体积 random walk；foliage 不套用旧树叶预设。AO/porosity 只保留，不直接乘着色；height 保留逐帧 min 解码，旧 voxel displacement 几何管线不移植。旧材质预设不参与默认值或分类。
+有效 `format=lab-pbr/1.3` 包的 `_n/_s` 原图由 Java 读取，在 Rust 生成规范 mip 和辅助动画。连续通道层内/层间线性过滤；normal 分布保持 GGX 平均长度，specular 的规范 G 身份与 B 强度在生产固定当前帧 mip0 点样。CPU把源 B 的0..65清洗为0、66..255翻译为1..190，只有完整源几何证明的薄片允许非金属 SSS；主/第二层分别消费自己的证明，cutout或物理介质薄片标志不能替代材质证明。厚体或未知来源回退常规Full opaque漫反射，Lite与厚SSS近似已删除；薄SSS介质身份不变，foliage不套用旧树叶预设。AO/porosity不直接乘着色，porosity不进入规范B；height保留逐帧min解码，旧voxel displacement几何管线不移植。旧材质预设不参与默认值或分类。
 
 游戏发光使用实际 block/quad emission 的较大值，按旧校准 `1.5 * (level/15)^2` 变为线性 BT.709 RGB，再乘采样点的解码纹理×tint。岩浆进入相同路径。光源从最终面提取，每个物理 patch 只计一次；复合面 proposal 覆盖两侧/层的功率上界，实际采样按选侧/coverage 计算发光，涂层挡住的底层不泄漏。
 
