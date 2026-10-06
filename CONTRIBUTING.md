@@ -32,7 +32,7 @@ git lfs status
 | Vulkan 驱动与兼容光追显卡 | 运行 GPU 测试和实际游戏 |
 | Vulkan validation layer / SPIR-V Tools | GPU 同步检查与 SPIR-V 验证 |
 
-使用仓库的 Gradle Wrapper，不必另装 Gradle。Windows 的 Rust 工具链还需要对应的 MSVC 链接及 C 编译工具，后者用于构建 native 分配器。仅运行 Java 编译与测试不需要 Rust 或 Vulkan SDK；纯 CPU Rust 测试可排除 Vulkan crate。
+使用仓库的 Gradle Wrapper，不必另装 Gradle。Windows 的 Rust 工具链还需要对应的 MSVC 链接及 C 编译工具，后者用于构建 native 分配器。单独 Java 编译不需要 Rust 或 Vulkan SDK；Gradle Java Test、根 check 和 native 构建先执行 ABI 门禁，需要 Python 3、clang、clang-format、rustc 和 rustfmt，仍不需要 GPU。纯 CPU Rust 测试可排除 Vulkan crate。
 
 `std::simd` 仍是 nightly 的 `portable_simd` 接口，仓库固定 `nightly-2026-09-11`；通过 rustup 运行 cargo 会选择该工具链，不使用 `RUSTC_BOOTSTRAP`。CPU 内核按512-bit逻辑向量编写，由编译目标降为较窄向量或标量，ABI仍使用普通数组。`.cargo/config.toml` 为 x86-64 默认启用 `target-feature=+avx2`，发行包要求 AVX2；不要求 AVX-512、不启用 `target-cpu=native`，也不包含运行时指令集分派。需要验证较窄目标时可用 `RUSTFLAGS='-C target-cpu=x86-64 -C target-feature=-avx2,-avx'` 覆盖，并使用独立 target 目录保存产物。参考 [Rust portable SIMD](https://doc.rust-lang.org/nightly/std/simd/index.html)。
 
@@ -71,17 +71,17 @@ Windows 构建的 Streamline C++ 静态桥接需要 MSVC C++ 工具链；Streaml
 
 ## ABI 生成与验证
 
-公共 C ABI 为 v16，Minecraft 源 schema 为 v7，配置文件 schema 为 v13。JAR 与 DLL 必须配套重建；旧字节入口不再导出。只修改 `crates/prime-engine/include/prime.h` / `prime_mc.h`，由头文件生成 `prime_abi/src/generated.rs` 和 Java `PrimeAbi`，不要手工维护三套布局。
+公共 C ABI 为 v16，Minecraft 源 schema 为 v7，配置文件 schema 为 v13。JAR 与 DLL 必须配套重建；旧字节入口不再导出。只修改 `crates/prime-engine/include/prime.h` / `prime_mc.h`，由头文件生成 `prime_abi/src/generated.rs`、Java `PrimeAbi` 和两份 Rust export 类型检查，不要手工维护布局或 export 名单。
 
 ```powershell
 python scripts/generate-abi.py --probe clang
-python scripts/generate-abi.py --check --probe clang
+.\gradlew.bat checkAbi
 cargo test -p prime_scene --test typed --locked
 cargo test -p prime_engine --no-default-features --lib --locked
 ./gradlew.bat :common:test
 ```
 
-生成器使用仓库 rustfmt/clang-format 规范化产物；`--check` 不改文件。C11 编译探针核对所有 POD 的尺寸/对齐/字段偏移和函数签名，Rust 编译同时约束真实 export 类型，Java/native 行为测试验证实际具名字段与指针借用。原始顶点/像素保留 payload span，不得用 typed wrapper 封装旧 stream 或引入逐 section FFM。MC 总源数组没有 generic 单批256 MiB上限；保留 checked 地址范围和真实像素预算。运行/消费预编译产物不依赖 Python 或 C 编译器。
+生成器使用仓库 rustfmt/clang-format 规范化产物；`--check` 不改文件。不支持、重复或残缺的公开函数声明会直接失败。`checkAbi` 先用实际 C/Rust 编译器运行生成器夹具，再检查产物新鲜度及 C11 的尺寸/对齐/字段偏移和函数签名；Java Test、根 check 和三类 native 构建均依赖它。可用 `-PabiPython=路径` / `-PabiCompiler=路径` 指定工具。完整的 Rust export 类型检查随引擎编译，Java/native 行为测试验证实际具名字段与指针借用。原始顶点/像素保留 payload span，不得用 typed wrapper 封装旧 stream 或引入逐 section FFM。MC 总源数组没有 generic 单批256 MiB上限；保留 checked 地址范围和真实像素预算。运行/消费预编译产物不依赖这些开发工具。
 
 ## 开发客户端
 
@@ -205,8 +205,8 @@ cargo test -p prime_vulkan --features shader-tests --lib --locked gpu_restir -- 
 # 独立 PowerShell 会话；验证生产 K1/guide 图像和重建显示，不创建窗口或执行 DLSS 模型。
 $env:PRIME_VK_VALIDATION = '1'
 $env:VK_LAYER_VALIDATE_SYNC = '1'
-cargo test -p prime_vulkan --features shader-tests --lib --locked gpu_primary_ -- --ignored --nocapture --test-threads=1
-cargo test -p prime_vulkan --features shader-tests --lib --locked gpu_rr_display_fallback_upscale_and_orientation -- --ignored --nocapture --test-threads=1
+.\scripts\test-cargo.ps1 -Package prime_vulkan -Features shader-tests -Filter gpu_primary_ -Ignored -NoCapture
+.\scripts\test-cargo.ps1 -Package prime_vulkan -Features shader-tests -Filter rr_display_tests:: -Ignored -Minimum 2 -NoCapture
 ```
 
 `gpu_primary_` 同时覆盖 K1 内部交接和生产 `PrimaryRrGuides` 的实际图像读回：固定几何/相机/jitter 下跨 lighting seed 的通道一致性、共享查询与分支重放、roulette/吸收后 guide 完成、反射/透射的对称预算不足、TIR、reset、动态前态缺失、奇数尺寸及 Halton/相机运动。普通粗糙表面的 post motion 检查调用生产 helper，但 K2 hit distance 是显式合成输入，不代表完整 K2→RR 验证。
@@ -276,7 +276,13 @@ GPU 正确性检查设置下面介绍的 validation/sync 环境变量。局部�
 
 ### 常规检查
 
+优先运行受影响包和测试域。定向 Cargo 检查使用 `scripts/test-cargo.ps1`：先列出所选单一 lib 或 integration target 的用例，再核验实际完成的名称和数量；零匹配、仅 ignored、失败或少于 `-Minimum` 都判失败。`-Test typed` 选择 integration target，`-Exact` 要求完整用例名，GPU 用例显式加 `-Ignored`，混合组用 `-IncludeIgnored`。每次保存命令、工具链、提交/工作区状态、日志和实际结果到独立 `artifacts/test-runs/`，可用 `-Output` 指定空目录；ignored 不计通过。修改这个入口时运行 `scripts/test-cargo-contract.ps1` 验证漏跑、失败和输出解析边界。
+
 ```powershell
+# 定向示例；仅检查设置 ABI，不启动 GPU
+.\scripts\test-cargo.ps1 -Package prime_scene -Test typed -Filter typed_settings_distinct_fields_and_boolean_basis_detect_misrouting -Exact
+.\scripts\test-cargo-contract.ps1
+
 # 无 GPU / Slang 依赖的协议、引擎边界与算法测试
 cargo test -p prime_minecraft -p prime_scene -p prime_engine --no-default-features --features prime_scene/legacy-fixtures --locked
 cargo test -p rectangle_decomposition --all-features --locked
@@ -305,7 +311,7 @@ cargo test -p prime_vulkan --features shader-tests --lib --locked -- --ignored -
 
 这些测试覆盖 cutout、累积、尺寸变化、增量场景和宿主资源退休；小尺寸/奇数尺寸用于边界检查，不是性能数据。改变宿主集成或捕获时，还需在对应 MC 适配器实际运行，检查主图像与 HUD、资源重载、世界退出等相关生命周期。更新公共接口时验证受影响的两个适配器；编译通过不证明 Mixin 注入或实际 GPU 功能正常。
 
-`shader-tests` 另编译无窗口测试入口，直接验证生产 Slang 的 Z-Sobol、颜色、primeDRT 与安全起点；正常发行构建不包含测试入口。imported shader 的改动会重编有效依赖受影响的入口变体。同步验证日志出现 `Prime Vulkan ERROR`、`VUID` 或 hazard 时，即使 Rust test harness 返回通过也不能视为 GPU 检查通过。Slang 模块/数学支持边界及可替换的显示策略见 [模块说明](docs/shaders.md)。
+`shader-tests` 另编译无窗口测试入口，直接验证生产 Slang 的 Z-Sobol、颜色、primeDRT 与安全起点；正常发行构建不包含测试入口。imported shader 的改动会重编有效依赖受影响的入口变体。Rust 测试自建 instance 的 validation callback 记录 ERROR，完成清理后让所属测试失败，不在 FFI 回调内 panic；此检查不改变发行版策略。真实 SDK、宿主借用设备与外部验证日志仍需各自的错误门禁，不能把 `VUID` / hazard 和成功读回当成通过。Slang 模块/数学支持边界及可替换的显示策略见 [模块说明](docs/shaders.md)。
 
 就绪计数与压缩编码回归随普通 `prime_minecraft` 测试执行：覆盖 Single/Local/Global 的水、玻璃与岩浆输出、63/64段阈值、cached halo 迁移和大工作集内的单次编辑。上传/阴影改动可在上述 validation 会话中执行以下窄入口，实际资源收缩、在途退休及遮挡行为不能只靠编译判断：
 
@@ -323,7 +329,7 @@ cargo test -p prime_vulkan --features shader-tests --lib --locked pbr_texture_te
 
 十字面 GPU 测试从四个方向对照独立源三角形，使用非对称颜色与 alpha 检查两侧 UV 和透孔。CPU 配对规则随普通 `prime_minecraft` 测试验证；实际双版本 `cross` / `tinted_cross` 字段由 `cpuSmoke` 生成，再通过下面的原生回放核对。支持与参照边界见 [Section 测试设施](docs/guides/section-tests.md)。
 
-实例相关 GPU 测试覆盖局部原型、仿射/颜色/UV、增删及在途资源退休。Java 的 `cpuSmoke` 在真实 Fabric/Mixin 类上验证源路由、标准模型、下游截断与 target 创建/缩放。测试启动器在 preLaunch 退出，不调用游戏 main、不创建窗口或设备。地形原型通过真实 MC palette/模型字段、FFM 和独立 CPU native 库验证64段完整性、重复 dirty 合并、相同输入不重编译、空段清除与未知模型默认值；opaque 模型回调会主动抛错以证明未被调用。该入口需要 Rust，构建库放在 `build/source-cpu-native`，不会覆盖游戏使用的 release DLL。人工窗口不能代替实际视距或游戏验证。
+实例相关 GPU 测试覆盖局部原型、仿射/颜色/UV、增删及在途资源退休。Java 的 `cpuSmoke` 在真实 Fabric/Mixin 类上验证源路由、标准模型、下游截断与 target 创建/缩放。测试启动器在 preLaunch 退出，不调用游戏 main、不创建窗口或设备。布尔 selector 仅接受 `true` / `false`，`false` 不启用；多个专用组冲突会失败，`primeptSectionBench=true` 要求 `primeptSectionSuite=true`。各版 `build/cpu-smoke/result.json` 记录实际请求与完成的夹具组，Gradle 核验其身份和状态；计数单位是完成组，不是断言数量。`targetResize`、`samplingRegistry`、`routingCost` 三组只需宿主，不构建 native；其余组按需要使用隔离 CPU 库。地形原型通过真实 MC palette/模型字段、FFM 验证64段完整性、重复 dirty 合并、相同输入不重编译、空段清除与未知模型默认值；opaque 模型回调会主动抛错以证明未被调用。库放在 `build/source-cpu-native`，不会覆盖游戏使用的 release DLL。人工窗口不能代替实际视距或游戏验证。
 
 地形分帧改动需同时验证 CPU 编译和后段 planner 的每阶段 N 格上限，覆盖 1/8/128、无新源时继续清空积压、重复编辑读取最新源、公平轮转、卸载/epoch 取消、负坐标、重定位和失败不确认；最终几何需与无上限参考一致。资源目录同 epoch 整代换新和普通纹理身份撤销须立即撤旧，后续按预算恢复且不混用旧 UV/材质。后段 GPU 验证另覆盖真实几何内容变化重置离线累积、等价 OMM 重建保留累积、OMM 旧覆盖的实例禁用与在途资源寿命。设置文件使用独立schema v13，v8–v12按显式规则迁移，其他不支持的版本回退默认；FFM使用216字节`PrimeSettings`、公共ABI v16，内部离线配置包为v12/212字节。JAR与DLL必须同次构建，完整布局由头文件及生成校验维护。
 
@@ -385,7 +391,7 @@ Prime 自有 CPU 工作池全部在 Rust。每个 Engine 创建一个 configured
 
 Java CSV 的 `terrain_plan_ns` 是请求规划 FFM 总时间，`terrain_pack_ns` 是按表读取/封装源和应用列镜像的时间，`terrain_accept_ns` 是响应提交、Rust 解码/编译/发布的同步总时间；它们包含于 `terrain_total_ns`，总时间还包括初次 epoch/atlas 准备和事件封装。`terrain_source_bytes` 是本帧请求输入与响应输入之和，包含资源定义，不含返回请求表。`terrain_requested_sources` 是本批请求段数，`terrain_available_sources` 是有源响应数，`terrain_missing_sources` 是本批无源数，`terrain_available_sources_total` 是累计有源响应数；这些字段均不表示积压量或64段就绪证明。旧的 pending/waiting/empty 常量列已移除。loaded/unloaded 是原始列事件数，entered 是 Rust 新激活且镜像成功的列数。`mc_source[...]` 另给 native plan/decode/compile/publish、请求批次数、变化/编译/活跃/驻留段数、实际 `pending_cells` 与 hack 使用计数；CPU 编译积压和后段 GPU 构建积压分别观察。
 
-原版 tint 由 Java 批量转录源字段，Rust 直接求色；`tint_callbacks` 只统计未知源的实际回调。`tint_bytes` 统计 typed 颜色/群系请求数组及响应数组、定义和 colormap payload，不含 DTO 根结构；`request_batches` / `response_batches` 包含实际发生的颜色和群系阶段。`biome_samples` 是需要重新计算颜色的位置数，`biome_host_cells` / `biome_pages` 是实际读取的 quart 群系单元/页数，不能互相当成同一单位。`biome_source` 包含 native zoom、源请求组织和求色，`biome_filter` 为混合；历史 Java `tint_callback_ms` 字段包含整个颜色源准备，不能直接归因为回调。协议配套版本为 source v7（公共 FFM ABI为11），重建双适配器与 DLL 后再验收。`cpuSmoke` 同时生成实际 `getOffset/getSeed` 的 `placement-oracle.bin`，原生回放精确比较位置种子与偏移位模式；支持与未知回调边界见 [Section 测试设施](docs/guides/section-tests.md)。
+原版 tint 由 Java 批量转录源字段，Rust 直接求色；`tint_callbacks` 只统计未知源的实际回调。`tint_bytes` 统计 typed 颜色/群系请求数组及响应数组、定义和 colormap payload，不含 DTO 根结构；`request_batches` / `response_batches` 包含实际发生的颜色和群系阶段。`biome_samples` 是需要重新计算颜色的位置数，`biome_host_cells` / `biome_pages` 是实际读取的 quart 群系单元/页数，不能互相当成同一单位。`biome_source` 包含 native zoom、源请求组织和求色，`biome_filter` 为混合；历史 Java `tint_callback_ms` 字段包含整个颜色源准备，不能直接归因为回调。协议配套版本为 source v7（公共 FFM ABI为16），重建双适配器与 DLL 后再验收。`cpuSmoke` 同时生成实际 `getOffset/getSeed` 的 `placement-oracle.bin`，原生回放精确比较位置种子与偏移位模式；支持与未知回调边界见 [Section 测试设施](docs/guides/section-tests.md)。
 
 `compile` 包含排序、作业建立、`kernel`（slab 解包/剔面/展开，含首次池创建）和 `finalize`（精确内容比较、分片边界计算及不可变输出准备）；各值都是调用方墙钟时间，不是 worker CPU 时间之和。分片直接移交其 Vec 所有权，精确相同的分片复用旧存储与包围盒，不再归并成整段连续副本。`published_layers` 是实际替换或删除的图层数，`retained_layers` 是重新编译后内容相同而保留的非空图层数。`publish` 是 owner 上的场景变更和旧引用释放，不包含 GPU 构建；新分片分配及旧几何最后引用的回收仍有成本。
 
@@ -644,7 +650,7 @@ cargo run --release --locked -p prime_tools --bin instance-perf -- --samples 60 
 .\gradlew.bat :common:test :common:cpuDiagnosticsSmoke
 ```
 
-它只创建 native CPU session、读取诊断、提交 reset 并销毁；不附着 Vulkan、不创建窗口。双版本 `cpuSmoke` 验证实际计时事件与光照通知钩子；公共测试覆盖 JSON 精度、多线程父任务、停止尾部、背压与 I/O 失败。GPU 时间戳及游戏内开关/导出由用户手动检查。
+它默认构建并使用 `build/source-cpu-native` 的隔离 CPU 库，只创建 native CPU session、读取诊断、提交 reset 并销毁；不附着 Vulkan、不创建窗口。`-PnativeLibrary=绝对路径` 可使用已构建的对应库并跳过 native 构建。双版本 `cpuSmoke` 验证实际计时事件与光照通知钩子；公共测试覆盖完整严格 JSON、整数精度、多线程父任务、停止尾部、背压与 I/O 失败。GPU 时间戳及游戏内开关/导出由用户手动检查。
 
 ## Section 对拍与 CPU 基准
 

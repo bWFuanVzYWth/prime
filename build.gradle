@@ -9,6 +9,26 @@ allprojects {
     repositories { mavenCentral() }
 }
 
+// Development/build verification only; packaged players never execute these tasks.
+tasks.register('testAbiGenerator', Exec) {
+    group = 'verification'
+    description = 'Run ABI generator behavior fixtures with real C/Rust compilers, without GPU.'
+    workingDir rootDir
+    environment 'PRIME_ABI_C_COMPILER', providers.gradleProperty('abiCompiler').getOrElse('clang')
+    commandLine providers.gradleProperty('abiPython').getOrElse('python'),
+            'scripts/test_generate_abi.py'
+}
+tasks.register('checkAbi', Exec) {
+    group = 'verification'
+    description = 'Check generated ABI freshness and independent C11 layout/signatures without changing files.'
+    dependsOn tasks.named('testAbiGenerator')
+    workingDir rootDir
+    commandLine providers.gradleProperty('abiPython').getOrElse('python'),
+            'scripts/generate-abi.py', '--check', '--probe',
+            providers.gradleProperty('abiCompiler').getOrElse('clang')
+}
+tasks.named('check') { dependsOn tasks.named('checkAbi') }
+
 subprojects {
     apply plugin: 'java-library'
     java {
@@ -25,6 +45,7 @@ subprojects {
         testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
     }
     tasks.withType(Test).configureEach {
+        dependsOn rootProject.tasks.named('checkAbi')
         useJUnitPlatform()
         jvmArgs '--enable-native-access=ALL-UNNAMED'
     }
@@ -45,19 +66,21 @@ tasks.register('stageStreamlineRuntime', Copy) {
     }
 }
 tasks.register('buildNative', Exec) {
-    dependsOn tasks.named('stageStreamlineRuntime')
+    dependsOn tasks.named('stageStreamlineRuntime'), tasks.named('checkAbi')
     workingDir rootDir
     commandLine 'cargo', 'build', '--release', '--locked', '--package', 'prime_engine'
 }
 
 // Isolated CPU library: never attaches Vulkan or replaces a DLL used by a running game.
 tasks.register('buildSourceCpuNative', Exec) {
+    dependsOn tasks.named('checkAbi')
     workingDir rootDir
     commandLine 'cargo', 'build', '--locked', '--no-default-features', '--package', 'prime_engine', '--target-dir', rootProject.file('build/source-cpu-native').absolutePath
 }
 
 // Benchmark only: optimized CPU engine, physically separate from smoke and game libraries.
 tasks.register('buildSectionBenchNative', Exec) {
+    dependsOn tasks.named('checkAbi')
     workingDir rootDir
     commandLine 'cargo', 'build', '--release', '--locked', '--no-default-features', '--package', 'prime_engine', '--target-dir', rootProject.file('build/section-bench-native').absolutePath
 }

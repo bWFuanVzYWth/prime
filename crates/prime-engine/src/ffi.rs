@@ -784,36 +784,7 @@ pub unsafe extern "C" fn prime_last_error(output: *mut u8, capacity: u64) -> u64
     })
 }
 
-const _: PrimeAbiVersionFn = prime_abi_version;
-const _: PrimeCreateFn = prime_create;
-const _: PrimeResetFn = prime_reset;
-const _: PrimeTexturesFn = prime_textures;
-const _: PrimeRetireTexturesFn = prime_retire_textures;
-const _: PrimeDynamicFn = prime_dynamic;
-const _: PrimeInstancesFn = prime_instances;
-const _: PrimeRenderFn = prime_render;
-const _: PrimeAttachVulkanFn = prime_attach_vulkan;
-const _: PrimeConfigureFn = prime_configure;
-const _: PrimePrepareResourcesFn = prime_prepare_resources;
-const _: PrimeRecordFn = prime_record;
-const _: PrimeSubmissionAcceptedFn = prime_submission_accepted;
-const _: PrimeDisplayOutputFn = prime_display_output;
-const _: PrimePresentHdrFn = prime_present_hdr;
-const _: PrimePrepareFrameGenerationFn = prime_prepare_frame_generation;
-const _: PrimeHdrSurfaceCreateFn = prime_hdr_surface_create;
-const _: PrimeHdrSurfaceRecordFn = prime_hdr_surface_record;
-const _: PrimeHdrSurfaceDestroyFn = prime_hdr_surface_destroy;
-const _: PrimeStreamlineBootstrapFn = prime_streamline_bootstrap;
-const _: PrimeStreamlineFrameFn = prime_streamline_frame;
-const _: PrimeGpuTimeFn = prime_gpu_time;
-const _: PrimeCpuDiagnosticsFn = prime_cpu_diagnostics;
-const _: PrimeDiagnosticsConfigureFn = prime_diagnostics_configure;
-const _: PrimeDiagnosticsFrameFn = prime_diagnostics_frame;
-const _: PrimeDiagnosticsClockFn = prime_diagnostics_clock;
-const _: PrimeDiagnosticsReadFn = prime_diagnostics_read;
-const _: PrimeDestroyFn = prime_destroy;
-const _: PrimeLastErrorFn = prime_last_error;
-const _: PrimeStreamlinePresentFn = prime_streamline_present;
+include!("ffi_exports.rs");
 
 #[cfg(test)]
 mod abi_tests {
@@ -1194,8 +1165,10 @@ mod abi_tests {
             assert_eq!(
                 engine.settings,
                 prime_scene::settings::RenderSettings {
-                    // The accepted packet explicitly chooses four, independently of defaults.
+                    // Preserve explicit packet values even when current defaults differ.
                     bounces: 4,
+                    terrain_batches_per_frame: 8,
+                    auto_exposure_compensation: 0.6,
                     saturation: 0.08,
                     ..Default::default()
                 }
@@ -1275,5 +1248,3 @@ mod abi_tests {
         }
     }
 }
-
-// Generated header signatures are also checked against actual exported Rust functions.

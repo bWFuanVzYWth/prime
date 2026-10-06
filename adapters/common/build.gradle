@@ -1,5 +1,6 @@
 base { archivesName = 'prime-common' }
 sourceSets.test.java.srcDir('src/testFixtures/java')
+dependencies { testImplementation 'com.google.code.gson:gson:2.14.0' }
 
 // CPU-only real Java capture/FFM/native transaction. Use a fresh JVM per DLL comparison.
 tasks.register('instanceSubmitPerf', JavaExec) {
@@ -27,11 +28,15 @@ tasks.register('nativeSmoke', JavaExec) {
 
 // Actual FFM diagnostics ownership/UTF-8 contract, without attaching or creating a Vulkan device.
 tasks.register('cpuDiagnosticsSmoke', JavaExec) {
-    dependsOn testClasses, rootProject.tasks.named('buildNative')
+    dependsOn testClasses
+    if (!providers.gradleProperty('nativeLibrary').isPresent())
+        dependsOn rootProject.tasks.named('buildSourceCpuNative')
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'dev.primept.CpuDiagnosticsSmoke'
     jvmArgs '--enable-native-access=ALL-UNNAMED'
     String library = System.getProperty('os.name').toLowerCase(Locale.ROOT).startsWith('windows')
             ? 'prime_engine.dll' : 'libprime_engine.so'
-    args rootProject.file("target/release/${library}").absolutePath
+    args providers.gradleProperty('nativeLibrary')
+            .map { rootProject.file(it).absolutePath }
+            .getOrElse(rootProject.file("build/source-cpu-native/debug/${library}").absolutePath)
 }

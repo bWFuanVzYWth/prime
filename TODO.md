@@ -19,42 +19,50 @@
 
 ## 下一阶段方向：对照旧 Prime
 
-参考项目为 `C:\WorkSpace\prime`。下面区分其已实现能力与本项目缺口，不把旧项目的待办、实验能力或已有缺陷作为可直接迁移的成品。Java 宿主绑定、Rust 场景与资源所有权的边界不变；剩余 CPU 性能债为非阻塞工作，真实游戏验收贯穿各阶段。
+参考项目为 `C:\WorkSpace\prime`，按两边实际生产调用链核对。下面的已接入表示代码通路存在，科学验证、窗口验收与整帧收益分别记录；旧项目的待办、实验能力或已有缺陷不作为可直接迁移的成品。Java 宿主绑定、Rust 场景与资源所有权的边界不变；剩余 CPU 性能债为非阻塞工作，真实游戏验收贯穿各阶段。
 
 | 能力 | 旧项目已有实现 | 本项目现状 | 后续取舍 |
 | --- | --- | --- | --- |
-| 实时重建与帧生成 | `render/runtime/RealtimeRenderer`、`vulkan/reconstruction`；DLSS RR、NRD + FSR、Streamline FG/PCL/Reflex | Streamline DLSS RR preset F，默认性能档；刚性实例前态、PSR guides、实际 interposer 与 FG 输入/Present 路由 | 收敛严格 SDK 同步验证及真实窗口验收；一般形变/运动光学接口和 NRD/FSR另行接入，不迁回 Java 渲染调度 |
-| 材质与闭包 | Full OpenPBR 实际支持子域、LitePBR 模型、LabPBR 资源翻译与数值契约；旧名称预设 | Full opaque/conductor、薄材质 SSS、solid/thin dielectric 已用于实时/离线；保留 Lite 厚 SSS 近似与参考 API，规范 LabPBR 图、动画与发光已接入 | 旧 PBR presets 不移植；补源拓扑与科学/整帧验收，不沿用旧图元位打包和容量上限 |
-| 天空与显示 | `RealtimeRenderer` 的星图合成、`post` 的曝光/HDR；物理大气 | 移植 NASA BC6H 星图、曝光直方图/适应、scRGB HDR 与 HUD 合成；保留 SDR primeDRT | 实际显示器/游戏验收及天气/维度源语义待补；星图加载峰值、完整显示成本与近似范围见[显示合同](docs/display.md) |
-| 场景与寿命 | cluster 编译、timeline 退休、BLAS 压缩与上传池 | Rust 增量源/实例、直接 quad、上传/AS 池；静态压缩查询/复制与空 AS 页归还已接入 | 压缩实现与完成证明由离屏行为验证，实际常驻显存与整帧/更新尾延迟仍需评估；其他池峰值收缩独立管理 |
-| 源兼容 | 旧版实际模型/资源捕获与支持范围 | 双版本 Rust section 原型仍有洋红代理、offset/特殊剔面等边界 | 按真实源合同补齐；不重播有状态回调或恢复已接管的 Java 下游展开 |
+| 实时重建与帧生成：部分接入 | `RealtimeRenderer` / reconstruction 的 DLSS RR、NRD + FSR、Streamline FG/PCL/Reflex；直接 NGX Responsivity 输入 | Streamline DLSS RR preset F、刚性前态、PSR guides、interposer 与 FG 输入/Present；安全失败使用软件空间降噪，预算候选保留显式代理 | NRD/FSR 和 Responsivity 尚未接入；FG呈现验收已关闭，SDK同步仍开放；空间滤波按PT-021临时hack管理 |
+| 独立轻量 PT：不移植 | 旧 `LambertRayTracingPipeline` 已实际实现 | 本项目保持朴素 PT / ReSTIR PT | 用户明确不移植，移出后续候选；不恢复旧轻量透明规则 |
+| 材质与闭包：部分接入 | 当前生产仅 `shaders/bsdf/compact` 的 Full OpenPBR 支持子域，包括 foliage；LabPBR 翻译；历史 Lite/core 已删除 | Full opaque/conductor、薄材质 SSS、solid/thin dielectric 已用于实时/离线；保留 Lite 厚 SSS 近似和参考 API，LabPBR 图/动画/发光已接入 | 旧 compact foliage 尚未移植，Lite foliage API 不等价；旧 presets 不恢复，按真实源拓扑及独立数学验证扩展 |
+| 颜色与法线：部分接入 | 真实源颜色后统一 EOTF；作者顶点法线重心插值/逆转置；动态纹理消费实际 sampler | 已有未照明颜色、标准 sprite mip/动画与颜色管理；一般几何 DTO 不含作者法线，一般动态纹理 sampler 语义未完整转录 | 优先补真实 authored normal 来源及 BSDF/RR 消费；按来源补 filter/address/mip，不能把 sprite 验证外推全部动态纹理 |
+| 天空与显示：主体已接入 | 星图、曝光 histogram/适应、材质分类/albedo confidence、HDR 与物理大气；手动 aerosol/altitude offset | NASA BC6H 星图、曝光主算法、scRGB/HUD 与固定大气已移植；meter 固定 confidence=0，大气没有旧手动密度/高度参数 | albedo 校正与手动大气控制未移植；实际显示器/游戏验收另做，见[显示合同](docs/display.md) |
+| 场景与寿命：已重设计 | Java cluster/异步编译、退休、BLAS 压缩、上传池；GPU 几何展开与索引 BLAS | Rust 增量源/实例、同步 cell 预算、直接 quad、上传/AS 池；压缩与空 AS 页归还已接入，GPU 展开未接入 | 保持真实提交接受/timeline 合同；GPU 展开及其他池策略按完整成本决定，不复刻旧 encoder 接收时点和 Java 调度 |
+| 启动与载入：部分接入 | 设备磁盘 cache、私有 cache session 合并、实际并行建管线、共享 program/prewarm | 设备/驱动校验的磁盘 cache 已接入；构建期 Slang 内容缓存与固定资源准备独立复用 | 旧并行创建/共享 program 预热未移植；先测实际 cold/warm 启动和重复创建成本后决定 |
+| 设置与诊断：部分接入 | 独立 block-light EV、RR/NRD 输入视图、曝光异步快照、Reflex/boost、FG 倍数/UI控制与 `prime.properties` | 新设置 schema13、自身旧 schema 迁移、基础图像视图与 JSON 性能诊断；FG 为单生成帧，Reflex low latency | 上述旧控件/诊断未完整恢复，旧配置导入也未实现；逐项按有效消费者与产品需求取舍，不把字段同名当语义兼容 |
+| 源兼容：部分接入 | 真实模型/流体回调和资源捕获，另有 moving block、leash、world text 通路 | 标准 XZ/XYZ offset 和 DoublePlant/Door/Bed seed 已支持；未知覆写、自定义模型/流体、特殊剔面与源上下文仍有边界；上述特殊动态源未恢复 | 按真实源合同补必要单次批量结果；旧新代码均不保证全部第三方兼容，不恢复已接管的 Java 下游展开 |
 | 动态光与新效果 | 动态发光采样、月亮、云、通用体积与 LOD 在旧项目也仍属后续工作 | 尚未完整接入 | 单独立项并声明数学/寿命合同，不标为旧能力恢复 |
 
 ### 优先推进：源兼容与实时重建
 
-- [ ] ReSTIR PT 闪烁部分改善，残余似按区块分界，继续收窄局部历史拒绝；关闭 RR 后的轻微蠕动与结构化亮像素扩大到 ReSTIR 内部调查，分别按 [PT-013、PT-018](HACK.md) 管理。旧 RR Responsivity 仍需补锁定 SDK 的 Vulkan 转发，暗处沸腾与 FG 果冻继续延后，保持当前生产默认。
+- [x] 关闭既有 ReSTIR 质量验收：闪烁、滚动、暗处沸腾及 RR-off 蠕动/结构化伪影按用户确认关闭 PT-013/PT-014/PT-016/PT-018；不保留旧根因假说为当前缺陷。
+- [ ] 新报告萤火虫（PT-019）与水下收敛明显振荡（PT-020）：分别保留实际序列、场景和预算，不将二者写成已确认同一根因。
+- [ ] 替换当前软件空间滤波hack（PT-021），达到正式时域重建与兼容后端目标；单帧平滑不算降噪移植完成。
+- [ ] 修复FG帧数显示（PT-022）：消费真实present统计，覆盖关闭/失败/重置和模式切换。
 - [x] 修正 ReSTIR 时间 donor 的 jitter 接口，避免周期 jitter 取整形成定向历史搬运；完整 Halton 周期及运动/FOV 回归通过，用户确认实机滚动问题已经解决，关闭 [PT-014](HACK.md)。
-- [ ] FG 开启后的严重果冻感从首次接入版本起存在，按 [PT-017](HACK.md) 跟踪。已依据双版本实际 SDR swapchain blit，将 FG HUDless/UI mask 和 HDR 直接呈现统一到 depth/motion 的核心左上方向；继续手动验收真实运动、生成帧及呈现。范围见[坐标契约](docs/coordinates.md)，接口修复尚未证明果冻感已解决。
-- [ ] 逐项收敛 P001/P004/P005/P006/P007/P008：先补真实标准 offset、剔面和源上下文，再确定自定义模型/流体必要回调的单次批量准备合同。每个支持项同时增加双版本实际宿主参照、失效与资源重载测试；未知来源继续明确计数，不用名称猜测或回调重播填补数据。
-- [x] 接入 Streamline DLSS RR preset F 与可调超分档位，默认 Performance；版本无关首表面guides、实际采中反射距离、相机及有稳定局部几何对应的持久实例motion、jitter/矩阵/history和完成值退休由Rust持有，未知形变保持无效。SDK/能力失败显式回退，Java只绑定设备与真实Present；契约见[实时重建](docs/reconstruction.md)。实际游戏画质不因编译通过而视为已验收。
+- [x] FG质量与呈现验收按用户确认关闭 PT-017；帧数显示错误独立修复，不再重复开放果冻感验收。
+- [ ] 逐项收敛 P001/P004/P005/P006/P007/P008：标准 offset/seed 已支持，继续补未知覆写、特殊剔面及源上下文，确定自定义模型/流体必要回调的单次批量准备合同。旧 Fabric tint 观察实际一次接受结果可作来源参考，不能恢复二次求色或已接管的 Java 展开。每项同时增加双版本宿主参照、失效与重载测试，不用名称猜测填补数据。
+- [ ] 补作者顶点法线的真实源字段、变换/插值与寿命合同，覆盖自定义平滑表面、镜像/非均匀缩放、法线贴图和 RR guide；当前几何法线/贴图不能代表旧 authored normal 已移植。来源采集留在批量准备阶段，不为取法线恢复下游 Java 展开。
+- [x] 接入 Streamline DLSS RR preset F 与可调超分档位，默认 Performance；版本无关 guides、反射距离、相机及可证明的持久实例 motion、jitter/矩阵/history和退休由Rust持有。缺少对应时保留真实表面并标记 camera/surface/budget 代理，FG 未知运动仍无效；SDK 不可用或安全失败使用空间降噪，命令状态不安全仍终止隔离。Java只绑定设备与真实Present；契约见[实时重建](docs/reconstruction.md)。ReSTIR既有质量验收已关闭，空间滤波仍是PT-021临时hack。
 - [ ] 收敛真实 DLSS RR 的 Vulkan 同步验证：当前锁定 SDK 的内部清图仍有 `WRITE_AFTER_WRITE`，即使实际 evaluate、完成和完整有限输出读回成功，严格验证仍失败。以 `scripts/test-streamline-gpu.ps1` 的零错误结果关闭；不能屏蔽验证错误或替调用方管理 NGX 私有图像。
 - [x] 持久实例按稳定身份保留最近接受提交的刚性姿态；移植旧首顶点归一化及逐位往返证明，支持局部顶点整体平移，并合并至既有前态仿射。K1 消费实际前物理点与静态 PSR 链代理；新增/重置/未知形变显式无效。相机与实例历史均在真实队列接受后提交，离屏读回覆盖前态、小数平移、仿射姿态、身份/几何变化、重定位与取消边界。
 - [x] 为受支持的具名 CustomGeometry 绑定实际 owner、完整调度身份及单次 callback 的 builder 范围，复用旧身份方式、具名几何平移分解和现有实例通路。重复调度、callback 内刷新、未知布局/consumer和超出typed支持域的源保留 raw，异常阻止该帧FFM；双版本实际来源产物与 K1/FG guides 有独立重放，合同见[捕获边界](docs/capture-boundaries.md#具名-customgeometry-来源)。baked 几何变化仍发布原型/构建BLAS，稳态仍比较源字段，不以运动修复推断性能收益。
 - [ ] 为其他直接网格继续提供可核验的一次真实 owner/submission/part 与范围；匿名聚合 raw 只有材质/空间桶，不能用首顶点归一化或相似几何猜测跨帧身份。标准粒子也没有独立稳定身份；具名范围支持不代表所有CustomGeometry或第三方来源已兼容。
-- [ ] 补一般局部形变与运动光学接口对应，扩大透明代理的科学/实机场景覆盖；未知 motion 继续明确无效。随后补 NRD + FSR 兼容后端，保留相同资源与完成证明边界。
-- [ ] 重建验收覆盖静止、运动实体、粒子、细叶、遮挡显露、水/玻璃、资源重载、尺寸和模式切换；记录原生 1920×1080 固定射线预算的 CPU/GPU 基线。降低输入分辨率后的重建单独报告，不能标为原生 1080p 性能。
-- [ ] 验收运动物体降噪修复（用户已报告普遍异常，范围不限于粒子）：缺失刚性前态、提交过早推进历史及零反射距离时丢失主物体运动已修复；局部数学或真实 GPU guide 读回不代表游戏问题已全部解决。覆盖整体位移/旋转、稳定骨骼叶节点、局部形变、粒子、运动相机和水面上下；剩余未知形变、运动光学接口与非零粗糙次段 motion 按[重建合同](docs/reconstruction.md)判断。水下粒子的较小影响不外推到其他运动物体。
+- [ ] 补一般局部形变与运动光学接口对应，扩大透明代理的科学/实机场景覆盖；RR 相机代理不声明为真实光流，FG 未知运动仍无效。旧 Lambert 的单移动平面镜对应仅作窄参考，不当作任意折射链成品。随后补 NRD + FSR 兼容后端，保留资源与完成证明边界。
+- [x] ReSTIR相关质量与FG验收按用户确认关闭；新增萤火虫与水下收敛明显振荡按 PT-019/PT-020 单独跟踪，原生1080p性能基线和SDK同步合同保持独立。
+- [x] 既有ReSTIR运动/降噪质量验收按用户确认关闭；一般形变/运动光学接口的未支持范围仍按[重建合同](docs/reconstruction.md)声明，不自动扩大兼容范围。
 
 ### 随后推进：材质、环境与显示
 
-- [x] 移植正式 LitePBR opaque、solid/thin dielectric、foliage 底层 API、LabPBR 解码和数值清洗，并将 opaque/dielectric 接入实时与离线生产输运。Java raw-map I/O、Rust canonical G/B、法线分布 mip、辅助动画、稳定 atlas lookup、发光最大值 proposal 与实际 shader 强度遵循[材质契约](docs/materials.md)；旧 PBR presets 不移植。
+- [x] 早期移植的 LitePBR opaque、solid/thin dielectric、foliage 底层参考 API、LabPBR 解码与数值清洗保留；当前生产 opaque/dielectric 已切 Full。它不包含旧当前 compact foliage 数学/生产。raw-map、canonical G/B、法线分布 mip、动画、atlas lookup及发光遵循[材质契约](docs/materials.md)，旧 presets 不恢复。
 - [x] 生产 opaque/conductor、薄材质 SSS 与 solid/thin dielectric 切换至旧 Full 支持子域，锁定独立作者 transmission-GGX 能量表与数学来源；Lite 通用库和厚 SSS 扩展继续保留。加入 eta-aware RR 与默认 12 顶点预算，末预算保留发光和 NEE，详情见 [PT 设计](docs/pt-state-design.md)。这不表示完整 OpenPBR 参数 API 或全部真实资源包已验收。
 - [ ] 为 foliage 生产消费建立真实源拓扑与薄表面语义，按明确来源选择闭包；不能仅凭 Minecraft 树叶类型或 LabPBR 字节猜测厚薄关系。LitePBR thick SSS 当前为白色 diffuse transmission 近似且不改变介质身份；更准确的厚介质散射须另行定义。AO/porosity 的物理用途与 height 几何消费另行决定，不默认恢复旧 voxel displacement 管线。
 - [ ] 扩展 Full 支持子域及保留 Lite 近似的科学验收与真实资源包覆盖：sample/evaluate/PDF、能量、颜色域、粗糙/掠射/薄壁、空间及动画 IOR、法线过滤与发光支持域分别对照独立参考。区分参考数学等价、估计器一致性和物理模型边界；Lite 的单散射/方向能量标量闭合、高粗糙度角分布和非互易 opaque dielectric 不作为 Full 等价性验收。两版游戏覆盖资源重载、模式切换、atlas 物品和冻结；固定原生1920×1080场景/种子/射线预算测量寄存器、显存和完整 CPU/GPU 时间，不从底层属性检查外推整帧收益。
 - [x] 移植旧星图资产、夜空方向与椭圆过滤，直接 RR 相机天空在重建后按真实前景 coverage 合成，间接环境仍读取星图；许可、压缩/解压产物及实际 GPU 前景/地面行为已验证。无需重复实现旧算法。
 - [ ] 补齐维度/天气环境真实源字段与失效，手动验收星图方向/反射、不同资源包与冻结；月亮、云和通用体积仍是独立新增能力。
-- [x] 移植旧自动曝光和 HDR 算法，保留 SDR primeDRT。256桶统计、时间适应、冻结/强度变更、FP16 scRGB 绝对亮度与手部/HUD 合成见[显示合同](docs/display.md)；BDA 计量避免完整累积输入复制，实际生成数学及 GPU 显示行为有验证。
-- [ ] 在真实显示器/Windows HDR 和两版游戏验收峰值/SDR白、跨屏、标题/手部/HUD、冻结与模式/尺寸变化；现有曝光分类 confidence 为0，未恢复旧来源未知的 albedo 分类提示。帧生成的实际插帧、Reflex时序与窗口呈现另验收，不能从 HUDless/mask 测试推断已显示生成帧。
+- [x] 移植旧曝光主算法和 HDR，保留 SDR primeDRT。256桶、时间适应、冻结/强度变更、FP16 scRGB 绝对亮度与手部/HUD 合成见[显示合同](docs/display.md)；BDA 计量避免完整累积输入复制，实际生成数学及 GPU 显示行为有验证。
+- [ ] 恢复旧 meter 的 materialClass/albedo confidence 消费前，定义当前主/反射 guide 与近似 albedo 的可信计量语义；现生产固定 confidence=0。真实显示器/Windows HDR 与双版游戏验收峰值/SDR白、跨屏、标题/手部/HUD、冻结及模式/尺寸变化；FG呈现验收已关闭；未覆盖的显示器/HDR范围仍单独验收。
 
 ### 持续工程工作与探索门槛
 
@@ -64,7 +72,7 @@
 - [x] 移植旧静态 BLAS 压缩生命周期：真实 compacted-size 查询只在对应完成后读取，预算内复制，后续 TLAS 发布压缩地址，原 AS 保留至最后旧 TLAS 使用完成。查询/ready 队列按变化维护，epoch/替换取消不读旧结果；空 AS 页按真实引用归还并保留一个闲页。压缩/未压缩像素和实际在途回收由离屏 GPU 验证。
 - [ ] 评估静态 BLAS 压缩的整帧取舍：固定原生 1920×1080 场景、源更新序列和射线预算，对比稳态 GPU 时间、常驻显存、构建/压缩与可见延迟 p95，计入查询、复制、双份占用及管理复杂度。8MiB/32个复制是每次录制的工作预算，不是显存峰值上限；池碎片可能使逻辑压缩不降低物理页占用。源资源细粒度退休和其他池收缩分别评估，报告活跃量、池容量、在途退休及驱动常驻量。
 - [ ] 动态发光采样先定义 emitter 身份、增删/姿态/纹理变化、前后向 PDF 与冻结寿命，再进入统一灯树；未知光学/发光来源不直接纳入已支持集合。
-- [ ] 仅在整帧/更新 p95 证明收益充分时试验 Wavefront、GPU 机械展开、更广的 TLAS UPDATE、LOD 或更细 BLAS。保留现有六种 shader 特化、64 段完整与每格单静态 BLAS 的基准；局部成本收益不足就简化或移除试验。
+- [ ] 评估旧已有的 `GeometryUpload` / `geometry_expand` / indexed BLAS 通路：本项目尚未移植，先比较当前 CPU mapped-lease 基线、上传字节、临时索引/输入、屏障与最后消费者成本。Wavefront、更广 TLAS UPDATE、LOD 和更细 BLAS 独立评估；仅整帧/更新 p95 收益充分才保留，维持六种 shader 特化与64段完整的基准。
 
 ### 资源生命周期与剩余准备成本
 
@@ -78,13 +86,15 @@
 
 长期边界见 [源路由与编译](docs/capture-boundaries.md)，剩余支持范围见 PT-009。实现完成与实际游戏验收分开记录。
 
-- [x] Java↔Rust 生产 ABI 迁至具名 C DTO 与批量类型数组（ABI 9 / MC source 7）。C header 生成 Rust `repr(C)` 与 Java FFM 布局/访问器，独立 C 编译器探针核对大小/对齐/偏移/函数签名。像素、压缩 palette words 和 raw 顶点仍为明确类型/长度/格式的连续 payload；批量同步借用、Rust 自持跨帧源与失败原子性保持。旧 wire 仅用于既有离线 oracle/诊断兼容，不出现在生产入口；显示/呈现 DTO 和96B设置明确新增，内部实例前态采用独立 GPU 合同。
+- [x] Java↔Rust 生产 ABI 迁至具名 C DTO 与批量类型数组（ABI 16 / MC source 7）。C header 生成 Rust `repr(C)`、Java FFM 和完整 export 类型检查；独立 C 编译器探针与真实 C/Rust 负例门禁核对布局/签名及生成器行为。像素、palette words 和 raw 顶点仍为明确类型/长度/格式的连续 payload；同步借用、自持跨帧源与失败原子性保持。旧 wire 仅用于离线 oracle/诊断兼容，设置与呈现布局以[生成 ABI](docs/abi.md)为准，内部实例前态采用独立 GPU 合同。
 - [x] 双版本地形改为模型定义/放置与流体邻接路由，资源定义批量发布，Rust 纯编译；删除 Java 私有 section compiler、builder、线程池及配置。
 - [x] 将区块管理独立为 Rust `ChunkManager` 模块，集中来源驻留、可用性、依赖失效与分帧编译选择；`TerrainContext` 保留资源/源事务和同步编译协调。未来 LOD 尚未实现，新增策略需在这一边界明确输入、工作量和完成证明，不能以拆模块代替 CPU 成本验证。
 - [x] 模型在单次 Cube.compile 虚调用前截断；普通 item 与 Fabric Mesh 保留源回调并路由局部定义/pose，去除下游 Mixin 存在即回退的门控。自定义 Cube compile 覆盖不执行；多层 Mesh 和逐角 item 颜色按源数据处理。
 - [x] 标准粒子路由52B参数，Rust 同步池展开，Java不生成粒子四角。完整验证与失败原子性、单/多线程、资源退休、双版本源数据独立重放已接入测试。
 - [ ] 用户手动完成原生1080p验收：真实地形/流体/透明/模型/粒子、资源重载、切换与移动/编辑，记录源路由、FFM/native、AS和GPU时间。自动CPU验证不代表实际FPS或全部模组兼容。
-- [ ] 为尚未接入早期描述的直接网格/ExtendedItem等源继续前移入口；明确自定义流体tessellator、特殊投影、foil/outline的支持范围。不得为兼容已接管的下游算法重新展开Java几何。
+- [ ] 为尚未接入早期描述的直接网格/ExtendedItem等源前移入口；恢复旧已有 moving block、leash、world text 时保留真实来源、字体/glyph选择与灰度alpha。文字 outline 不等同通用实体 outline/glint；自定义流体、特殊投影和 foil 单独声明范围，不重新展开已接管的Java几何。
+- [ ] 按具名动态纹理来源补实际 sampler 的 filter/address/mip 语义与失效，当前 ordinary 纹理的固定采样不能宣称与旧真实 GpuSampler 等价。标准 sprite 的 mip/动画验证保持独立。
+- [ ] 按需恢复旧设置/诊断：当前 RR guide 实际输入视图和按需曝光快照优先明确数据身份，block-light EV、Reflex/boost、FG 档位/UI及旧配置导入逐项决定。无消费者字段不先暴露；诊断读回依完成证明，不给常态帧增加等待。
 
 ## 自定义光追场景编译
 
@@ -96,24 +106,29 @@ Java 绑定实际源字段，Rust 负责语义编译、调度和资源，GPU 直
 - [x] 直接 GPU 正反/覆盖层、Fresnel/Beer/初始介质、静态纹理发光与两层灯树；最近命中、阴影、空气透视遮挡和灯采样使用一致的侧/层支持域。固定 quad pair、176/240/272/432 B 记录按实际字段分组，不引入模板解释链。
 - [x] 实际 sprite 身份、f32 局部 UV、帧序列/时长、RGBA 插值和源 mip；纹理帧共享存储，基色动画只变采样描述，LabPBR 辅助动画在 CPU 混合并局部发布，不重建 BLAS。源纹理与几何验证后原子发布，共享像素按唯一存储计费。
 - [x] 静态镂空地形可选 OMM，默认检测实际设备能力后启用；完整方块图集一次源准备，有限完整 sprite 1/2/4 tile D4 模板在资源代次内共享 CPU/GPU 资源，MC 像素格优先二值，运行时只绑定或回退 shader。完整动画全集避免切帧重建，覆盖变更整代替换并重新绑定全部镂空 BLAS。完成证明回收、资源共享及开关/冻结行为由无窗口测试覆盖。共享像素边界的已接受性能取舍和动态对象回退见 [OMM 契约](docs/opacity-micromaps.md)，整帧收益仍由用户按原生1080p验收。
-- [x] 收缩 Java/ABI：生产 CaptureInbox 只保留资源发布，旧地形队列及 op12/13 移到测试夹具。source v5 传递真实 sprite、时间、发光、实际玻璃/树叶类型和原始 LabPBR 图字段，owner、关系、裁切、合并与材质分类由 Rust 派生。
+- [x] 收缩 Java/ABI：生产 CaptureInbox 只保留资源发布，旧地形队列及 op12/13 移到测试夹具。source v7 传递真实 sprite、时间、发光、实际玻璃/树叶类型和原始 LabPBR 图字段，owner、关系、裁切、合并与材质分类由 Rust 派生。
 - [x] 合并轴对齐且至少一个方向长度为1的连续部分矩形，沿它自身的完整方向延伸；覆盖半砖、活版门薄边、竖向栅栏。保留孔洞、每侧/层 UV 裁切和周期、材质及介质；常规完整1×1面使用最优矩形，启用 OMM 的有限模板映射改用1/2/4方形，渐变/非仿射反例保留。
 - [x] 材质页从4 MiB按需倍增至64 MiB，复杂格式不各自固定预留64 MiB；成本夹具分别记录有效记录、池容量、活跃BLAS、构建/上传预留与索引。六种固定shader特化移除场景不用的功能，没有运行时编译器切换。
 - [ ] 用户手动验收原生1080p真实场景：草侧/红石/向日葵、浅水/含水玻璃/火焰、动画覆盖、资源包、跨簇编辑、重载及在途替换；分别记录稳态GPU/CPU、显存峰值、源到可见p95和吞吐。无窗口数据与功能近似不能外推完整游戏收益或旧效果完全等价。
 - [ ] 补足已声明的支持边界：复杂开放/随机玻璃和未知UV/光学来源、动态介质/发光、foliage 源拓扑、折射焦散及更准确的间接光纹理footprint。LabPBR 解码/采样已接入，新增物理用途须先确定真实需求和成本，不引入任意层数或通用CSG框架。
-- [ ] 继续控制实际显存高水位：在途退休与纹理/灯分项、真实裁切退化占比、整空页归还、AS与scratch分池、静态BLAS压缩。现有页仍保留历史容量；不以三角形数或累计allocated_bytes代替驱动常驻量。
+- [ ] 继续评估实际显存高水位：静态BLAS压缩、AS/临时上传空页回收已接入，测其碎片和在途双份成本；纹理/灯、材质等其他池的容量/退休分项记录。部分池仍保留高水位，不以三角形数或累计allocated_bytes代替驱动常驻量。
 - [ ] 持续审查收益与复杂度：规范源已前移，但最终合并/分组仍有成本；只在完整数据流收益充分时增加缓存、硬件纹理分页或GPU展开，不围绕局部指标叠加状态。每轮保留原始样本、较慢场景与明确取舍。
 
 ## 大气迁移与成本
 
 - [x] 保留旧物理场与调优默认，Safetensors 资产和离线 solver；Java 路由实际太阳角，Rust 管理天空、太阳、空气透视与遮挡缓存。契约见 [大气文档](docs/atmosphere.md)。
 - [x] 迁移旧纬度/太阳黄经天文系统，游戏时间驱动昼夜；设置与帧 ABI 显式传递，离线冻结保持同一时角与天文参数。覆盖四季、南北半球、极昼极夜和双版本 FFM 图像行为。
+- [ ] 移植旧手动 aerosol density / altitude offset 时补实际配置、固定LUT支持范围与更新依赖；当前大气保持固定介质。天气/维度/月亮/云在旧项目也未完整接入，单独定义来源与数学合同。
 - [ ] 用户验收原生 1080p 连续昼夜、升降/转向/跑图、洞穴/顶棚编辑及离线冻结，记录 GPU 准备/渲染与更新 p95。局部 SkyView 查询加速不代表整帧收益。
 - [ ] 按实测评估遮挡列的空间局部失效。已证明不影响遮挡的 RGB 变化复用缓存，实际遮挡依赖变化仍保守整体失效；仅在整帧或更新 p95 收益足够时保留更复杂的空间索引，不先引入分帧掩饰延迟。
 
 ## 编译验证设施
 
 - [x] 固定资产、生产 SPIR-V、显式测试 SPIR-V 与 Vulkan 宿主分为独立 crate；非内联访问器隔离 payload metadata。Slang 按实际依赖与工具链内容缓存各入口变体，保留 `-O3 -g3`，并行受 Cargo jobserver 限制；开发入口见 CONTRIBUTING。
+- [x] 设备管线磁盘缓存接入 PT/ReSTIR、大气与显示，校验设备/驱动身份、内容与长度，损坏冷启动、初始化/关闭保存及原子替换；稳态不做缓存I/O。实际冷/热启动收益仍待测。
+- [ ] 对照旧并行管线创建、私有 cache 合并、共享 program/prewarm：先记录驱动 CPU 建管线、完整启动/模式切换及重复创建比例，只有收益足够才增加线程、共享状态与初始化内存。
+- [x] 定向 Cargo 入口核验发现/执行名单与通过数量，零匹配或仅ignored失败；CPU smoke 校验请求/完成组，冲突/非法布尔请求失败。测试 owned Vulkan instance 的 validation ERROR 在清理后判失败；纯宿主组和CPU诊断使用最小依赖。入口与证据边界见 CONTRIBUTING。
+- [ ] 将快速 CPU/ABI、双版真实宿主和显式 GPU/SDK 检查接入自动执行；旧 CI 的验证目标尚未完整迁移。本地脚本与 manifest 已有，硬件不可用、未执行或跳过仍不能算通过；不按覆盖率数字复制重复夹具。
 - [ ] 根据 Rust type-check/codegen/link 的实际耗时继续评估 CPU 准备模块的 crate 边界；仅在节省迭代时间足以抵偿新增跨 crate 接口时提取，不按源码行数拆分 GPU owner。保留生产 LTO/优化语义，编译收益与运行性能分别验收。
 - [x] 双版本共用实际 SectionCompiler 对拍入口，固定整数材质/绕序/重复面语义及浮点容限；覆盖完整编译、增量编辑、原版串并行一致性和大坐标比较精度。
 - [x] 同工作集、同线程数的原版/Java→FFM→Rust CPU 基准；独立 release 库，多轮新 JVM，保存原始样本、工具链/输入哈希、阶段时长与离群值。入口见 CONTRIBUTING。
@@ -135,7 +150,7 @@ Java 绑定实际源字段，Rust 负责语义编译、调度和资源，GPU 直
 
 当前 CPU 瓶颈按非阻塞性能债处理，不要求先达到“真实存档完全不受 CPU 限制”才能继续其他开发；这不表示已消除瓶颈或降低正确性要求。已接入普通物品的持久原型、方块实体候选筛选、raw 工作区复用及静态来源增量链，整帧收益仍需用户手动验证。已完成项只表示所述局部契约已验证，其余是待实现/验证的方向。
 
-- [x] 常驻粗粒度 CPU/GPU 阶段计时及 50 ms 慢帧警告。保留同次 native serial 的资源准备/等待/工作量快照，按需写入游戏日志；光照通知来源单独计数，仍保留真实失效回调。阈值、口径、双版本源事件和 CPU FFM 已有行为测试；GPU 阶段与实际尾延迟仍须手动验收。
+- [x] 按需 CPU/GPU 阶段计时与紧凑 JSON 性能导出；关闭时不收集详细时钟，历史常驻慢帧日志已移除。保留真实帧/提交、工作量、光照通知及缺失状态；双版本源事件、完整JSON与CPU FFM已有行为测试，GPU尾延迟和游戏内操作仍需手动验收。
 - [ ] 继续降低冷群系源字段传输、原生选择/过滤及输出缓存成本。保持实际三维群系和精确整数混合；扩大到真实存档流送，区分缓存命中、颜色失效与几何编辑，不能将受控冷缓存收益当成整帧保证。
 - [x] 标准群系选择与求色直接在 Rust 计算：批量绑定实际三维群系调色板、zoom seed、颜色参数和资源包色表，按版本保持原版 zoom 与特殊修色精度；未知自定义颜色源继续走实际回调。双版本实际 MC 数学/几何对拍和大规模冷资源、全部颜色失效、部分列更新覆盖 p95 与吞吐量；真实存档流送仍待手动验收。
 - [x] 冷群系采样改为查询方形的精确并集，按实际解析器/Y/16×16源块索引去重，半径0省去前缀和；全部半径和稀疏边界由标量性质测试覆盖。着色 CPU 夹具可扩展到大批量，实际宿主求色及游戏流送仍需继续测量。

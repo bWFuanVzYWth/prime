@@ -3,6 +3,7 @@ package dev.primept.capture;
 import com.mojang.blaze3d.vertex.VertexSorting;
 import dev.primept.NativeBridge;
 import dev.primept.abi.PrimeAbi.*;
+import dev.primept.settings.RenderSettings;
 import java.lang.foreign.MemorySegment;
 import java.io.DataOutputStream;
 import java.lang.foreign.ValueLayout;
@@ -129,6 +130,26 @@ final class SectionWorkload implements AutoCloseable {
                     replace ? 16 : 0, replace ? SourceSpriteFixture.atlas() : new byte[0]));
     }
 
+    private void configureWholeBatch(NativeBridge bridge) {
+        // This oracle compares complete closed workloads, not the production per-frame budget.
+        // Include empty halo cells: their publication consumes the same cell quota as geometry.
+        int cells = Math.toIntExact(
+                keys.stream()
+                        .map(k
+                             -> List.of(Math.floorDiv(k.x(), 4), Math.floorDiv(k.y(), 4),
+                                        Math.floorDiv(k.z(), 4)))
+                        .distinct()
+                        .count());
+        bridge.configure(RenderSettings.defaults().with(
+                                 RenderSettings.Control.TERRAIN_BATCHES_PER_FRAME, cells),
+                         false, RenderSettings.View.OUTPUT);
+    }
+
+    private static void requireWholeBatch(String diagnostics) {
+        if (nativeCount(diagnostics, "pending_cells") != 0)
+            throw new AssertionError("Incomplete closed workload: " + diagnostics);
+    }
+
     void write(Path directory) throws Exception {
         Files.writeString(directory.resolve(fixture.name() + ".workload.properties"),
                           "requested=" + keys.size() +
@@ -140,6 +161,7 @@ final class SectionWorkload implements AutoCloseable {
                      new NativeBridge(Path.of(System.getProperty("primept.smoke.nativeLibrary")));
              var tintResponse = new McSourceBatch()) {
             bridge.reset(1);
+            configureWholeBatch(bridge);
             var router = new SectionSources(models, fluids);
             // Source first: the oracle is not allowed to warm source model-selection caches.
             for (var k : keys)
@@ -215,7 +237,9 @@ final class SectionWorkload implements AutoCloseable {
                 request = biome ? bridge.biomes(response) : bridge.colors(response);
             }
         }
-        if (nativeCount(bridge.cpuDiagnostics(), "tint_callbacks") != 0)
+        String diagnostics = bridge.cpuDiagnostics();
+        requireWholeBatch(diagnostics);
+        if (nativeCount(diagnostics, "tint_callbacks") != 0)
             throw new AssertionError("Known vanilla tint source invoked a color callback");
     }
     private static void writeExpected(LegacyTerrainInbox expected, Path output) throws Exception {
@@ -296,6 +320,7 @@ final class SectionWorkload implements AutoCloseable {
                      var events = new McSourceBatch(); var response = new McSourceBatch();
                      var resources = new McSourceBatch()) {
                     bridge.reset(1);
+                    configureWholeBatch(bridge);
                     var router = new SectionSources(models, fluids);
                     for (var k : keys)
                         router.section(resources, response, k.x(), k.y(), k.z(),
@@ -369,6 +394,7 @@ final class SectionWorkload implements AutoCloseable {
                         }
                         String diagnostics =
                                 bridge.cpuDiagnostics(); // formatting and I/O are outside timed work
+                        requireWholeBatch(diagnostics);
                         long expectedRequests = sample < 0 || mode.equals("reload") ? keys.size()
                                                 : (mode.equals("idle") || mode.startsWith("biome"))
                                                         ? 0

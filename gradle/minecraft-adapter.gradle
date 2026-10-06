@@ -144,28 +144,69 @@ tasks.register('cpuSmokeJar', Jar) {
     from sourceSets.cpuSmoke.output
 }
 tasks.register('cpuSmoke', JavaExec) {
-    dependsOn tasks.named('classes'), tasks.named('cpuSmokeJar'), common.tasks.named('testClasses'), rootProject.tasks.named(providers.gradleProperty('primeptSectionSuite').isPresent() ? 'buildSectionBenchNative' : 'buildSourceCpuNative')
+    def smokeFlag = { String name ->
+        String value = providers.gradleProperty(name).getOrElse('false').trim()
+        if (!value.equalsIgnoreCase('true') && !value.equalsIgnoreCase('false'))
+            throw new GradleException("${name} must be true or false: ${value}")
+        value.equalsIgnoreCase('true')
+    }
+    boolean sectionSuite = smokeFlag('primeptSectionSuite')
+    boolean targetResize = smokeFlag('primeptSmokeTargetResize')
+    boolean foreign = smokeFlag('primeptSmokeForeign')
+    boolean sectionBench = smokeFlag('primeptSectionBench')
+    String registry = providers.gradleProperty('primeptSamplingRegistry').getOrElse('')
+    String routingCost = providers.gradleProperty('primeptSmokeRoutingCost').getOrElse('')
+    def selectors = []
+    if (sectionSuite) selectors.add('section')
+    if (targetResize) selectors.add('target_resize')
+    if (foreign) selectors.add('foreign')
+    if (!registry.isBlank()) selectors.add('sampling_registry')
+    if (!routingCost.isBlank()) selectors.add('routing_cost')
+    if (selectors.size() > 1)
+        throw new GradleException("Conflicting CPU smoke selectors: ${selectors}")
+    String selector = selectors.isEmpty() ? 'default' : selectors.first()
+    if (sectionBench && !sectionSuite)
+        throw new GradleException('primeptSectionBench=true requires primeptSectionSuite=true')
+    boolean nativeRequired = selector in ['default', 'foreign', 'section']
+    def manifest = layout.buildDirectory.file('cpu-smoke/result.json').get().asFile
+    dependsOn tasks.named('classes'), tasks.named('cpuSmokeJar'), common.tasks.named('testClasses')
+    if (nativeRequired && !providers.gradleProperty('primeptSectionNativeLibrary').isPresent())
+        dependsOn rootProject.tasks.named(sectionSuite ? 'buildSectionBenchNative' : 'buildSourceCpuNative')
     classpath = sourceSets.main.runtimeClasspath + common.sourceSets.test.output
     mainClass = 'dev.primept.FabricCpuTestLauncher'
     jvmArgs '--enable-native-access=ALL-UNNAMED'
     systemProperty 'fabric.development', 'true'
-    systemProperty 'primept.smoke.foreignWrapper', providers.gradleProperty('primeptSmokeForeign').getOrElse('false')
-    systemProperty 'primept.smoke.routingCost', providers.gradleProperty('primeptSmokeRoutingCost').getOrElse('')
-    systemProperty 'primept.smoke.targetResize', providers.gradleProperty('primeptSmokeTargetResize').getOrElse('false')
+    systemProperty 'primept.smoke.selector', selector
+    systemProperty 'primept.smoke.manifest', manifest.absolutePath
+    systemProperty 'primept.smoke.foreignWrapper', foreign.toString()
+    systemProperty 'primept.smoke.routingCost', routingCost
+    systemProperty 'primept.smoke.targetResize', targetResize.toString()
     systemProperty 'primept.smoke.namedOutput', providers.gradleProperty('primeptNamedOutput').map { rootProject.file(it).absolutePath }.getOrElse('')
     systemProperty 'primept.smoke.mcVersion', minecraftVersion
-    systemProperty 'primept.sampling.registry', providers.gradleProperty('primeptSamplingRegistry').map { rootProject.file(it).absolutePath }.getOrElse('')
-    systemProperty 'primept.section.suite', providers.gradleProperty('primeptSectionSuite').isPresent().toString()
-    systemProperty 'primept.section.bench', providers.gradleProperty('primeptSectionBench').getOrElse('false')
+    systemProperty 'primept.sampling.registry', registry.isBlank() ? '' : rootProject.file(registry).absolutePath
+    systemProperty 'primept.section.suite', sectionSuite.toString()
+    systemProperty 'primept.section.bench', sectionBench.toString()
     systemProperty 'primept.section.threads', providers.gradleProperty('primeptSectionThreads').getOrElse('8')
     systemProperty 'primept.section.warmup', providers.gradleProperty('primeptSectionWarmup').getOrElse('8')
     systemProperty 'primept.section.samples', providers.gradleProperty('primeptSectionSamples').getOrElse('25')
     systemProperty 'primept.section.side', providers.gradleProperty('primeptSectionSide').getOrElse('2')
     systemProperty 'primept.section.tintSide', providers.gradleProperty('primeptSectionTintSide').getOrElse('2')
     systemProperty 'primept.smoke.routingDirectory', providers.gradleProperty('primeptSectionOutput').map { rootProject.file("${it}/mc-${minecraftVersion}").absolutePath }.getOrElse(layout.buildDirectory.dir('routing-fixtures').get().asFile.absolutePath)
-    systemProperty 'primept.smoke.nativeLibrary', providers.gradleProperty('primeptSectionNativeLibrary').map { rootProject.file(it).absolutePath }.getOrElse(rootProject.file(providers.gradleProperty('primeptSectionSuite').isPresent() ? "build/section-bench-native/release/${hostLibraryName}" : "build/source-cpu-native/debug/${hostLibraryName}").absolutePath)
+    systemProperty 'primept.smoke.nativeLibrary', providers.gradleProperty('primeptSectionNativeLibrary').map { rootProject.file(it).absolutePath }.getOrElse(rootProject.file(sectionSuite ? "build/section-bench-native/release/${hostLibraryName}" : "build/source-cpu-native/debug/${hostLibraryName}").absolutePath)
     systemProperty 'fabric.addMods', tasks.named('cpuSmokeJar').get().archiveFile.get().asFile.absolutePath
     systemProperty 'fabric.classPathGroups', sourceSets.main.output.files.collect { it.absolutePath }.join(File.pathSeparator)
     workingDir layout.buildDirectory.dir('cpu-smoke')
-    doFirst { workingDir.mkdirs() }
+    doFirst {
+        workingDir.mkdirs()
+        java.nio.file.Files.deleteIfExists(manifest.toPath())
+    }
+    doLast {
+        if (!manifest.isFile()) throw new GradleException("CPU smoke did not write ${manifest}")
+        def result = new groovy.json.JsonSlurper().parse(manifest)
+        if (result.status != 'passed' || result.selector != selector || result.minecraft != minecraftVersion
+                || result.count <= 0 || result.count != result.executed.size()
+                || result.requested != result.executed)
+            throw new GradleException("CPU smoke execution does not match its request: ${result}")
+        logger.lifecycle("CPU smoke ${minecraftVersion}: ${result.executed}, ${result.count} completed fixture groups; ${manifest}")
+    }
 }

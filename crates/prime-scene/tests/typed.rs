@@ -2,12 +2,198 @@ use prime_abi::{
     scene::{DynamicView, InstancesView, TexturesView},
     *,
 };
+use prime_scene::settings::{
+    DiagnosticView, Integrator, LightSampling, ReconstructionQuality, RenderMode, RestirRrMode,
+    RestirSettings,
+};
 use prime_scene::{
     protocol::Frame,
     scene::{SourceScene, Texture},
     settings::RenderSettings,
 };
 use std::sync::Arc;
+
+#[test]
+fn typed_settings_distinct_fields_and_boolean_basis_detect_misrouting() {
+    let input = PrimeSettings {
+        header: header::<PrimeSettings>(),
+        mode: 1,
+        integrator: 1,
+        bounces: 7,
+        offline_samples: 3,
+        terrain_batches_per_frame: 5,
+        exposure: 1.25,
+        hue: 0.375,
+        saturation: 0.125,
+        view: 3,
+        sun: 2.0,
+        sky: 0.5,
+        stars: 1.5,
+        depth_range: 256.0,
+        seed: 0x2468_1357,
+        latitude_degrees: -37,
+        solar_longitude_degrees: 121,
+        opacity_micromap: 0,
+        native_noisy_output: 1,
+        reconstruction_quality: 4,
+        auto_exposure_compensation: 0.875,
+        hdr: 1,
+        hdr_reference_white: 140,
+        frame_generation: 0,
+        light_sampling: 1,
+        ignore_global_history_resets: 1,
+        restir_spatial_only: 0,
+        restir_history_length: 31,
+        restir_spatial_reuse: 0,
+        restir_spatial_iterations: 2,
+        restir_spatial_neighbors: 5,
+        restir_pairing_radius: 45,
+        restir_stochastic_reprojection: 1,
+        restir_duplicate_map: 0,
+        restir_duplication_power: 0.625,
+        restir_decoupled_shading: 1,
+        restir_initial_samples: 6,
+        restir_distance_threshold: 0.03125,
+        restir_distance_sigma: 0.0625,
+        restir_roughness_threshold: 0.1875,
+        restir_roughness_sigma: 0.25,
+        restir_normal_threshold: -0.3125,
+        restir_depth_threshold: 0.4375,
+        restir_debug_view: 2,
+        restir_rr_decorrelation: 0,
+        restir_rr_mode: 1,
+        restir_rr_factor: 0.5625,
+        restir_rr_stagnancy_exponent: 0.75,
+        restir_rr_ema: 0.6875,
+        restir_rr_firefly_strength: 0.8125,
+        restir_rr_multiply_bound: 17.0,
+        restir_rr_bias_reduction: 1,
+        restir_rr_firefly: 0,
+    };
+    // Expected semantics are specified separately from the decoder. Unequal values expose
+    // swapped/dropped float and count fields; boolean basis cases distinguish equal bit values.
+    let expected = RenderSettings {
+        astronomy: prime_scene::environment::Astronomy {
+            latitude_degrees: -37,
+            solar_longitude_degrees: 121,
+        },
+        mode: RenderMode::Offline,
+        integrator: Integrator::RestirPt,
+        bounces: 7,
+        offline_samples: 3,
+        terrain_batches_per_frame: 5,
+        exposure: 1.25,
+        hue: 0.375,
+        saturation: 0.125,
+        view: DiagnosticView::Normal,
+        sun: 2.0,
+        sky: 0.5,
+        stars: 1.5,
+        depth_range: 256.0,
+        seed: 0x2468_1357,
+        opacity_micromap: false,
+        native_noisy_output: true,
+        reconstruction_quality: ReconstructionQuality::UltraPerformance,
+        auto_exposure_compensation: 0.875,
+        hdr: true,
+        hdr_reference_white: 140,
+        frame_generation: false,
+        light_sampling: LightSampling::Tree,
+        ignore_global_history_resets: true,
+        restir_spatial_only: false,
+        restir: RestirSettings {
+            history_length: 31,
+            spatial_reuse: false,
+            spatial_iterations: 2,
+            spatial_neighbors: 5,
+            pairing_radius: 45,
+            stochastic_reprojection: true,
+            duplicate_map: false,
+            duplication_power: 0.625,
+            decoupled_shading: true,
+            initial_samples: 6,
+            distance_threshold: 0.03125,
+            distance_sigma: 0.0625,
+            roughness_threshold: 0.1875,
+            roughness_sigma: 0.25,
+            normal_threshold: -0.3125,
+            depth_threshold: 0.4375,
+            debug_view: 2,
+            rr_decorrelation: false,
+            rr_mode: RestirRrMode::Uniform,
+            rr_factor: 0.5625,
+            rr_stagnancy_exponent: 0.75,
+            rr_ema: 0.6875,
+            rr_firefly_strength: 0.8125,
+            rr_multiply_bound: 17.0,
+            rr_bias_reduction: true,
+            rr_firefly: false,
+        },
+    };
+    assert_eq!(RenderSettings::from_abi(&input).unwrap(), expected);
+    type Toggle = (fn(&mut PrimeSettings), fn(&mut RenderSettings));
+    let toggles: [Toggle; 13] = [
+        (
+            |s| s.opacity_micromap ^= 1,
+            |s| s.opacity_micromap = !s.opacity_micromap,
+        ),
+        (
+            |s| s.native_noisy_output ^= 1,
+            |s| s.native_noisy_output = !s.native_noisy_output,
+        ),
+        (|s| s.hdr ^= 1, |s| s.hdr = !s.hdr),
+        (
+            |s| s.frame_generation ^= 1,
+            |s| s.frame_generation = !s.frame_generation,
+        ),
+        (
+            |s| s.ignore_global_history_resets ^= 1,
+            |s| s.ignore_global_history_resets = !s.ignore_global_history_resets,
+        ),
+        (
+            |s| s.restir_spatial_only ^= 1,
+            |s| s.restir_spatial_only = !s.restir_spatial_only,
+        ),
+        (
+            |s| s.restir_spatial_reuse ^= 1,
+            |s| s.restir.spatial_reuse = !s.restir.spatial_reuse,
+        ),
+        (
+            |s| s.restir_stochastic_reprojection ^= 1,
+            |s| s.restir.stochastic_reprojection = !s.restir.stochastic_reprojection,
+        ),
+        (
+            |s| s.restir_duplicate_map ^= 1,
+            |s| s.restir.duplicate_map = !s.restir.duplicate_map,
+        ),
+        (
+            |s| s.restir_decoupled_shading ^= 1,
+            |s| s.restir.decoupled_shading = !s.restir.decoupled_shading,
+        ),
+        (
+            |s| s.restir_rr_decorrelation ^= 1,
+            |s| s.restir.rr_decorrelation = !s.restir.rr_decorrelation,
+        ),
+        (
+            |s| s.restir_rr_bias_reduction ^= 1,
+            |s| s.restir.rr_bias_reduction = !s.restir.rr_bias_reduction,
+        ),
+        (
+            |s| s.restir_rr_firefly ^= 1,
+            |s| s.restir.rr_firefly = !s.restir.rr_firefly,
+        ),
+    ];
+    for (toggle_input, toggle_expected) in toggles {
+        let mut changed_input = input;
+        let mut changed_expected = expected;
+        toggle_input(&mut changed_input);
+        toggle_expected(&mut changed_expected);
+        assert_eq!(
+            RenderSettings::from_abi(&changed_input).unwrap(),
+            changed_expected
+        );
+    }
+}
 
 fn header<T>() -> PrimeHeader {
     PrimeHeader {

@@ -69,6 +69,35 @@ struct InstanceOwner {
     instance: Instance,
     debug: Option<(ash::ext::debug_utils::Instance, vk::DebugUtilsMessengerEXT)>,
     owned: bool,
+    #[cfg(test)]
+    validation_errors: Box<ValidationErrors>,
+}
+
+// Test instances retain this stable callback address through messenger/device teardown.
+// Production logging and the game's externally owned validation policy are unchanged.
+#[cfg(test)]
+#[derive(Default)]
+struct ValidationErrors(AtomicU64);
+
+#[cfg(test)]
+impl ValidationErrors {
+    fn assert_clean(&self) {
+        if !std::thread::panicking() {
+            assert_eq!(
+                self.0.load(Ordering::Relaxed),
+                0,
+                "Vulkan validation errors in test instance"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+impl Drop for ValidationErrors {
+    fn drop(&mut self) {
+        // Outside the extern callback, after the owner has completed its existing cleanup.
+        self.assert_clean();
+    }
 }
 impl Drop for InstanceOwner {
     fn drop(&mut self) {
@@ -112,6 +141,10 @@ unsafe extern "system" fn validation(
     data: *const vk::DebugUtilsMessengerCallbackDataEXT<'_>,
     _user: *mut std::ffi::c_void,
 ) -> vk::Bool32 {
+    #[cfg(test)]
+    if severity.contains(vk::DebugUtilsMessageSeverityFlagsEXT::ERROR) && !_user.is_null() {
+        unsafe { &*_user.cast::<AtomicU64>() }.fetch_add(1, Ordering::Relaxed);
+    }
     if !data.is_null() {
         unsafe {
             eprintln!(
@@ -128,6 +161,86 @@ pub(super) struct OpacityMicromapSupport {
     pub synchronization: ash::khr::synchronization2::Device,
     pub max_two_state: u32,
     pub max_four_state: u32,
+}
+
+#[cfg(test)]
+mod validation_tests {
+    use super::*;
+
+    #[test]
+    fn callback_counts_errors_per_owner_and_fails_only_outside_ffi() {
+        let errors = Box::<ValidationErrors>::default();
+        let other = Box::<ValidationErrors>::default();
+        let user = (&errors.0 as *const AtomicU64).cast_mut().cast();
+        unsafe {
+            assert_eq!(
+                validation(
+                    vk::DebugUtilsMessageSeverityFlagsEXT::WARNING,
+                    vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION,
+                    std::ptr::null(),
+                    user
+                ),
+                vk::FALSE
+            );
+            assert_eq!(errors.0.load(Ordering::Relaxed), 0);
+            assert_eq!(
+                validation(
+                    vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
+                    vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION,
+                    std::ptr::null(),
+                    user
+                ),
+                vk::FALSE
+            );
+        }
+        assert_eq!(errors.0.load(Ordering::Relaxed), 1);
+        assert_eq!(other.0.load(Ordering::Relaxed), 0);
+        drop(other);
+        assert!(std::panic::catch_unwind(move || drop(errors)).is_err());
+    }
+
+    #[test]
+    fn error_observer_does_not_double_panic_during_an_existing_failure() {
+        assert!(
+            std::panic::catch_unwind(|| {
+                let errors = ValidationErrors(AtomicU64::new(1));
+                let _keep_alive = errors;
+                panic!("original test failure");
+            })
+            .is_err()
+        );
+    }
+
+    #[test]
+    #[ignore = "windowless Vulkan validation messenger; injects a diagnostic, no invalid GPU command"]
+    fn gpu_validation_error_is_caught_by_the_owned_test_instance() {
+        let context = Context::new().unwrap();
+        let (loader, _) = context
+            ._instance
+            .debug
+            .as_ref()
+            .expect("run this test with PRIME_VK_VALIDATION=1");
+        context
+            .submit_named("validation_owner_probe", |_| {})
+            .unwrap();
+        unsafe {
+            loader.submit_debug_utils_message(
+                vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
+                vk::DebugUtilsMessageTypeFlagsEXT::GENERAL,
+                &vk::DebugUtilsMessengerCallbackDataEXT::default()
+                    .message(c"intentional test: certify error observer and owner failure"),
+            );
+        }
+        assert_eq!(
+            context
+                ._instance
+                .validation_errors
+                .0
+                .load(Ordering::Relaxed),
+            1
+        );
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(context))).is_err());
+    }
 }
 
 unsafe fn micromap_supported(
@@ -230,6 +343,10 @@ impl Drop for Context {
                 eprintln!(
                     "[Prime PT] Retaining Vulkan device after an unconfirmed submission failure"
                 );
+                // Quarantine intentionally retains InstanceOwner; its destructor cannot certify
+                // this test, so check the retained error counter here as well.
+                #[cfg(test)]
+                self._instance.validation_errors.assert_clean();
                 return;
             }
             if self.host.is_none() {
@@ -328,24 +445,30 @@ impl Context {
                 instance,
                 debug: None,
                 owned: true,
+                #[cfg(test)]
+                validation_errors: Box::default(),
             };
             if validation_enabled {
                 let loader = ash::ext::debug_utils::Instance::new(&owner._entry, &owner.instance);
-                let messenger = loader
-                    .create_debug_utils_messenger(
-                        &vk::DebugUtilsMessengerCreateInfoEXT::default()
-                            .message_severity(
-                                vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
-                                    | vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
-                            )
-                            .message_type(
-                                vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
-                                    | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
-                                    | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE,
-                            )
-                            .pfn_user_callback(Some(validation)),
-                        None,
+                let messenger_info = vk::DebugUtilsMessengerCreateInfoEXT::default()
+                    .message_severity(
+                        vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
+                            | vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
                     )
+                    .message_type(
+                        vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
+                            | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
+                            | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE,
+                    )
+                    .pfn_user_callback(Some(validation));
+                #[cfg(test)]
+                let messenger_info = messenger_info.user_data(
+                    (&owner.validation_errors.0 as *const AtomicU64)
+                        .cast_mut()
+                        .cast(),
+                );
+                let messenger = loader
+                    .create_debug_utils_messenger(&messenger_info, None)
                     .map_err(|e| error("Create Vulkan validation messenger", e))?;
                 owner.debug = Some((loader, messenger));
             }
@@ -641,6 +764,8 @@ impl Context {
                 instance,
                 debug: None,
                 owned: false,
+                #[cfg(test)]
+                validation_errors: Box::default(),
             });
             let physical = vk::PhysicalDevice::from_raw(physical);
             let properties = owner.instance.get_physical_device_properties(physical);
@@ -2152,6 +2277,7 @@ mod host_tests {
                     instance,
                     debug: None,
                     owned: false,
+                    validation_errors: Box::default(),
                 }),
                 device,
                 physical: vk::PhysicalDevice::null(),

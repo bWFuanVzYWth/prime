@@ -32,6 +32,17 @@ function Run-Checked([string]$Name, [string]$Program, [string[]]$Arguments) {
     & $Program @Arguments > (Join-Path $Output "$Name.log") 2>&1
     if ($LASTEXITCODE -ne 0) { throw "$Name failed; see $Output/$Name.log" }
 }
+function Assert-SectionInputs([string]$Root) {
+    foreach ($version in @('26.2', '26.3')) {
+        $fixtureRoot = Join-Path $Root "mc-$version/section-oracle"
+        $cases = Join-Path $fixtureRoot 'cases.txt'
+        $sources = @(Get-ChildItem -LiteralPath $fixtureRoot -File -Filter '*.source' -ErrorAction SilentlyContinue)
+        if (!(Test-Path -LiteralPath $cases) -or !([IO.File]::ReadAllText($cases).Trim()) -or
+            !$sources.Count -or @($sources | Where-Object Length -eq 0).Count) {
+            throw "Missing or empty oracle inputs for Minecraft $version"
+        }
+    }
+}
 Push-Location $workspace
 try {
     $env:PRIME_SECTION_SUITE_ROOT = $Output
@@ -51,19 +62,22 @@ try {
     Save-Metadata
     $gradleArgs = @(':mc-26.2:cpuSmoke', ':mc-26.3:cpuSmoke', '--no-parallel', '-PprimeptSectionSuite=true', "-PprimeptSectionThreads=$Threads", "-PprimeptSectionSide=$Side", "-PprimeptSectionTintSide=$TintSide", "-PprimeptSectionOutput=$Output")
     Run-Checked 'generate' '.\gradlew.bat' $gradleArgs
+    Assert-SectionInputs $Output
     $dll = Join-Path $workspace 'build/section-bench-native/release/prime_engine.dll'
     $metadata.nativeSha256 = (Get-FileHash -LiteralPath $dll -Algorithm SHA256).Hash
-    $tests = @('test', '-p', 'prime_minecraft', '--release', '--locked', '--lib', 'oracle', '--', '--include-ignored', '--test-threads=1')
-    Run-Checked 'compare' 'cargo' $tests
+    $testShell = (Get-Process -Id $PID).Path
+    $tests = @('-NoLogo', '-NoProfile', '-NonInteractive', '-File', (Join-Path $PSScriptRoot 'test-cargo.ps1'), '-Package', 'prime_minecraft', '-Release', '-Filter', 'oracle', '-IncludeIgnored')
+    Run-Checked 'compare' $testShell ($tests + @('-Output', (Join-Path $Output 'compare-contract')))
     if ($Bench) {
         for ($round = 1; $round -le $Rounds; ++$round) {
             $roundName = 'round-{0:d2}' -f $round
             $roundRoot = Join-Path $Output $roundName
             $roundArgs = $gradleArgs | Where-Object { !$_.StartsWith('-PprimeptSectionOutput=') }
             Run-Checked "bench-$roundName" '.\gradlew.bat' ($roundArgs + @("-PprimeptSectionOutput=$roundRoot", '-PprimeptSectionBench=true', "-PprimeptSectionWarmup=$Warmup", "-PprimeptSectionSamples=$Samples"))
+            Assert-SectionInputs $roundRoot
             # Each measurement uses fresh JVMs and regenerates its own inputs. Check those inputs too.
             $env:PRIME_SECTION_SUITE_ROOT = $roundRoot
-            Run-Checked "compare-$roundName" 'cargo' $tests
+            Run-Checked "compare-$roundName" $testShell ($tests + @('-Output', (Join-Path $roundRoot 'compare-contract')))
         }
         $env:PRIME_SECTION_SUITE_ROOT = $Output
         Run-Checked 'report' 'python' @('-X', 'utf8', 'scripts/section-bench-report.py', $Output)

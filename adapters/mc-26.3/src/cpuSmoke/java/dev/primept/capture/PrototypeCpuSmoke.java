@@ -4,6 +4,7 @@ import com.mojang.renderpearl.api.pipeline.PrimitiveTopology;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import com.mojang.blaze3d.vertex.PoseStack;
 import dev.primept.mixin.BufferBuilderAccessor;
+import dev.primept.SmokeSelection;
 import java.lang.reflect.Field;
 import java.util.EnumSet;
 import java.util.List;
@@ -22,48 +23,65 @@ import org.joml.Matrix4f;
 public final class PrototypeCpuSmoke implements PreLaunchEntrypoint {
     @Override
     public void onPreLaunch() {
+        SmokeSelection.Report report = null;
         try {
             String samplingRegistry = System.getProperty("primept.sampling.registry", "");
-            if (!samplingRegistry.isEmpty()) {
-                SamplingRegistryDump.run(java.nio.file.Path.of(samplingRegistry));
-                System.exit(0);
-            }
-            if (Boolean.getBoolean("primept.section.suite")) {
-                SectionSuite.run();
-                System.exit(0);
-            }
             String routingCost = System.getProperty("primept.smoke.routingCost", "");
-            if (!routingCost.isEmpty()) {
-                TerrainRoutingCostCpuSmoke.run(routingCost);
-                System.exit(0);
+            var selection = SmokeSelection.resolve(Map.of(
+                    "primeptSectionSuite", System.getProperty("primept.section.suite", "false"),
+                    "primeptSmokeTargetResize",
+                    System.getProperty("primept.smoke.targetResize", "false"),
+                    "primeptSmokeForeign",
+                    System.getProperty("primept.smoke.foreignWrapper", "false"),
+                    "primeptSectionBench", System.getProperty("primept.section.bench", "false"),
+                    "primeptSamplingRegistry", samplingRegistry, "primeptSmokeRoutingCost",
+                    routingCost));
+            if (!selection.id().equals(
+                        System.getProperty("primept.smoke.selector", selection.id())))
+                throw new IllegalStateException("Gradle and preLaunch smoke selectors differ");
+            report = selection.report(java.nio.file.Path.of(System.getProperty(
+                                              "primept.smoke.manifest", "result.json")),
+                                      System.getProperty("primept.smoke.mcVersion", "unknown"));
+            switch (selection) {
+            case SAMPLING_REGISTRY ->
+                report.run("sampling_registry",
+                           () -> SamplingRegistryDump.run(java.nio.file.Path.of(samplingRegistry)));
+            case SECTION -> report.run("section", SectionSuite::run);
+            case ROUTING_COST ->
+                report.run("routing_cost", () -> TerrainRoutingCostCpuSmoke.run(routingCost));
+            case TARGET_RESIZE -> report.run("target_resize", TargetResizeCpuSmoke::run);
+            case FOREIGN -> {
+                report.run("foreign_geometry", GeometryCacheCpuSmoke::foreign);
+                report.run("foreign_item", ItemCpuSmoke::foreign);
+                report.run("section_sources", SectionSourcesCpuSmoke::run);
             }
-            if (Boolean.getBoolean("primept.smoke.targetResize")) {
-                TargetResizeCpuSmoke.run();
-                System.exit(0);
+            case DEFAULT -> {
+                report.run("target_resize", TargetResizeCpuSmoke::run);
+                report.run("settings", SettingsCpuSmoke::run);
+                report.run("astronomy", AstronomyCpuSmoke::run);
+                report.run("geometry_cache", GeometryCacheCpuSmoke::run);
+                report.run("canonical_texture", CanonicalTextureCpuSmoke::run);
+                report.run("fabric_mesh", FabricMeshCpuSmoke::run);
+                report.run("item", ItemCpuSmoke::run);
+                report.run("custom", CustomCpuSmoke::run);
+                report.run("publication", PublicationCpuSmoke::run);
+                report.run("exclusive_terrain", ExclusiveTerrainCpuSmoke::run);
+                report.run("frame_profile", dev.primept.RenderProfileCpuSmoke::run);
+                report.run("model_sprite", ModelSpriteCpuSmoke::run);
+                report.run("prototype", PrototypeCpuSmoke::run);
+                System.out.println(
+                        "PRIME_PT_CPU_SMOKE_OK: actual transformed Cube/Draw hooks, 10000 instances, unchanged frame=0B, mutation, skipped native submit, raw fallback");
             }
-            if (Boolean.getBoolean("primept.smoke.foreignWrapper")) {
-                GeometryCacheCpuSmoke.foreign();
-                ItemCpuSmoke.foreign();
-                SectionSourcesCpuSmoke.run();
-                System.exit(0);
             }
-            TargetResizeCpuSmoke.run();
-            SettingsCpuSmoke.run();
-            AstronomyCpuSmoke.run();
-            GeometryCacheCpuSmoke.run();
-            CanonicalTextureCpuSmoke.run();
-            FabricMeshCpuSmoke.run();
-            ItemCpuSmoke.run();
-            CustomCpuSmoke.run();
-            PublicationCpuSmoke.run();
-            ExclusiveTerrainCpuSmoke.run();
-            dev.primept.RenderProfileCpuSmoke.run();
-            ModelSpriteCpuSmoke.run();
-            run();
-            System.out.println(
-                    "PRIME_PT_CPU_SMOKE_OK: actual transformed Cube/Draw hooks, 10000 instances, unchanged frame=0B, mutation, skipped native submit, raw fallback");
+            report.passed();
             System.exit(0);
         } catch (Throwable failure) {
+            if (report != null)
+                try {
+                    report.failed(failure);
+                } catch (Throwable reportFailure) {
+                    failure.addSuppressed(reportFailure);
+                }
             failure.printStackTrace();
             System.exit(1);
         }

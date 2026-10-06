@@ -102,8 +102,4 @@ accept!(
 accept!(prime_mc_colors, PrimeMcColorBatch, Colors, colors_typed);
 accept!(prime_mc_biomes, PrimeMcBiomeBatch, Biomes, biomes_typed);
 
-const _: PrimeMcPlanFn = prime_mc_plan;
-const _: PrimeMcSectionsFn = prime_mc_sections;
-const _: PrimeMcResourcesFn = prime_mc_resources;
-const _: PrimeMcColorsFn = prime_mc_colors;
-const _: PrimeMcBiomesFn = prime_mc_biomes;
+include!("minecraft_ffi_exports.rs");

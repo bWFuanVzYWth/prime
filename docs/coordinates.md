@@ -66,7 +66,7 @@ ReSTIR 时间复用也按无 jitter 的运动选择前帧 reservoir：`floor(pix
 
 Minecraft 26.2/26.3 的 Vulkan surface blit 将中间 UI 目标翻转到最终左上 swapchain。SDR FG 的 HUDless 直接读取 canonical baseline，mask 反向索引宿主 UI alpha；HDR pass 直接写 swapchain，按 canonical 像素读取 world/baseline，并反向索引宿主 UI。原帧与生成帧因此使用同一最终图像方向。
 
-FG 四张输入和最终 backbuffer 均属于 canonical 空间。motion 的 Y 分量、无 jitter 矩阵、jitter 符号和共用 frame-token 常量保持核心定义，不另做一次符号翻转。此合同修正不证明 FG 果冻的全部原因已解决；实际连续帧与窗口呈现仍按 PT-017 验收。
+FG 四张输入和最终 backbuffer 均属于 canonical 空间。motion 的 Y 分量、无 jitter 矩阵、jitter 符号和共用 frame-token 常量保持核心定义，不另做一次符号翻转。FG质量与窗口呈现已按用户确认关闭 PT-017，帧数显示错误独立按 PT-022 修复；接口回归仍验证此方向合同。
 
 ## 纹理 UV 的范围
 

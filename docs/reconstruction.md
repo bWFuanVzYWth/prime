@@ -117,4 +117,6 @@ Rust 在最后的手部/HUD 合成后准备 HUDless 和真实 UI 覆盖，借用
 
 FG 的输入仍可能被 SDK 的 Present 队列使用。更换尺寸/输出/质量、关闭 FG、世界/后端切换及销毁前，先读取 `DLSSGState.inputsProcessingCompletionFence` 和对应实际值，取得完成证明后关闭选项并释放 SDK 资源，再退休应用图像。未进入 Present 的输入通过关闭/释放取消，实际 SDK 等待失败则隔离所有者。正常图像复用依同一图形队列和 SDK 的 Present 队列约束，边界才执行有界等待；应用世界 timeline 和“经过几帧”都不是该消费者的证明。进程 SDK 在真实宿主设备关闭时最终退休。
 
-诊断提供 `fg_requested`、`fg_capable`、`fg_last_prepare_succeeded` 和 `fg_prepare_serial`，分别表示设置请求、SDK能力、最近一次输入准备及对应 serial；它们不证明已经显示生成帧。真实窗口的帧生成、Reflex 时序、HDR 和运动画质仍须手动验收。严格 RR Vulkan 检查必须零验证错误；有效有限输出或 SDK 返回成功不能覆盖内部同步失败。
+诊断提供 `fg_requested`、`fg_capable`、`fg_last_prepare_succeeded` 和 `fg_prepare_serial`，分别表示设置请求、SDK能力、最近一次输入准备及对应 serial；这些状态本身不证明已经显示生成帧。FG质量与真实呈现已按用户确认验收关闭，帧数显示错误独立修复；未覆盖的HDR/显示器范围另行验证。严格 RR Vulkan 检查仍必须零验证错误，有效有限输出或 SDK 返回成功不能覆盖内部同步失败。
+
+ReSTIR既有质量问题与FG呈现验收已按用户确认关闭；现存萤火虫及水下收敛振荡独立见[问题登记](../HACK.md)。当前5×5空间滤波是临时hack，不符合最终时域重建目标，不计作正式降噪后端完成。SDK严格同步和未支持来源边界仍独立维护。

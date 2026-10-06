@@ -27,6 +27,7 @@ public final class CpuDiagnosticsSmoke {
             long before = bridge.diagnosticsClock();
             bridge.reset(2);
             String captured = bridge.diagnosticsRead();
+            StrictTestJson.parse(captured);
             if (before < 0 || bridge.diagnosticsClock() < before || !captured.contains("\"cpu\"") ||
                 !captured.contains("\"f\":91") || !captured.contains("reset"))
                 throw new AssertionError("Real native reset interval missing from capture: " +
@@ -54,7 +55,7 @@ public final class CpuDiagnosticsSmoke {
                 tail.close();
                 Path exported =
                         Diagnostics.lastExport().get(10, java.util.concurrent.TimeUnit.SECONDS);
-                String report = java.nio.file.Files.readString(exported);
+                String report = StrictTestJson.read(exported);
                 if (!report.contains("\"sync\":[{"))
                     throw new AssertionError("Java/native capture must retain clock brackets");
                 verifyTransport(report, 92);
@@ -73,7 +74,7 @@ public final class CpuDiagnosticsSmoke {
                     throw new AssertionError(
                             "Diagnostic control error must stop recording and clear requests");
                 exported = Diagnostics.lastExport().get(10, java.util.concurrent.TimeUnit.SECONDS);
-                if (!java.nio.file.Files.readString(exported).contains("\"partial\":true"))
+                if (!StrictTestJson.read(exported).contains("\"partial\":true"))
                     throw new AssertionError(
                             "Diagnostic failure must export an explicit partial document");
                 bridge.reset(5); // The healthy native owner remains usable after diagnostics fail.
@@ -101,12 +102,14 @@ public final class CpuDiagnosticsSmoke {
                 Diagnostics.setCaptureRequested(false);
             }
             Path exported = Diagnostics.lastExport().get(10, java.util.concurrent.TimeUnit.SECONDS);
-            String json = java.nio.file.Files.readString(exported);
+            String json = StrictTestJson.read(exported);
             if (!json.contains("\"f\":93"))
                 throw new AssertionError("First native owner must inherit the current Java frame");
         }
         System.out.println(
-                "PRIME_CPU_DIAGNOSTICS_FFM_OK: ABI15 112B settings, native-noisy true/false with inverse RR and independent view consumed by native, power-distance Tree ID1, global-reset and spatial-only bools true/false captured, real reset and transport spans/frame, final tail, UTF-8, retained clock and owner thread; no GPU");
+                "PRIME_CPU_DIAGNOSTICS_FFM_OK: ABI" + dev.primept.abi.PrimeAbi.PRIME_ABI_VERSION +
+                " " + dev.primept.abi.PrimeAbi.PrimeSettings.SIZE +
+                "B settings, native-noisy true/false with inverse RR and independent view consumed by native, power-distance Tree ID1, global-reset and spatial-only bools true/false captured, real reset and transport spans/frame, final tail, UTF-8, retained clock and owner thread; no GPU");
     }
 
     private record Event(long id, long parent, long frame, int name, long start, long duration,

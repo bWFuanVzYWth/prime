@@ -27,7 +27,7 @@ const CHANNELS: [(u32, vk::Format, usize); 10] = [
 struct Fixture {
     context: Arc<Context>,
     pipeline: Pipeline,
-    _energy_lut: openpbr::EnergyLut,
+    _energy_lut: Arc<openpbr::EnergyLut>,
     _geometry: Geometry,
     images: Vec<Image>,
     constants: Buffer,
@@ -384,6 +384,24 @@ impl Fixture {
         instances: &InstanceScene,
         features: u32,
     ) -> Self {
+        Self::with_energy(
+            context,
+            scene,
+            extent,
+            instances,
+            features,
+            shared_energy(context),
+        )
+    }
+
+    fn with_energy(
+        context: &Arc<Context>,
+        scene: &Scene,
+        extent: [u32; 2],
+        instances: &InstanceScene,
+        features: u32,
+        energy_lut: Arc<openpbr::EnergyLut>,
+    ) -> Self {
         let mut geometry =
             Geometry::new(context, scene.into(), Arc::new(CpuWorkers::new(1).unwrap())).unwrap();
         geometry.objects.set_motion_enabled(features != 0);
@@ -424,7 +442,6 @@ impl Fixture {
             })
             .collect();
         let readback = Buffer::new_readback(context, byte_count as u64).unwrap();
-        let mut energy_lut = openpbr::EnergyLut::new(context).unwrap();
         let mut pipeline = Pipeline {
             context: context.clone(),
             layout: vk::PipelineLayout::null(),
@@ -441,7 +458,6 @@ impl Fixture {
             reconstruction_linear: None,
             restir: None,
         };
-        energy_lut.prepare().unwrap();
         unsafe {
             let mut bindings: Vec<_> = [
                 (0, vk::DescriptorType::ACCELERATION_STRUCTURE_KHR),
@@ -590,9 +606,8 @@ impl Fixture {
                 .device
                 .create_shader_module(&vk::ShaderModuleCreateInfo::default().code(&words), None)
                 .unwrap();
-            let built = context.device.create_compute_pipelines(
-                vk::PipelineCache::null(),
-                &[vk::ComputePipelineCreateInfo::default()
+            let built =
+                context.create_compute_pipelines(&[vk::ComputePipelineCreateInfo::default()
                     .layout(pipeline.layout)
                     .stage(
                         vk::PipelineShaderStageCreateInfo::default()
@@ -608,9 +623,7 @@ impl Fixture {
                                     }])
                                     .data(&features.to_le_bytes()),
                             ),
-                    )],
-                None,
-            );
+                    )]);
             context.device.destroy_shader_module(shader, None);
             pipeline.pipelines[0] = built.unwrap()[0];
         }
@@ -690,27 +703,25 @@ impl Fixture {
                 .device
                 .create_shader_module(&vk::ShaderModuleCreateInfo::default().code(&words), None)
                 .unwrap();
-            let result = self.context.device.create_compute_pipelines(
-                vk::PipelineCache::null(),
-                &[vk::ComputePipelineCreateInfo::default()
-                    .layout(self.pipeline.layout)
-                    .stage(
-                        vk::PipelineShaderStageCreateInfo::default()
-                            .stage(vk::ShaderStageFlags::COMPUTE)
-                            .module(shader)
-                            .name(c"main")
-                            .specialization_info(
-                                &vk::SpecializationInfo::default()
-                                    .map_entries(&[vk::SpecializationMapEntry {
-                                        constant_id: 3,
-                                        offset: 0,
-                                        size: 4,
-                                    }])
-                                    .data(&self.motion_features.to_le_bytes()),
-                            ),
-                    )],
-                None,
-            );
+            let result =
+                self.context
+                    .create_compute_pipelines(&[vk::ComputePipelineCreateInfo::default()
+                        .layout(self.pipeline.layout)
+                        .stage(
+                            vk::PipelineShaderStageCreateInfo::default()
+                                .stage(vk::ShaderStageFlags::COMPUTE)
+                                .module(shader)
+                                .name(c"main")
+                                .specialization_info(
+                                    &vk::SpecializationInfo::default()
+                                        .map_entries(&[vk::SpecializationMapEntry {
+                                            constant_id: 3,
+                                            offset: 0,
+                                            size: 4,
+                                        }])
+                                        .data(&self.motion_features.to_le_bytes()),
+                                ),
+                        )]);
             self.context.device.destroy_shader_module(shader, None);
             let pipeline = result.unwrap()[0];
             self.context
@@ -1010,6 +1021,12 @@ fn water(extinction: f32) -> Scene {
     )
 }
 
+fn shared_energy(context: &Arc<Context>) -> Arc<openpbr::EnergyLut> {
+    let mut energy = openpbr::EnergyLut::new(context).unwrap();
+    energy.prepare().unwrap();
+    Arc::new(energy)
+}
+
 fn mirror_chain() -> Scene {
     let mut mirror = plane(2.0, false);
     mirror.geometry.texture_id = 7;
@@ -1066,13 +1083,19 @@ fn slow_reflection() -> Scene {
 #[ignore = "windowless production K1 RR images; seed/roulette independence, odd edges and query budget"]
 fn gpu_primary_rr_images_are_stable_across_lighting_seeds_and_roulette() {
     let context = Context::new().unwrap();
+    let energy = shared_energy(&context);
     for (name, scene, minimum_budget) in [
         ("water", water(0.0), 3),
         ("absorbing_water", water(1e6), 3),
         ("glass_mirror_chain", mirror_chain(), 4),
         ("roulette_glass_layers", roulette_layers(), 4),
     ] {
-        let fixture = Fixture::new(&context, &scene, [17, 9]);
+        let instances = InstanceScene {
+            epoch: scene.epoch,
+            ..Default::default()
+        };
+        let fixture =
+            Fixture::with_energy(&context, &scene, [17, 9], &instances, 0, energy.clone());
         let expected = fixture.run(camera(), camera(), [0.125, -0.25], 0, 12);
         expected.resolved();
         expected.static_motion();
@@ -1231,12 +1254,82 @@ fn gpu_primary_rr_post_completes_rough_pixel_reflection_motion() {
 #[ignore = "windowless production RR mask: symmetric partial completion, TIR, reset and unknown dynamic motion"]
 fn gpu_primary_rr_partial_completion_tir_reset_and_dynamic_contracts() {
     let context = Context::new().unwrap();
+    let energy = shared_energy(&context);
     for (name, scene) in [
         ("transmission_budget_proxy", water(0.0)),
         ("reflection_budget_proxy", slow_reflection()),
     ] {
-        let fixture = Fixture::new(&context, &scene, [17, 9]);
+        let instances = InstanceScene {
+            epoch: scene.epoch,
+            ..Default::default()
+        };
+        let fixture =
+            Fixture::with_energy(&context, &scene, [17, 9], &instances, 0, energy.clone());
         let baseline = fixture.run(camera(), camera(), [0.125, -0.25], 0, 2);
+        let depth = baseline.channel(0);
+        let normal = baseline.channel(2);
+        let expected_depth = if name == "transmission_budget_proxy" {
+            1.0
+        } else {
+            2.0
+        };
+        let expected_roughness = if name == "transmission_budget_proxy" {
+            0.0
+        } else {
+            0.9
+        };
+        assert!(
+            depth
+                .iter()
+                .all(|value| (*value - expected_depth).abs() < 1e-5),
+            "{name}: budget chooses the first visited interface or completed main terminal"
+        );
+        for value in normal.as_chunks::<4>().0 {
+            assert_eq!(
+                &value[..3],
+                &[0.0, 0.0, -1.0],
+                "{name}: actual selected plane normal"
+            );
+            assert!(
+                (value[3] - expected_roughness).abs() < 0.001,
+                "{name}: selected material roughness, {} != {expected_roughness}",
+                value[3]
+            );
+        }
+        if name == "transmission_budget_proxy" {
+            let diffuse = baseline.channel(3);
+            let specular = baseline.channel(4);
+            let tangent = (f64::from(camera().vertical_fov_radians) * 0.5).tan();
+            let eta = f64::from(1.333f32);
+            for pixel in 0..17 * 9 {
+                let uv = [
+                    ((pixel % 17) as f64 + 0.625) / 17.0,
+                    ((pixel / 17) as f64 + 0.25) / 9.0,
+                ];
+                let ray_x = (2.0 * uv[0] - 1.0) * tangent * 17.0 / 9.0;
+                let ray_y = -(2.0 * uv[1] - 1.0) * tangent;
+                let cosine = (1.0 + ray_x * ray_x + ray_y * ray_y).sqrt().recip();
+                let transmitted = (1.0 - (1.0 - cosine * cosine) / (eta * eta)).sqrt();
+                let fresnel = 0.5
+                    * (((cosine - eta * transmitted) / (cosine + eta * transmitted)).powi(2)
+                        + ((eta * cosine - transmitted) / (eta * cosine + transmitted)).powi(2));
+                for channel in 0..3 {
+                    let reflection = f64::from(specular[pixel * 4 + channel]);
+                    let transmission = f64::from(diffuse[pixel * 4 + channel]);
+                    // The filtered energy LUT and FP16 storage approximate the analytic smooth
+                    // interface; this absolute allowance is separate from geometry/motion error.
+                    assert!(
+                        (reflection - fresnel).abs() < 0.002,
+                        "first water-interface specular pixel {pixel}/{channel}: {reflection} != {fresnel}"
+                    );
+                    assert!(
+                        (transmission - (1.0 - fresnel)).abs() < 0.002,
+                        "first water-interface diffuse pixel {pixel}/{channel}: {transmission} != {}",
+                        1.0 - fresnel
+                    );
+                }
+            }
+        }
         let mut selections = [0usize; 2];
         for seed in 0..32 {
             let actual = fixture.run(camera(), camera(), [0.125, -0.25], seed, 2);
@@ -1639,7 +1732,7 @@ fn gpu_primary_rr_exact_local_translation_uses_accepted_barycentric_corresponden
     scene.anchor = anchor;
     let pending = |snapshot: &Snapshot| {
         assert!(snapshot.0[6].iter().all(|status| *status == 40));
-        for channel in [1, 7, 9] {
+        for channel in [1, 7] {
             assert!(
                 snapshot
                     .channel(channel)
@@ -1648,6 +1741,10 @@ fn gpu_primary_rr_exact_local_translation_uses_accepted_barycentric_corresponden
                 "camera proxy allows FP32 physical hit/anchor roundoff, channel {channel}"
             );
         }
+        assert!(
+            snapshot.channel(9).iter().all(|motion| *motion == 0.0),
+            "Unknown FG correspondence retains exact finite zero, independently of RR camera proxy"
+        );
     };
     for first in [[0.0, 0.0, 3.0], [4.0, 6.0, 3.0]] {
         for shift in [[0.125, -0.25, 0.5], [0.1; 3]] {

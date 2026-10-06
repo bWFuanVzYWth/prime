@@ -60,7 +60,7 @@ class PerformanceCaptureTest {
         assertFalse(exported.isDone(), "The explicit final scope must finish before finalization");
         assertSame(Diagnostics.span("disabled"), Diagnostics.span(capture, "late_read"));
         stop.close();
-        String json = Files.readString(exported.get(10, TimeUnit.SECONDS));
+        String json = StrictTestJson.read(exported.get(10, TimeUnit.SECONDS));
         assertTrue(json.contains("\"partial\":false"));
         assertTrue(json.contains("\"reject\":0"));
         var event = EVENT.matcher(json);
@@ -92,7 +92,7 @@ class PerformanceCaptureTest {
         assertFalse(Diagnostics.lastExport().isDone(),
                     "An open interval must finish before finalization");
         outer.close();
-        String json = Files.readString(Diagnostics.lastExport().get(10, TimeUnit.SECONDS));
+        String json = StrictTestJson.read(Diagnostics.lastExport().get(10, TimeUnit.SECONDS));
         assertTrue(json.contains("\"partial\":false"));
         assertTrue(json.contains("\"reject\":0"));
         assertTrue(json.contains("\"d\":9007199254740993"));
@@ -130,7 +130,7 @@ class PerformanceCaptureTest {
         try (var current = Diagnostics.span("current")) {
         }
         Diagnostics.setCaptureRequested(false);
-        String json = Files.readString(Diagnostics.lastExport().get(10, TimeUnit.SECONDS));
+        String json = StrictTestJson.read(Diagnostics.lastExport().get(10, TimeUnit.SECONDS));
         var event = EVENT.matcher(json);
         assertTrue(event.find());
         String dispatchId = event.group(1);
@@ -152,7 +152,7 @@ class PerformanceCaptureTest {
         Diagnostics.boundary("renderer_failure");
         tail.fail();
         tail.close();
-        String json = Files.readString(Diagnostics.lastExport().get(10, TimeUnit.SECONDS));
+        String json = StrictTestJson.read(Diagnostics.lastExport().get(10, TimeUnit.SECONDS));
         assertTrue(json.contains("\"partial\":true"));
         assertTrue(json.contains("\"reject\":0"));
         assertTrue(json.contains("failed_tail"));
@@ -184,7 +184,7 @@ class PerformanceCaptureTest {
             worker.join();
         assertNull(failure.get());
         Diagnostics.boundary("world_exit");
-        String json = Files.readString(Diagnostics.lastExport().get(10, TimeUnit.SECONDS));
+        String json = StrictTestJson.read(Diagnostics.lastExport().get(10, TimeUnit.SECONDS));
         var event = EVENT.matcher(json);
         var roots = new HashSet<String>();
         var parents = new java.util.ArrayList<String>();
@@ -220,7 +220,7 @@ class PerformanceCaptureTest {
         capture.nativeChunk("{\"dict\":{\"nb\":1,\"n\":[]},\"cpu\":[{\"i\":2}]}");
         for (int i = 0; i < 2000; ++i)
             capture.javaEvent("{\"seq\":" + i + "}");
-        String json = Files.readString(capture.stop("disabled", "").get(10, TimeUnit.SECONDS));
+        String json = StrictTestJson.read(capture.stop("disabled", "").get(10, TimeUnit.SECONDS));
         assertTrue(json.contains("\"partial\":false"));
         assertTrue(json.contains("\"reject\":0"));
         assertTrue(json.contains("\"nb\":0"));
@@ -235,6 +235,25 @@ class PerformanceCaptureTest {
         try (var files = Files.list(directory)) {
             assertEquals(1, files.count());
         }
+    }
+
+    @Test
+    void wholeJsonValidationRejectsMalformedSuffixAndLenientSyntax() {
+        String event =
+                "{\"i\":1,\"p\":null,\"f\":31,\"n\":0,\"s\":1,\"d\":2,\"t\":3,\"ok\":true,\"a\":{\"bytes\":17}}";
+        String valid = "{\"partial\":false,\"reject\":0,\"events\":[" + event + "]}";
+        assertTrue(EVENT.matcher(valid + " trailing-invalid-json").find(),
+                   "The old event-fragment check alone could miss this corruption");
+        assertDoesNotThrow(() -> StrictTestJson.parse(valid));
+        assertThrows(com.google.gson.JsonSyntaxException.class,
+                     () -> StrictTestJson.parse(valid + " trailing-invalid-json"));
+        assertThrows(com.google.gson.JsonSyntaxException.class,
+                     () -> StrictTestJson.parse("{\"partial\":false,}"));
+        assertThrows(com.google.gson.JsonSyntaxException.class,
+                     () -> StrictTestJson.parse("{/* invalid strict JSON */\"partial\":false}"));
+        var exact = StrictTestJson.parse("{\"n\":9007199254740993,\"max\":9223372036854775807}");
+        assertEquals(9_007_199_254_740_993L, exact.get("n").getAsLong());
+        assertEquals(Long.MAX_VALUE, exact.get("max").getAsLong());
     }
 
     @Test

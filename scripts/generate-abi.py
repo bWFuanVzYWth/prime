@@ -27,12 +27,56 @@ def read_header(path):
     return re.sub(r'#include "([^"]+)"', lambda m: read_header(path.parent / m[1]), text)
 
 
-def generate():
-    source = re.sub(r"/\*.*?\*/|//[^\n]*", "", read_header(HEADER), flags=re.S)
+STRUCT = re.compile(r"typedef\s+struct\s+(\w+)\s*\{([^}]+)\}\s*(\w+)\s*;", re.S)
+
+
+def functions_from_source(source, types):
+    # Only declarations remain after supported PODs and the header wrappers.
+    # A full match prevents unsupported public declarations from disappearing.
+    declarations = STRUCT.sub("", source)
+    declarations = re.sub(r'#ifdef\s+__cplusplus\s+(?:extern\s+"C"\s*\{|\})\s*#endif', "", declarations)
+    declarations = re.sub(r"^\s*#.*$", "", declarations, flags=re.M)
+    functions = []
+    names = set()
+    statements = declarations.split(";")
+    if statements[-1].strip():
+        raise ValueError(f"Unterminated ABI declaration: {statements[-1].strip()}")
+    for declaration in statements[:-1]:
+        declaration = declaration.strip()
+        if not declaration:
+            continue
+        match = re.fullmatch(r"(uint32_t|uint64_t|int32_t|void)\s+(prime_\w+)\s*\(([^()]*)\)", declaration)
+        if not match:
+            raise ValueError(f"Unsupported ABI declaration: {declaration}")
+        result, name, arguments = match.groups()
+        if name in names:
+            raise ValueError(f"Duplicate ABI declaration: {name}")
+        names.add(name)
+        args = []
+        if arguments.strip() != "void":
+            if not arguments.strip():
+                raise ValueError(f"ABI function requires explicit void or typed arguments: {name}")
+            for argument in arguments.split(","):
+                argument = argument.strip()
+                match = re.fullmatch(r"(const\s+)?(\w+)\s*(\*)?\s*(\w+)", argument)
+                if not match:
+                    raise ValueError(f"Unsupported ABI argument in {name}: {argument}")
+                const, kind, pointer, field = match.groups()
+                if kind not in SCALARS and not (pointer and (kind in types or kind == "void")):
+                    raise ValueError(f"Unsupported ABI argument type in {name}: {argument}")
+                args.append((bool(const), kind, bool(pointer), field))
+        functions.append((result, name, args))
+    return functions
+
+
+def generate(header=None, root=None):
+    header = header or HEADER
+    root = root or ROOT
+    source = re.sub(r"/\*.*?\*/|//[^\n]*", "", read_header(header), flags=re.S)
     constants = re.findall(r"^#define\s+(PRIME_\w+)\s+(0x[0-9A-Fa-f]+|\d+)\s*$", source, re.M)
     types = {}
     structs = []
-    for m in re.finditer(r"typedef\s+struct\s+(\w+)\s*\{([^}]+)\}\s*(\w+)\s*;", source, re.S):
+    for m in STRUCT.finditer(source):
         name, body, alias = m.groups()
         if name != alias:
             raise ValueError(f"Use matching struct tag/typedef: {name}")
@@ -46,6 +90,10 @@ def generate():
                 raise ValueError(f"Unsupported C field: {declaration}")
             const, kind, pointer, field, count = f.groups()
             count = int(count) if count else None
+            if kind not in SCALARS and kind not in types and not (pointer and kind == "void"):
+                raise ValueError(f"Unsupported C field type in {name}: {declaration}")
+            if count == 0:
+                raise ValueError(f"C arrays must have a positive fixed size: {declaration}")
             if pointer:
                 fs, fa = 8, 8
             elif kind in SCALARS:
@@ -124,27 +172,24 @@ def generate():
             expected[key] = offset
             probe.append(f'    printf("{key}=%zu\\n", offsetof({name}, {field}));')
 
-    functions = re.findall(r"(uint32_t|uint64_t|int32_t|void)\s+(prime_\w+)\s*\(([^;]*)\)\s*;", source)
+    functions = functions_from_source(source, types)
+    checks = {"ffi_exports.rs": [], "minecraft_ffi_exports.rs": []}
     for result, name, arguments in functions:
         arglayouts = []
         rustargs = []
         cargs = []
-        for arg in arguments.split(","):
-            arg = arg.strip()
-            if arg and arg != "void":
-                arglayouts.append("ADDRESS" if "*" in arg else SCALARS[arg.split()[0]][3])
-                m = re.fullmatch(r"(const\s+)?(\w+)\s*(\*)?\s*(\w+)", arg)
-                if not m:
-                    raise ValueError(f"Unsupported function argument: {arg}")
-                const, kind, pointer, field = m.groups()
-                rt = SCALARS.get(kind, (0,kind))[1]
-                if pointer:
-                    rt = ("*const " if const else "*mut ") + rt
-                rustargs.append(rt)
-                cargs.append(("const " if const else "") + kind + (" *" if pointer else ""))
+        for const, kind, pointer, _ in arguments:
+            arglayouts.append("ADDRESS" if pointer else SCALARS[kind][3])
+            rt = "std::ffi::c_void" if kind == "void" else SCALARS.get(kind, (0, kind))[1]
+            if pointer:
+                rt = ("*const " if const else "*mut ") + rt
+            rustargs.append(rt)
+            cargs.append(("const " if const else "") + kind + (" *" if pointer else ""))
         alias = "".join(x.capitalize() for x in name.split("_")) + "Fn"
         ret = "()" if result == "void" else SCALARS[result][1]
         rust.append(f'pub type {alias} = unsafe extern "C" fn({", ".join(rustargs)}) -> {ret};')
+        group = "minecraft_ffi_exports.rs" if name.startswith("prime_mc_") else "ffi_exports.rs"
+        checks[group].append(f"const _: prime_abi::{alias} = {name};")
         probe.insert(3, f'typedef {result} (*{alias})({", ".join(cargs) if cargs else "void"});')
         probe.append(f'    _Static_assert(_Generic(&{name}, {alias}: 1, default: 0), "{name} signature");')
         factory = "ofVoid(" if result == "void" else "of(" + SCALARS[result][3] + (", " if arglayouts else "")
@@ -157,10 +202,30 @@ def generate():
              "        };", "        return Linker.nativeLinker().downcallHandle(",
              "                lookup.find(name).orElseThrow(() -> new UnsatisfiedLinkError(name)), descriptor);", "    }", "}"]
     probe += ["    return 0;", "}"]
-    return {
-        ROOT / "crates/prime-abi/src/generated.rs": "\n".join(rust) + "\n",
-        ROOT / "adapters/common/src/main/java/dev/primept/abi/PrimeAbi.java": "\n".join(java) + "\n",
-    }, "\n".join(probe), expected
+    outputs = {
+        root / "crates/prime-abi/src/generated.rs": "\n".join(rust) + "\n",
+        root / "adapters/common/src/main/java/dev/primept/abi/PrimeAbi.java": "\n".join(java) + "\n",
+    }
+    for name, entries in checks.items():
+        outputs[root / "crates/prime-engine/src" / name] = "\n".join([
+            "// Generated by scripts/generate-abi.py; edit C headers, not this file.",
+            "// Compiled in the implementation module: every declared export must exist and match.",
+            *entries,
+        ]) + "\n"
+    return outputs, "\n".join(probe), expected
+
+
+def run_probe(probe, expected, header, compiler):
+    with tempfile.TemporaryDirectory(prefix="prime-abi-") as directory:
+        source = Path(directory) / "layout.c"
+        executable = Path(directory) / "layout.exe"
+        source.write_text(probe, encoding="utf-8")
+        subprocess.run([compiler, "-std=c11", "-I", str(header.parent), str(source), "-o", str(executable)], check=True)
+        output = subprocess.check_output([str(executable)], text=True)
+        actual = {key: int(value) for key, value in (line.split("=") for line in output.splitlines())}
+        if actual != expected:
+            raise ValueError(f"C compiler ABI layout mismatch: {actual}")
+        return len(actual)
 
 
 def main():
@@ -168,7 +233,10 @@ def main():
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--probe", metavar="C_COMPILER")
     args = parser.parse_args()
-    outputs, probe, expected = generate()
+    try:
+        outputs, probe, expected = generate()
+    except ValueError as error:
+        parser.error(str(error))
     for path, data in outputs.items():
         command = (["rustfmt", "--edition", "2024", "--emit", "stdout"] if path.suffix == ".rs" else
                    ["clang-format", "--style=file", "--fallback-style=none", f"--assume-filename={path}"])
@@ -180,16 +248,8 @@ def main():
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(data, encoding="utf-8", newline="\n")
     if args.probe:
-        with tempfile.TemporaryDirectory(prefix="prime-abi-") as directory:
-            source = Path(directory) / "layout.c"
-            executable = Path(directory) / "layout.exe"
-            source.write_text(probe, encoding="utf-8")
-            subprocess.run([args.probe, "-std=c11", "-I", str(HEADER.parent), str(source), "-o", str(executable)], check=True)
-            output = subprocess.check_output([str(executable)], text=True)
-            actual = {key: int(value) for key, value in (line.split("=") for line in output.splitlines())}
-            if actual != expected:
-                raise SystemExit(f"C compiler ABI layout mismatch: {actual}")
-            print(f"C compiler verified {len(actual)} layout facts")
+        facts = run_probe(probe, expected, HEADER, args.probe)
+        print(f"C compiler verified {facts} layout facts")
     print(f"ABI {'checked' if args.check else 'generated'}: {len(outputs)} files")
 
 
