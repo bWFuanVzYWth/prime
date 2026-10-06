@@ -30,3 +30,4 @@ const _: prime_abi::PrimeLastErrorFn = prime_last_error;
 const _: prime_abi::PrimeStreamlinePresentFn = prime_streamline_present;
 const _: prime_abi::PrimeStreamlineBootstrapFn = prime_streamline_bootstrap;
 const _: prime_abi::PrimeStreamlineFrameFn = prime_streamline_frame;
+const _: prime_abi::PrimeStreamlinePresentStatsFn = prime_streamline_present_stats;

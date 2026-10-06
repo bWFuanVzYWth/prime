@@ -6,7 +6,7 @@
 | --- | --- |
 | [整体架构与所有权](architecture.md) | 源数据到场景和 GPU 的数据流、增量更新、线程与资源生命周期 |
 | [自定义表面编译](surface-compiler.md) | 源关系与局部接触、部分矩形合并、直接 GPU 记录、介质、sprite 与功率距离灯树 |
-| [LabPBR 与 OpenPBR 支持子域](materials.md) | 源声明、规范通道、数值清洗、法线分布过滤、动画、完整模型的支持边界、保留的 LitePBR 近似与发光 |
+| [LabPBR 与 OpenPBR 支持子域](materials.md) | 源声明、规范通道、数值清洗、法线分布过滤、动画、完整模型的支持边界、CPU薄壁证明、厚SSS拒绝与发光 |
 | [镂空表面 OMM](opacity-micromaps.md) | 二值优先的有限资源模板、共享资源代次与运行时绑定、未知退路、Vulkan 能力和完成证明 |
 | [大气资产与缓存](atmosphere.md) | 固定物理场、天空/太阳/空气透视、GPU 遮挡列与更新依赖 |
 | [固定资产格式与分发](assets.md) | KTX2/Safetensors 选择、Zstd 压缩、Git LFS 存储、语义与来源身份、加载峰值及迁移验收 |
@@ -21,7 +21,7 @@
 | [Streamline、DLSS RR与帧生成](reconstruction.md) | preset F、超分档位、动态前态、重建与插帧输入、Present及完成证明 |
 | [FFM ABI](abi.md) | 生成的 C/FFM 结构、批量数组、输入验证与借用、宿主 Vulkan 接口 |
 | [宿主 Vulkan 流水线](pipeline.md) | 设备协商、直接输出、命令提交、同步、手部与 HUD 合成 |
-| [Slang 数学基础与显示策略](shaders.md) | 模块边界、OpenPBR 支持子域与 LitePBR 参考、可替换的 primeDRT、颜色空间、Z-Sobol、求交误差与尺寸历史 |
+| [Slang 数学基础与显示策略](shaders.md) | 模块边界、OpenPBR 支持子域与CPU源翻译、可替换的 primeDRT、颜色空间、Z-Sobol、求交误差与尺寸历史 |
 | [PT 依赖与性能设计](pt-state-design.md) | 数据依赖图、查询切面、CPU/GPU 边界、当前状态策略与修改前必须回答的性能问题；不声明最优，不锁定设计 |
 | [诊断与原始性能数据](diagnostics.md) | 按需诊断、关闭开销、跨线程任务、时钟域、紧凑 JSON 与后台导出 |
 | [行尾与源码格式](guides/git-line-endings.md) | 仓库级换行、格式工具与规范化边界 |

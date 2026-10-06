@@ -2,7 +2,7 @@
 module roulette_test;
 import "math/transport.slang";
 import "math/z_sobol.slang";
-import "../../shaders/pbr.slang";
+import "pbr/delta.slang";
 import "service/bsdf/contract/sample.slang";
 import "service/bsdf/support/sanitization.slang";
 
@@ -22,21 +22,35 @@ public float4 rrCpuEta(float etaScale, float relativeEta, bool transmission) {
                   float(primeRussianRouletteApplies(1, PRIME_RUSSIAN_ROULETTE_START)));
 }
 
-public PrimePbrSample rrCpuBsdf(float cosine, float roughness, bool thin, float4 incident,
-                                float4 transmitted, float3 randomValue) {
+public PrimePbrSample rrCpuDeltaBsdf(float cosine, bool thin, float4 incident, float4 transmitted,
+                                     float3 randomValue) {
     float3 view = float3(sqrt(max(0.0, 1.0 - cosine * cosine)), 0, cosine);
     PrimePbrVertex vertex =
-            primePbrVertex(float3(1), float3(0, 0, 1), 0, float3(1.0 - roughness, 4.0 / 255.0, 0),
-                           false, true, thin, true, view);
-    // This CPU fixture validates the shared roulette/eta seam through the retained Lite backend.
-    // Full OpenPBR uses its independent, actual-LUT old-source equivalence oracle.
-    return primeSampleLitePbrVertex(vertex, view, randomValue, incident, transmitted);
+            primePbrVertex(float3(1), float3(0, 0, 1), 0, float3(1.0, 4.0 / 255.0, 0), false, true,
+                           thin, true, view);
+    // Roulette's exact eta/medium seam needs only Full delta optics, which has no energy LUT.
+    // Continuous Full BSDF/roughness behavior is exercised by the actual-LUT GPU fixtures.
+    return primeSamplePbrDelta(vertex, view, float3(0, 0, 1), randomValue.z, incident, transmitted);
+}
+
+// Stable scalar/vector reports avoid depending on compiler-generated internal field suffixes.
+public float4 rrCpuDeltaMeasure(float cosine, bool thin, float4 incident, float4 transmitted,
+                                float3 randomValue) {
+    BsdfSample sample = rrCpuDeltaBsdf(cosine, thin, incident, transmitted, randomValue).bsdfSample;
+    return float4(sample.relativeEta, sample.pdf, sample.response.x, float(sample.eventFlags));
+}
+public float4 rrCpuDeltaMedium(float cosine, bool thin, float4 incident, float4 transmitted,
+                               float3 randomValue) {
+    return rrCpuDeltaBsdf(cosine, thin, incident, transmitted, randomValue).medium;
 }
 
 public BsdfSample rrCpuSanitize(float relativeEta, float pdf, float response) {
     BsdfSample sampleValue = {float3(0, 0, 1), float3(response), pdf, relativeEta,
                               PRIME_BSDF_EVENT_REFLECTION};
     return primeSanitizeBsdfSample(sampleValue);
+}
+public uint rrCpuSanitizeFlags(float relativeEta, float pdf, float response) {
+    return rrCpuSanitize(relativeEta, pdf, response).eventFlags;
 }
 
 public float rrCpuSobol(uint sampleIndex, uint seed, uint domain) {
@@ -72,13 +86,14 @@ public float3 rrCpuZeroNee(float3 accumulated, float3 source, float pdf, float c
     float4 a = inputs[2 * id.x], b = inputs[2 * id.x + 1];
     outputs[4 * id.x] = rrCpuMath(a);
     outputs[4 * id.x + 1] = rrCpuEta(a.w, b.x, b.y != 0);
-    PrimePbrSample sampled =
-            rrCpuBsdf(b.z, b.w, b.y != 0, float4(1, 0, 0, 0), float4(1.5, 0.01, 0.02, 0.03), a.xyz);
-    outputs[4 * id.x + 2] = float4(sampled.bsdfSample.relativeEta, sampled.bsdfSample.eventFlags,
-                                   sampled.medium.x, rrCpuBudget(id.x, 64));
+    float4 measure = rrCpuDeltaMeasure(b.z, b.y != 0, float4(1, 0, 0, 0),
+                                       float4(1.5, 0.01, 0.02, 0.03), a.xyz);
+    float4 medium = rrCpuDeltaMedium(b.z, b.y != 0, float4(1, 0, 0, 0),
+                                     float4(1.5, 0.01, 0.02, 0.03), a.xyz);
+    outputs[4 * id.x + 2] = float4(measure.x, measure.w, medium.x, rrCpuBudget(id.x, 64));
     BsdfSample cleaned = rrCpuSanitize(a.w, b.x, b.y);
     outputs[4 * id.x + 3] = float4(
             rrCpuSobol(id.x & 255u, 0, 8), cleaned.pdf, cleaned.relativeEta,
-            float(cleaned.eventFlags) + rrCpuNee(id.x, 64, 0.25, 0.5) +
+            float(rrCpuSanitizeFlags(a.w, b.x, b.y)) + rrCpuNee(id.x, 64, 0.25, 0.5) +
                     rrCpuZeroNee(a.xyz, b.xyz, a.w, b.x, a.xyz, b.xyz, b.y != 0, b.z != 0).x);
 }

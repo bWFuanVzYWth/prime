@@ -1,5 +1,7 @@
 package dev.primept;
 
+import static dev.primept.abi.PrimeAbi.*;
+import java.lang.foreign.Arena;
 import java.nio.file.Path;
 
 public final class CpuDiagnosticsSmoke {
@@ -8,6 +10,28 @@ public final class CpuDiagnosticsSmoke {
             var initial = bridge.cpuDiagnostics();
             if (!initial.contains("available=false"))
                 throw new AssertionError(initial);
+            try (var arena = Arena.ofConfined()) {
+                var snapshot = arena.allocate(PrimePresentationStats.LAYOUT);
+                for (int read = 0; read < 2; ++read) {
+                    snapshot.fill((byte)0x55);
+                    if (NativeBridge.presentationStatistics(snapshot) != 0)
+                        throw new AssertionError(
+                                "Actual CPU FFM presentation snapshot unavailable");
+                    var header = PrimePresentationStats.header(snapshot);
+                    if (PrimePresentationStats.SIZE != 40 ||
+                        PrimeHeader.struct_size(header) != 40 ||
+                        PrimeHeader.abi_version(header) != PRIME_ABI_VERSION ||
+                        PrimePresentationStats.active(snapshot) != 0 ||
+                        PrimePresentationStats.valid(snapshot) != 0 ||
+                        PrimePresentationStats.epoch(snapshot) != 0 ||
+                        PrimePresentationStats.sample_id(snapshot) != 0 ||
+                        PrimePresentationStats.total_presented(snapshot) != 0)
+                        throw new AssertionError(
+                                "CPU snapshot fabricated SDK state or changed its ABI");
+                }
+            }
+            if (!initial.equals(bridge.cpuDiagnostics()))
+                throw new AssertionError("Presentation statistics changed the CPU session");
             bridge.reset(1);
             if (!bridge.cpuDiagnostics().contains("available=false"))
                 throw new AssertionError("Source submission cannot fabricate renderer timings");
@@ -110,6 +134,10 @@ public final class CpuDiagnosticsSmoke {
                 "PRIME_CPU_DIAGNOSTICS_FFM_OK: ABI" + dev.primept.abi.PrimeAbi.PRIME_ABI_VERSION +
                 " " + dev.primept.abi.PrimeAbi.PrimeSettings.SIZE +
                 "B settings, native-noisy true/false with inverse RR and independent view consumed by native, power-distance Tree ID1, global-reset and spatial-only bools true/false captured, real reset and transport spans/frame, final tail, UTF-8, retained clock and owner thread; no GPU");
+        System.out.println(
+                "PRIME_PRESENTATION_STATS_FFM_OK: real exported 40B snapshot, ABI" +
+                PRIME_ABI_VERSION +
+                ", repeated poisoned output overwritten with inactive/invalid zero SDK counters, CPU session unchanged; no SDK/GPU");
     }
 
     private record Event(long id, long parent, long frame, int name, long start, long duration,

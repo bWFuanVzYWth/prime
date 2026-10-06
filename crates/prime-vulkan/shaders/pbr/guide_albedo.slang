@@ -4,8 +4,6 @@
 module "pbr/guide_albedo.slang";
 
 import "pbr/vertex.slang";
-import "bsdf/common/common.slang";
-import "bsdf/lite/guide_energy.slang";
 import "bsdf/full/contract/sample.slang";
 import "bsdf/full/math/microfacet_energy.slang";
 import "bsdf/full/math/microfacet_measure.slang";
@@ -53,40 +51,22 @@ public PrimeDenoiseAlbedos primePbrGuideAlbedos<Energy>(Energy energy, PrimePbrV
                                                  (float3(1.0) + f0 * (1.0 - ess) / ess);
     } else {
         uint code = vertex.control & PRIME_OPTICAL_FRESNEL_MASK;
-        float ior = primeOpenPbrF0ToIor(primeDecodeDielectricF0(code)) * (1.0 / incidentMedium.x);
+        float ior =
+                primeFullOpenPbrF0ToIor(primeDecodeDielectricF0(code)) * (1.0 / incidentMedium.x);
         uint subsurface = (vertex.control >> PRIME_OPTICAL_SUBSURFACE_SHIFT) & 0xffu;
         float weight = float(subsurface) / 190.0;
-        float3 baseEnergy;
-        float reflected;
-        if (primePbrVertexUsesLegacyThickSss(vertex)) {
-            PrimeOpenPbrMicrofacet liteMicrofacet;
-            liteMicrofacet.alpha = microfacet.alpha;
-            float energyIor = primeOpenPbrIorAdjustment(ior, 1.0);
-            float unusedSpecularScale;
-            reflected =
-                    primeFullOpenPbrMicrofacetEffectivelySmooth(microfacet)
-                            ? primeLiteDielectricFresnel(energyIor, abs(cosine))
-                            : primeLiteDielectricDirectionalClosure(liteMicrofacet, abs(cosine),
-                                                                    energyIor, unusedSpecularScale);
-            uint kind = weight == 1.0 ? PRIME_LITE_OPAQUE_SUBSURFACE
-                                      : PRIME_LITE_OPAQUE_MIXED_SUBSURFACE;
-            baseEnergy =
-                    primeLiteBaseEnergyCore(kind, vertex.baseColor, weight, 0u, vertex.baseColor);
-        } else {
-            reflected = primeFullOpenPbrMicrofacetDielectricMsCompensation(
-                                energy, microfacet, cosine, primeFullOpenPbrIorAdjustment(ior, 1.0))
-                                .z;
-            // Preserve Full's zero-roughness diffuse/subsurface blend and its operation order.
-            baseEnergy =
-                    weight > 0.0 && weight != 1.0
-                            ? (weight < 1.0 ? vertex.baseColor : float3(0.0)) * (1.0 - weight) +
-                                      vertex.baseColor * weight
-                            : (weight > 0.0 || cosine >= 0.0 ? vertex.baseColor : float3(0.0));
-        }
+        float reflected =
+                primeFullOpenPbrMicrofacetDielectricMsCompensation(
+                        energy, microfacet, cosine, primeFullOpenPbrIorAdjustment(ior, 1.0))
+                        .z;
+        // Preserve Full's zero-roughness diffuse/subsurface blend and its operation order.
+        float3 baseEnergy =
+                weight > 0.0 && weight != 1.0
+                        ? (weight < 1.0 ? vertex.baseColor : float3(0.0)) * (1.0 - weight) +
+                                  vertex.baseColor * weight
+                        : (weight > 0.0 || cosine >= 0.0 ? vertex.baseColor : float3(0.0));
         result.diffuse = baseEnergy * (1.0 - reflected);
-        result.specular =
-                float3(primePbrVertexUsesLegacyThickSss(vertex) ? 1.0 - (1.0 - reflected)
-                                                                : (cosine < 0.0 ? 0.0 : reflected));
+        result.specular = float3(cosine < 0.0 ? 0.0 : reflected);
     }
     result.diffuse = primeSanitizeDenoiseAlbedo(result.diffuse);
     result.specular = primeSanitizeDenoiseAlbedo(result.specular);

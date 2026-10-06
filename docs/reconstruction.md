@@ -113,10 +113,14 @@ CPU/ABI/shader/桥接行为检查不证明实际模型质量、窗口呈现或�
 
 FG 默认关闭，只在实时 RR 最终输出、锁定 SDK 报告支持且实际呈现尺寸/格式满足其要求时请求一个生成帧。PCL/Reflex 使用同一真实帧 token，依实际 begin、模拟结束、渲染结束与 Present 标记推进；不虚构 acquire/Present，也不在应用里额外 evaluate 一个“生成帧”来代替 interposer。
 
+F3在统计有效时根据SDK报告的呈现数量估算FPS，并附原始渲染FPS；`Minecraft.getFps()`及CPU帧时/限帧语义保留。能力和运行状态每个准备帧共用一次GetState，成功准备后记录其中的 `numFramesActuallyPresented`（包含真实帧，生成帧可被丢弃）。锁定SDK getter复制缓存而不清零；不能把同帧重复查询当成新的呈现，也不能按返回值相等跨帧去重。退休查询仍取得原输入完成证明，但不计入统计。遵循[官方Vulkan样例](https://github.com/nvpro-samples/vk_streamline/blob/main/main.cpp#L434)每帧只读一次的规则。
+
+40B快照只读取CPU标量，现有API锁暂忙返回1而不等待；关闭、失败、域变更重置epoch。Java最多4Hz读取，用单调至少1s窗口算率；低帧率或长读取间隔遇到同epoch的新样本时按完整elapsed求平均。inactive/invalid下次读取撤销，持续busy或sample不进展1.5s回到原版；已观察到中断后恢复须重新暖窗口。正常消费时关闭信息最多250ms被读取，实际低帧率会延长显示更新时间。首次暖窗口、无SDK及软件空间滤波不伪造FG倍数；此统计不等于每帧显示扫描/pacing测量。
+
 Rust 在最后的手部/HUD 合成后准备 HUDless 和真实 UI 覆盖，借用实际 swapchain 数量、格式及尺寸后向 SDK 标记。SDR HUDless 为编码 RGBA8；HDR HUDless 为以80nit等于1的线性 scRGB FP16，UI覆盖为 R8。不能将 SDR 编码图当线性 HDR 输入，也不能用恒零 UI mask 掩盖 HUD；源合成恢复的近似边界见[display.md](display.md)。
 
 FG 的输入仍可能被 SDK 的 Present 队列使用。更换尺寸/输出/质量、关闭 FG、世界/后端切换及销毁前，先读取 `DLSSGState.inputsProcessingCompletionFence` 和对应实际值，取得完成证明后关闭选项并释放 SDK 资源，再退休应用图像。未进入 Present 的输入通过关闭/释放取消，实际 SDK 等待失败则隔离所有者。正常图像复用依同一图形队列和 SDK 的 Present 队列约束，边界才执行有界等待；应用世界 timeline 和“经过几帧”都不是该消费者的证明。进程 SDK 在真实宿主设备关闭时最终退休。
 
-诊断提供 `fg_requested`、`fg_capable`、`fg_last_prepare_succeeded` 和 `fg_prepare_serial`，分别表示设置请求、SDK能力、最近一次输入准备及对应 serial；这些状态本身不证明已经显示生成帧。FG质量与真实呈现已按用户确认验收关闭，帧数显示错误独立修复；未覆盖的HDR/显示器范围另行验证。严格 RR Vulkan 检查仍必须零验证错误，有效有限输出或 SDK 返回成功不能覆盖内部同步失败。
+诊断提供 `fg_requested`、`fg_capable`、`fg_last_prepare_succeeded` 和 `fg_prepare_serial`，分别表示设置请求、SDK能力、最近一次输入准备及对应 serial；这些状态本身不证明已经显示生成帧。FG质量与真实呈现已按用户确认验收关闭；帧数显示已接入实际SDK计数，窗口与外部呈现工具对照、未覆盖的HDR/显示器范围由用户检查。严格 RR Vulkan 检查仍必须零验证错误，有效有限输出或 SDK 返回成功不能覆盖内部同步失败。
 
 ReSTIR既有质量问题与FG呈现验收已按用户确认关闭；现存萤火虫及水下收敛振荡独立见[问题登记](../HACK.md)。当前5×5空间滤波是临时hack，不符合最终时域重建目标，不计作正式降噪后端完成。SDK严格同步和未支持来源边界仍独立维护。

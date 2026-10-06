@@ -21,6 +21,16 @@ struct Size {
     width: u32,
     height: u32,
 }
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct PresentationStats {
+    pub epoch: u64,
+    pub total_presented: u64,
+    pub sample_id: u64,
+    pub active: u32,
+    pub valid: u32,
+}
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 struct Resource {
@@ -145,6 +155,7 @@ unsafe extern "C" {
     fn prime_sl_destroy(context: *mut c_void) -> i32;
     fn prime_sl_last_error() -> *const c_char;
     fn prime_sl_present(queue: u64, present_info: u64) -> i32;
+    fn prime_sl_present_stats(output: *mut PresentationStats) -> i32;
 }
 
 pub(crate) fn bootstrap() -> Result<(), String> {
@@ -181,6 +192,23 @@ pub(crate) unsafe fn present(queue: u64, present_info: u64) -> i32 {
     {
         let _ = (queue, present_info);
         vk::Result::ERROR_EXTENSION_NOT_PRESENT.as_raw()
+    }
+}
+
+pub(crate) fn presentation_stats() -> Result<Option<PresentationStats>, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let mut stats = PresentationStats::default();
+        let result = unsafe { prime_sl_present_stats(&mut stats) };
+        if result == 1 {
+            return Ok(None);
+        }
+        check(result)?;
+        Ok(Some(stats))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(Some(PresentationStats::default()))
     }
 }
 
@@ -476,6 +504,11 @@ mod tests {
         assert_eq!(std::mem::offset_of!(Frame, world_to_view), 88);
         assert_eq!(std::mem::offset_of!(Frame, images), 472);
         assert_eq!(align_of::<Frame>(), 8);
+        assert_eq!(size_of::<PresentationStats>(), 32);
+        assert_eq!(align_of::<PresentationStats>(), 8);
+        assert_eq!(std::mem::offset_of!(PresentationStats, sample_id), 16);
+        assert_eq!(std::mem::offset_of!(PresentationStats, active), 24);
+        assert_eq!(std::mem::offset_of!(PresentationStats, valid), 28);
         #[cfg(target_os = "windows")]
         assert_eq!(unsafe { prime_sl_abi_version() }, 2);
     }

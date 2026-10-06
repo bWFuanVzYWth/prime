@@ -522,6 +522,7 @@ pub(super) fn fixtures() -> Vec<(&'static str, Scene)> {
     coating.detail = Some(Arc::new(SurfaceDetail {
         mode: LayerMode::OverlayBoth,
         layer: SurfaceLayer {
+            material_thin: false,
             colors: [[1.; 4]; 4],
             uvs: [[0.; 2]; 4],
             texture_id: 7,
@@ -1318,8 +1319,9 @@ fn gpu_restir_authored_thin_sss_self_shift_preserves_source_measure() {
         let code = prime_shader_tests::restir_adapter_tree();
         for (mapped, label) in [(false, "plain"), (true, "mapped")] {
             let mut primary = face(2.);
-            // Cutout coverage is the declared material-thin source. Fully opaque texels
-            // keep this deterministic without turning it into a dielectric boundary.
+            // This fixture explicitly supplies the CPU topology proof for its source sheet.
+            // Coverage is independent and cannot authorize subsurface transmission.
+            primary.material_thin = true;
             primary.geometry.flags = 1;
             primary.geometry.texture_id = 8;
             let mut emitter = face(1.);
@@ -1328,7 +1330,7 @@ fn gpu_restir_authored_thin_sss_self_shift_preserves_source_measure() {
             let mut material = texture(1, 1, vec![255; 4]);
             material.material = Some(Arc::new(TextureMaterial {
                 // Roughness1, non-conductor F0, pure SSS, no authored emission.
-                specular: Some(texture(1, 1, vec![0, 10, 254, 255])),
+                specular: Some(texture(1, 1, vec![0, 10, 190, 255])),
                 normal: mapped.then(|| texture(1, 1, vec![128, 128, 255, 0])),
                 ..Default::default()
             }));
@@ -1443,13 +1445,14 @@ fn gpu_restir_authored_thin_sss_self_shift_preserves_source_measure() {
 fn rear_sun_scene(revision: u64, mapped: bool) -> Scene {
     let mut primary = face(0.);
     // Cross(+X,+Z)=-Y, facing the camera below; Sun is on the physical back side.
+    primary.material_thin = true;
     primary.geometry.positions = [[0., 2., 0.], [16., 2., 0.], [16., 2., 16.], [0., 2., 16.]];
     primary.geometry.flags = 1;
     primary.geometry.texture_id = 8;
     let mut fixture = scene(revision, vec![primary]);
     let mut material = texture(1, 1, vec![255; 4]);
     material.material = Some(Arc::new(TextureMaterial {
-        specular: Some(texture(1, 1, vec![0, 10, 254, 255])),
+        specular: Some(texture(1, 1, vec![0, 10, 190, 255])),
         normal: mapped.then(|| texture(1, 1, vec![128, 128, 255, 0])),
         ..Default::default()
     }));

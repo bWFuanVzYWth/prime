@@ -132,7 +132,7 @@ pub(super) fn fixture(case: Case, revision: u64) -> (Scene, Camera) {
         | Case::EqualIorRoughGlass
         | Case::ThinEqualIorRoughGlass => Some([150, 5, 0, 255]),
         Case::SmoothMixed => Some([255, 5, 0, 255]),
-        Case::Subsurface | Case::ThinSubsurface => Some([120, 5, 254, 255]),
+        Case::Subsurface | Case::ThinSubsurface => Some([120, 5, 190, 255]),
         Case::CoverageNormal => Some([160, 5, 0, 255]),
         _ => None,
     };
@@ -207,6 +207,7 @@ pub(super) fn fixture(case: Case, revision: u64) -> (Scene, Camera) {
         }
         Case::ThinSubsurface => {
             let mut face = sheet(0., 1);
+            face.material_thin = true;
             face.geometry.flags = 1;
             faces.push(face);
         }
@@ -215,6 +216,7 @@ pub(super) fn fixture(case: Case, revision: u64) -> (Scene, Camera) {
             face.detail = Some(Arc::new(SurfaceDetail {
                 mode: LayerMode::OverlayBoth,
                 layer: SurfaceLayer {
+                    material_thin: false,
                     colors: [[0.8, 0.35, 0.55, 1.]; 4],
                     uvs: face.geometry.uvs,
                     texture_id: 3,

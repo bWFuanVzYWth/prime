@@ -1313,6 +1313,7 @@ mod tests {
             BTreeMap::from([(7, texture(4, |x, y| if (x + y) % 2 == 0 { 255 } else { 0 }))]);
         let mut f = face();
         let layer = SurfaceLayer {
+            material_thin: false,
             colors: f.geometry.colors,
             uvs: f.geometry.uvs,
             texture_id: 7,
@@ -1919,6 +1920,7 @@ mod tests {
         f.detail = Some(Arc::new(SurfaceDetail {
             mode: LayerMode::Bilateral,
             layer: SurfaceLayer {
+                material_thin: false,
                 colors: f.geometry.colors,
                 uvs: f.geometry.uvs,
                 texture_id: 8,

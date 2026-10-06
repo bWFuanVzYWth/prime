@@ -17,6 +17,81 @@ fn quad() -> CompiledQuad {
 }
 
 #[test]
+fn material_thin_controls_use_reserved_word_without_changing_coverage_or_record_stride() {
+    use prime_scene::surface::{LayerMode, Medium, Optics, SurfaceDetail, SurfaceLayer};
+    for record_format in 0..FORMATS {
+        for primary in [false, true] {
+            for secondary in [false, true] {
+                let mut face = SurfaceFace::from_quad(quad());
+                face.material_thin = primary;
+                if record_format == 1 {
+                    face.emission.radiance = [1.; 3];
+                }
+                if record_format >= 2 {
+                    face.optics = Some(Optics {
+                        negative: Medium::default(),
+                        positive: Medium::default(),
+                        ior_textures: [None; 2],
+                        transmit: false,
+                        thin: true,
+                    });
+                }
+                if record_format == 3 {
+                    face.detail = Some(Arc::new(SurfaceDetail {
+                        mode: LayerMode::Bilateral,
+                        layer: SurfaceLayer {
+                            colors: face.geometry.colors,
+                            uvs: face.geometry.uvs,
+                            texture_id: 7,
+                            flags: 1,
+                            material_thin: secondary,
+                            repeat: None,
+                            emission: Emission::default(),
+                        },
+                    }));
+                }
+                let geometry = MeshGeometry::Surfaces(Arc::new(
+                    prime_scene::surface::SurfaceMesh::from_resolved(1, vec![face]).unwrap(),
+                ));
+                let plan = Plan::new([input(geometry.view(0..2))], true).unwrap();
+                assert_eq!(plan.groups.len(), 1);
+                assert_eq!(plan.groups[0].format, record_format);
+                let packed = bytes(&plan, 1);
+                assert_eq!(packed.len(), [176, 240, 272, 432][record_format]);
+                let word = |at| u32::from_le_bytes(packed[at..at + 4].try_into().unwrap());
+                assert_eq!(word(164), 1, "coverage remains cutout");
+                let expected =
+                    u32::from(primary) | (u32::from(record_format == 3 && secondary) << 1);
+                assert_eq!(word(172), expected);
+                if record_format >= 2 {
+                    assert_ne!(word(236) & 64, 0, "physical thin remains separate");
+                    assert_eq!(word(236) & 128, 0, "material proof cannot authorize optics");
+                }
+            }
+        }
+    }
+    let source = [quad()];
+    let plan = Plan::new(
+        [Input {
+            triangles: TriangleView::Quads {
+                values: &source,
+                first: 0,
+                count: 2,
+            },
+            offset: None,
+            flags: None,
+        }],
+        true,
+    )
+    .unwrap();
+    assert_eq!(
+        &bytes(&plan, 1)[172..176],
+        &[0; 4],
+        "raw geometry has no complete source proof"
+    );
+}
+
+#[test]
 fn optical_reference_uses_existing_padding_and_keeps_repeat_coordinates() {
     use prime_scene::surface::{Medium, Optics, SurfaceFace};
     let mut face = SurfaceFace::from_quad(quad());
@@ -73,6 +148,7 @@ fn support_dependencies_follow_each_packed_format_and_exclude_ior_only_lookups()
     coating.detail = Some(Arc::new(SurfaceDetail {
         mode: LayerMode::OverlayBoth,
         layer: SurfaceLayer {
+            material_thin: false,
             colors: [[1.; 4]; 4],
             uvs: [[0.; 2]; 4],
             texture_id: 10,

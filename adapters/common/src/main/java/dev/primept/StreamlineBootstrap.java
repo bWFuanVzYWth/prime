@@ -40,6 +40,7 @@ public final class StreamlineBootstrap {
                                                 status);
             frame = PrimeAbi.bind(lookup, "prime_streamline_frame");
             present = PrimeAbi.bind(lookup, "prime_streamline_present");
+            NativeBridge.bindPresentationStats(lookup);
             setVulkanLoader.accept(interposer.toString());
             installed = true;
         } catch (RuntimeException | Error failure) {

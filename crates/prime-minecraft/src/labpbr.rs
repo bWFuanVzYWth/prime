@@ -11,6 +11,8 @@ pub(crate) struct Material {
     specular: Option<Plane>,
     emission: Option<f32>,
     fresnel: Option<u8>,
+    /// All source frames participate; animation cannot introduce unsupported source state.
+    subsurface: bool,
     /// Original height survives normal-page translation, rebased per source frame.
     height: Option<Height>,
 }
@@ -115,9 +117,11 @@ impl Material {
         Self::prepare(sprite, normal.map(source), specular.map(source))
     }
     fn prepare(sprite: &Sprite, normal: Option<Source>, specular: Option<Source>) -> Self {
+        let mut subsurface = false;
         let emission = specular.as_ref().and_then(|s| {
             let mut maximum = None::<u8>;
             for p in s.image.pixels.as_chunks::<4>().0.iter() {
+                subsurface |= p[2] > 65;
                 if p[3] != 255 {
                     maximum = Some(maximum.map_or(p[3], |v| v.max(p[3])));
                 }
@@ -167,11 +171,15 @@ impl Material {
             specular: specular.map(|s| s.compile(sprite, true)),
             emission,
             fresnel,
+            subsurface,
             height,
         }
     }
     pub fn emission_maximum(&self) -> Option<f32> {
         self.emission
+    }
+    pub fn has_subsurface(&self) -> bool {
+        self.subsurface
     }
     pub fn fresnel_code(&self, frame: u32, uv: [f32; 2]) -> Option<u8> {
         self.specular.as_ref().map(|s| {
@@ -482,13 +490,8 @@ fn canonical_fresnel(v: u8) -> u8 {
     }
 }
 fn canonical_scattering(v: u8) -> u8 {
-    if v <= 64 {
-        v
-    } else if v == 65 {
-        0
-    } else {
-        v - 1
-    }
+    // LabPBR 0..64 is porosity (not shaded), 65 is reserved, 66..255 is SSS 1..190.
+    v.saturating_sub(65)
 }
 fn encode(v: f64) -> u8 {
     (v * 255.).round().clamp(0., 255.) as u8
@@ -661,7 +664,7 @@ mod tests {
             .unwrap()
             .clone();
         assert_eq!(specular.region, Some([0, 2, 2, 2]));
-        assert_eq!(&specular.pixels[16..20], &[254, 239, 254, 254]);
+        assert_eq!(&specular.pixels[16..20], &[254, 239, 190, 254]);
         for end in 0..data.len() {
             let pages = [&data[..end]];
             let mut r = Reader::new(&pages).unwrap();
@@ -695,10 +698,10 @@ mod tests {
             .unwrap();
         let material = image.material.unwrap();
         let optical = material.specular.as_ref().unwrap();
-        assert_eq!(optical.pixels.as_ref(), [169, 11, 65, 169].repeat(4));
+        assert_eq!(optical.pixels.as_ref(), [169, 11, 1, 169].repeat(4));
         assert_eq!(
             optical.sampling.as_ref().unwrap().levels[0].pixels.as_ref(),
-            [169, 11, 65, 169]
+            [169, 11, 1, 169]
         );
     }
     #[test]
@@ -767,16 +770,7 @@ mod tests {
                     0
                 }
             );
-            assert_eq!(
-                canonical_scattering(v),
-                if v <= 64 {
-                    v
-                } else if v == 65 {
-                    0
-                } else {
-                    v - 1
-                }
-            );
+            assert_eq!(canonical_scattering(v), if v <= 65 { 0 } else { v - 65 });
         }
     }
     #[test]
@@ -793,7 +787,7 @@ mod tests {
         };
         assert_eq!(
             source.filtered(0, [0., 0., 2., 1.], [2, 1], true),
-            [127, 239, 254, 127]
+            [127, 239, 190, 127]
         );
         assert_eq!(
             source.filtered(0, [0., 0., 1., 1.], [2, 1], true),
@@ -844,5 +838,38 @@ mod tests {
                 14
             ]
         );
+    }
+    #[test]
+    fn subsurface_capability_covers_future_frames_while_values_switch_discretely() {
+        let mut sprite = authored_sprite();
+        let data = bytes(None, Some((1, 2, vec![0, 4, 65, 255, 255, 4, 255, 255])));
+        let pages = [data.as_slice()];
+        sprite.material = Some(Material::read(&mut Reader::new(&pages).unwrap(), &sprite).unwrap());
+        assert!(sprite.has_subsurface());
+        for (tick, red, subsurface) in [(0, 0, 0), (1, 128, 0), (2, 255, 190)] {
+            let image = sprite
+                .image(tick, &prime_scene::SourceScene::default())
+                .unwrap();
+            let material = image.material.unwrap();
+            let specular = material.specular.as_ref().unwrap();
+            let region = specular.region.unwrap();
+            let at = ((region[1] * specular.width + region[0]) * 4) as usize;
+            assert_eq!(&specular.pixels[at..at + 4], &[red, 5, subsurface, 255]);
+            let mip = &specular.sampling.as_ref().unwrap().levels[0];
+            let at = ((mip.region[1] * mip.width + mip.region[0]) * 4) as usize;
+            assert_eq!(&mip.pixels[at..at + 4], &[red, 5, subsurface, 255]);
+        }
+        for blue in 0..=65 {
+            let material = Material::from_images(
+                &sprite,
+                None,
+                Some(Image {
+                    width: 1,
+                    height: 1,
+                    pixels: Arc::from([0, 4, blue, 255]),
+                }),
+            );
+            assert!(!material.has_subsurface());
+        }
     }
 }

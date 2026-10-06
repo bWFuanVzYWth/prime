@@ -4,9 +4,10 @@
 module "pbr/delta.slang";
 
 __exported import "pbr/vertex.slang";
-import "bsdf/common/common.slang";
-import "bsdf/full/contract/flags.slang";
+import "bsdf/full/contract/material.slang";
+import "bsdf/full/math/frame.slang";
 import "bsdf/full/contract/sample.slang";
+import "bsdf/full/contract/flags.slang";
 import "bsdf/full/math/delta.slang";
 import "bsdf/full/math/fresnel.slang";
 import "bsdf/full/math/spectrum.slang";
@@ -42,38 +43,32 @@ PrimeFullOpenPbrSpecularFresnel primePbrDeltaFresnel(float ior) {
 // One canonical world-space construction for both lighting and detached/shared guides.
 // Thin transmission is straight through. Reconstructing -view through an ONB is redundant
 // and permits different contraction/reassociation when its caller also consumes a response.
-float3 primePbrDeltaWorldDirection(PrimeOpenPbrOnb onb, float3 viewDirection, float3 localDirection,
-                                   bool reflection, bool thin) {
+float3 primePbrDeltaWorldDirection(PrimeFullOpenPbrOnb onb, float3 viewDirection,
+                                   float3 localDirection, bool reflection, bool thin) {
     if (reflection)
         return normalize(reflect(-viewDirection, onb.normal));
     if (thin)
         return -viewDirection;
-    return primeOpenPbrOnbToWorld(onb, localDirection);
+    return primeFullOpenPbrOnbToWorld(onb, localDirection);
 }
 
-PrimePbrSample primePbrDeltaToWorld(PrimeFullOpenPbrSample fullSample, PrimeOpenPbrOnb onb,
+PrimePbrSample primePbrDeltaToWorld(PrimeFullOpenPbrSample fullSample, PrimeFullOpenPbrOnb onb,
                                     PrimePbrVertex vertex, float3 viewDirection,
                                     float3 geometricNormal, float4 incidentMedium,
                                     float4 transmittedMedium) {
     PrimePbrSample result;
     result.bsdfSample = primeInvalidBsdfSample();
     result.medium = incidentMedium;
-    PrimeOpenPbrSample sampled;
-    sampled.wo = fullSample.wo;
-    sampled.throughput.value = fullSample.throughput.value;
-    sampled.throughput.flags = fullSample.throughput.flags;
-    sampled.pdf = fullSample.pdf;
-    sampled.eta = fullSample.eta;
-    if (!primeOpenPbrHasSample(sampled))
+    if (!primeFullOpenPbrHasSample(fullSample))
         return result;
     result.bsdfSample.direction = primePbrDeltaWorldDirection(
-            onb, viewDirection, sampled.wo,
-            (sampled.throughput.flags & PRIME_FULL_OPENPBR_FLAG_DELTA_REFLECTION) != 0u,
+            onb, viewDirection, fullSample.wo,
+            (fullSample.throughput.flags & PRIME_FULL_OPENPBR_FLAG_DELTA_REFLECTION) != 0u,
             primePbrVertexIsThinWalled(vertex));
-    result.bsdfSample.response = sampled.throughput.value;
-    result.bsdfSample.pdf = sampled.pdf;
-    result.bsdfSample.relativeEta = sampled.eta;
-    result.bsdfSample.eventFlags = primeOpenPbrToBsdfEventFlags(sampled.throughput.flags);
+    result.bsdfSample.response = fullSample.throughput.value;
+    result.bsdfSample.pdf = fullSample.pdf;
+    result.bsdfSample.relativeEta = fullSample.eta;
+    result.bsdfSample.eventFlags = primeFullOpenPbrToBsdfEventFlags(fullSample.throughput.flags);
     result.bsdfSample = primeSanitizeBsdfSample(result.bsdfSample);
     if (!primeGeometricSampleSupport(primePbrVertexHasNormal(vertex), geometricNormal,
                                      viewDirection, result.bsdfSample))
@@ -87,9 +82,9 @@ PrimePbrSample primePbrDeltaToWorld(PrimeFullOpenPbrSample fullSample, PrimeOpen
 public PrimePbrSample primeSamplePbrDelta(PrimePbrVertex vertex, float3 viewDirection,
                                           float3 geometricNormal, float randomEvent,
                                           float4 incidentMedium, float4 transmittedMedium) {
-    PrimeOpenPbrOnb onb =
+    PrimeFullOpenPbrOnb onb =
             primePbrVertexFrame(vertex, viewDirection, incidentMedium, transmittedMedium);
-    float3 wi = primeOpenPbrOnbToLocal(onb, viewDirection);
+    float3 wi = primeFullOpenPbrOnbToLocal(onb, viewDirection);
     PrimeFullOpenPbrSample sampled = primeFullOpenPbrZeroSample();
     if (primePbrVertexIsDiscreteOnly(vertex, incidentMedium, transmittedMedium)) {
         if (primePbrVertexIsDielectric(vertex)) {
@@ -132,9 +127,9 @@ public PrimePbrSample primeSamplePbrPrimaryDelta(PrimePbrVertex vertex, float3 v
     if (!primePbrVertexIsDielectric(vertex) ||
         !primePbrVertexIsDiscreteOnly(vertex, incidentMedium, transmittedMedium))
         return invalid;
-    PrimeOpenPbrOnb onb =
+    PrimeFullOpenPbrOnb onb =
             primePbrVertexFrame(vertex, viewDirection, incidentMedium, transmittedMedium);
-    float3 wi = primeOpenPbrOnbToLocal(onb, viewDirection);
+    float3 wi = primeFullOpenPbrOnbToLocal(onb, viewDirection);
     bool thin = primePbrVertexIsThinWalled(vertex);
     if (thin && wi.z <= 0.0)
         return invalid;
@@ -223,8 +218,8 @@ public PrimePbrGuideDirection primePbrDeltaGuideDirection(PrimePbrVertex vertex,
         return result;
     // Use the lighting frame and canonical world direction. The branch coin must not
     // change the ray when the guide changes between shared and detached traversal.
-    PrimeOpenPbrOnb onb = primePbrVertexFrame(vertex, viewDirection, incident, transmitted);
-    float3 wi = primeOpenPbrOnbToLocal(onb, viewDirection);
+    PrimeFullOpenPbrOnb onb = primePbrVertexFrame(vertex, viewDirection, incident, transmitted);
+    float3 wi = primeFullOpenPbrOnbToLocal(onb, viewDirection);
     if (wi.z == 0.0)
         return result;
     float3 normal = onb.normal;

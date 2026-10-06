@@ -5,7 +5,10 @@ module "service/bsdf/support/conversion.slang";
 
 import "service/bsdf/contract/sample.slang";
 import "service/bsdf/support/sanitization.slang";
-import "bsdf/common/common.slang";
+import "bsdf/full/contract/material.slang";
+import "bsdf/full/math/frame.slang";
+import "bsdf/full/contract/sample.slang";
+import "bsdf/full/contract/flags.slang";
 
 public bool3 lessThan(float3 first, float3 second) {
     return first < second;
@@ -14,8 +17,8 @@ public bool3 lessThanEqual(float3 first, float3 second) {
     return first <= second;
 }
 
-public bool primeOpenPbrHasSample(PrimeOpenPbrSample sampleValue) {
-    if (sampleValue.throughput.flags == PRIME_OPENPBR_FLAG_NONE) {
+public bool primeFullOpenPbrHasSample(PrimeFullOpenPbrSample sampleValue) {
+    if (sampleValue.throughput.flags == PRIME_FULL_OPENPBR_FLAG_NONE) {
         // A rejected proposal has no consumable payload. Prime replaces it with its canonical
         // zero-event sample, so inspecting discarded fields only creates diagnostic false positives.
         return false;
@@ -32,21 +35,21 @@ public bool primeOpenPbrHasSample(PrimeOpenPbrSample sampleValue) {
     return true;
 }
 
-public uint primeOpenPbrToBsdfEventFlags(uint flags) {
+public uint primeFullOpenPbrToBsdfEventFlags(uint flags) {
     uint result = 0u;
-    if (primeOpenPbrIsReflective(flags)) {
+    if (primeFullOpenPbrIsReflective(flags)) {
         result |= PRIME_BSDF_EVENT_REFLECTION;
     }
-    if (primeOpenPbrIsTransmissive(flags)) {
+    if (primeFullOpenPbrIsTransmissive(flags)) {
         result |= PRIME_BSDF_EVENT_TRANSMISSION;
     }
-    if (primeOpenPbrIsDiffuse(flags)) {
+    if (primeFullOpenPbrIsDiffuse(flags)) {
         result |= PRIME_BSDF_EVENT_DIFFUSE;
     }
-    if (primeOpenPbrIsSpecular(flags)) {
+    if (primeFullOpenPbrIsSpecular(flags)) {
         result |= PRIME_BSDF_EVENT_GLOSSY;
     }
-    if (primeOpenPbrIsDelta(flags)) {
+    if (primeFullOpenPbrIsDelta(flags)) {
         result |= PRIME_BSDF_EVENT_DISCRETE;
     }
     return result;

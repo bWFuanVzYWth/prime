@@ -1,4 +1,5 @@
 {
+  "primept.diagnostics.rendered_fps": "rendered %s fps",
   "primept.settings.title": "Prime Render Settings",
   "primept.settings.reset": "Restore Prime Defaults",
   "primept.settings.render": "Prime PT · Rendering",

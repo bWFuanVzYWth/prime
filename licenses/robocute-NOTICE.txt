@@ -1,30 +1,21 @@
-The shared BSDF foundations in
-`crates/prime-vulkan/shaders/bsdf/common/common.slang` and
-`crates/prime-vulkan/shaders/bsdf/common/material.slang` are adapted from legacy
-Prime's compact boundary utilities. Legacy Prime identifies the mathematical
-basis of those utilities with the BSDF implementation distributed by RoboCute:
+The Full OpenPBR supported-domain kernels in
+crates/prime-vulkan/shaders/bsdf/full/ are adapted from legacy Prime revision
+b35438684203200b6ab8c0b19977bd06625faaea, rooted in RoboCute reference
+0d982c77b3fd26c2c5a3c0852be3bd05e5860bd8:
 
 https://github.com/RoboCute/RoboCute
-
-BSDF base source revision recorded by legacy Prime:
-5985e989254b4685e3885d876b33f4874d233dcd
 
 Copyright RoboCute contributors. Licensed under the Apache License, Version
 2.0. The unmodified license is included in robocute-Apache-2.0.txt.
 
-This port retains the common value types, event flags, scalar/vector helpers,
-frame construction, Fresnel/IOR and roughness relations, volume derivation,
-bounded stack operations and default material initialization. Module names,
-visibility and imports are adapted to Prime PT's explicit LitePBR interface.
+The incorporated scope includes supported opaque/conductor and solid/thin
+dielectric mathematics, event/frame/volume utilities, exact Fresnel, complete
+sampling/evaluation PDFs and directional-energy compensation. The independently
+locked author 2026-07-24 dielectric-highlight overlay and HALF4 transmission
+energy data have their hashes and attribution in the OpenPBR asset lock and
+author notice. Original reference files are retained without modification.
 
-The incorporated implementation is Prime's low-order LitePBR, carried by
-legacy Prime revision ca364b25c4b4c7de5c8eae82115b401bf1932b3e. This notice does
-not describe a complete compact OpenPBR closure library, an author hotfix
-source overlay, or transmission-GGX energy data. The LitePBR shader and Prime
-integration retain their separate project copyright and license.
-
-The LitePBR adaptation explicitly returns R=1 and T=0 at the thin-wall Snell TIR
-endpoint and removes a redundant incident-side sign factor from the initial
-refractive reflection-candidate guard, retaining exit reflection and TIR.
-Half-vector orientation, subsequent support checks, relative eta and medium
-state are preserved; the other source math is retained.
+Prime's Slang ports and narrow source adapters retain their project copyright,
+LICENSE and LICENSE-EXCEPTIONS. Arbitrary OpenPBR parameters, presets and
+automatic foliage are outside the production scope. LitePBR and its thick-SSS
+approximation have been removed; this notice does not claim they remain included.

@@ -1175,6 +1175,7 @@ fn bilateral_observer_exports_back_winding_with_its_own_corner_attributes() {
     face.detail = Some(Arc::new(SurfaceDetail {
         mode: LayerMode::Bilateral,
         layer: SurfaceLayer {
+            material_thin: false,
             colors: positions.map(|[x, y, _]| [x, y, 0.5, 1.]),
             uvs: positions.map(|[x, y, _]| [1. - x, y]),
             texture_id: 2,

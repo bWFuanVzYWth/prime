@@ -203,12 +203,22 @@ pub(super) fn run_full_openpbr(
     output_words: usize,
     count: u32,
 ) -> Vec<u32> {
+    run_full_openpbr_config(context, code, input, output_words, [0, count])
+}
+
+pub(super) fn run_full_openpbr_config(
+    context: &Arc<Context>,
+    code: &[u8],
+    input: &[u32],
+    output_words: usize,
+    config: [u32; 2],
+) -> Vec<u32> {
     run_impl(
         context,
         code,
         input,
         output_words,
-        [0, count],
+        config,
         None,
         true,
         false,

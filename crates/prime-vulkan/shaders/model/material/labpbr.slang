@@ -15,12 +15,6 @@ public bool primeHasLabPbrSpecular(uint flags) {
     return (flags & PRIME_RECIPE_OPTICAL_TEXTURE) != 0;
 }
 
-// Alpha cutout is the source material's thin-surface declaration. This only selects the
-// authored subsurface closure; the caller keeps its optical medium-transition proof separate.
-public bool primePbrSourceThinWalled(bool opticalThin, uint coverage, uint canonicalScattering) {
-    return opticalThin || (coverage == 1u && canonicalScattering > 64u);
-}
-
 public struct PrimeLabPbrNormalAtlasSample {
     public float3 tangentNormal;
     public float distributionRoughness;

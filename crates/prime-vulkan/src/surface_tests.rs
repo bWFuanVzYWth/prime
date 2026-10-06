@@ -135,6 +135,7 @@ fn gpu_compound_sheet_matches_independent_material_oracle_from_both_sides() {
             q.detail = Some(Arc::new(SurfaceDetail {
                 mode,
                 layer: SurfaceLayer {
+                    material_thin: false,
                     colors: [[1.; 4]; 4],
                     uvs: base.uvs,
                     texture_id: 2,
@@ -434,6 +435,7 @@ fn gpu_cross_bilateral_uvs_match_original_source_triangles_from_four_sides() {
                     face.detail = Some(Arc::new(SurfaceDetail {
                         mode: LayerMode::Bilateral,
                         layer: SurfaceLayer {
+                            material_thin: false,
                             colors: [back.color; 4],
                             // Match source positions; no assumed U reflection or barycentric flip.
                             uvs: base.positions.map(|p| {
@@ -973,6 +975,354 @@ fn physics_optical_query(
     .iter()
     .map(|row| row.map(f32::from_bits))
     .collect()
+}
+
+#[cfg(feature = "shader-tests")]
+#[test]
+#[ignore = "windowless closest-hit packed primary/secondary thin proofs and independent optical flags"]
+fn gpu_closest_material_thin_proof_selects_real_primary_secondary_and_physical_optics() {
+    use prime_scene::{
+        TextureMaterial,
+        surface::{Emission, LayerMode, Medium, Optics, SurfaceDetail, SurfaceFace, SurfaceLayer},
+    };
+
+    // A witness names its source directly. In particular the overlay table below does not
+    // implement selectMaterial/acceptsCoverage again as a supposed independent oracle.
+    #[derive(Clone, Copy)]
+    enum Source {
+        Primary(bool),
+        Secondary(bool),
+    }
+    struct Witness {
+        label: String,
+        face: usize,
+        uv: [f32; 2],
+        front: bool,
+        source: Source,
+        physical_thin: bool,
+        optical: bool,
+    }
+    fn quad(face: usize, flags: u32) -> CompiledQuad {
+        let x = (face * 2) as f32;
+        CompiledQuad {
+            positions: [[x, 0., 8.], [x + 1., 0., 8.], [x + 1., 1., 8.], [x, 1., 8.]],
+            uvs: [[0., 0.], [1., 0.], [1., 1.], [0., 1.]],
+            color: [1.; 4],
+            texture_id: 1,
+            flags,
+        }
+    }
+    fn detail(mode: LayerMode, thin: bool, texture_id: u32) -> Arc<SurfaceDetail> {
+        Arc::new(SurfaceDetail {
+            mode,
+            layer: SurfaceLayer {
+                colors: [[1.; 4]; 4],
+                uvs: [[0., 0.], [1., 0.], [1., 1.], [0., 1.]],
+                texture_id,
+                flags: 1,
+                material_thin: thin,
+                repeat: None,
+                emission: Emission::default(),
+            },
+        })
+    }
+    fn optics(thin: bool) -> Optics {
+        Optics {
+            negative: Medium {
+                ior: 1.5,
+                extinction: [0.; 3],
+            },
+            positive: Medium::default(),
+            ior_textures: [None; 2],
+            transmit: true,
+            thin,
+        }
+    }
+
+    let mut faces = Vec::new();
+    let mut witnesses = Vec::new();
+    // All four proof combinations, from both physical sides and both packed quad halves.
+    // Mismatched cases kill either inheriting bit0 for secondary or swapping bit0/bit1.
+    for (primary, secondary) in [(false, false), (false, true), (true, false), (true, true)] {
+        let id = faces.len();
+        let mut face = SurfaceFace::from_quad(quad(id, 0));
+        face.material_thin = primary;
+        face.detail = Some(detail(LayerMode::Bilateral, secondary, 2));
+        faces.push(face);
+        for (front, source) in [
+            (true, Source::Primary(primary)),
+            (false, Source::Secondary(secondary)),
+        ] {
+            for uv in [[0.75, 0.25], [0.25, 0.75]] {
+                witnesses.push(Witness {
+                    label: format!(
+                        "bilateral primary={primary} secondary={secondary} front={front} uv={uv:?}"
+                    ),
+                    face: id,
+                    uv,
+                    front,
+                    source,
+                    physical_thin: false,
+                    optical: false,
+                });
+            }
+        }
+    }
+    // The blue coating has a fully opaque left texel and a fully absent right texel.
+    // These are specified source witnesses, including the OverlayFront back-side exception.
+    for (mode, primary, secondary, expected) in [
+        (
+            LayerMode::OverlayFront,
+            false,
+            true,
+            [
+                Source::Secondary(true),
+                Source::Primary(false),
+                Source::Primary(false),
+                Source::Primary(false),
+            ],
+        ),
+        (
+            LayerMode::OverlayBoth,
+            true,
+            false,
+            [
+                Source::Secondary(false),
+                Source::Primary(true),
+                Source::Secondary(false),
+                Source::Primary(true),
+            ],
+        ),
+    ] {
+        let id = faces.len();
+        let mut face = SurfaceFace::from_quad(quad(id, 0));
+        face.material_thin = primary;
+        face.detail = Some(detail(mode, secondary, 3));
+        faces.push(face);
+        for ((front, uv), source) in [
+            (true, [0.25, 0.75]),
+            (true, [0.75, 0.25]),
+            (false, [0.25, 0.75]),
+            (false, [0.75, 0.25]),
+        ]
+        .into_iter()
+        .zip(expected)
+        {
+            witnesses.push(Witness {
+                label: format!("{mode:?} front={front} uv={uv:?}"),
+                face: id,
+                uv,
+                front,
+                source,
+                physical_thin: false,
+                optical: false,
+            });
+        }
+    }
+    // Ordinary 176B and extended 240B records: coverage=1 plus B=190 without proof
+    // must remain opaque. Conversely coverage=0 does not disqualify a proven sheet.
+    for (extended, thin, flags) in [
+        (false, false, 1),
+        (false, true, 0),
+        (true, false, 1),
+        (true, true, 0),
+    ] {
+        let id = faces.len();
+        let mut face = SurfaceFace::from_quad(quad(id, flags));
+        face.material_thin = thin;
+        if extended {
+            face.emission = Emission {
+                radiance: [1., 0., 0.],
+                two_sided: true,
+                textured: false,
+            };
+        }
+        assert_eq!(crate::packing::format(&face), usize::from(extended));
+        faces.push(face);
+        for (front, uv) in [(true, [0.75, 0.25]), (false, [0.25, 0.75])] {
+            witnesses.push(Witness {
+                label: format!(
+                    "ordinary extended={extended} proof={thin} coverage={flags} front={front}"
+                ),
+                face: id,
+                uv,
+                front,
+                source: Source::Primary(thin),
+                physical_thin: false,
+                optical: false,
+            });
+        }
+    }
+    // Optical 272B records consume physical thin independently of material proof.
+    for (thin, physical_thin) in [(false, false), (false, true), (true, false), (true, true)] {
+        let id = faces.len();
+        let mut face = SurfaceFace::from_quad(quad(id, 0));
+        face.material_thin = thin;
+        face.media = [7, 0];
+        face.optics = Some(optics(physical_thin));
+        assert_eq!(crate::packing::format(&face), 2);
+        faces.push(face);
+        witnesses.push(Witness {
+            label: format!("optical proof={thin} physical_thin={physical_thin}"),
+            face: id,
+            uv: if thin { [0.25, 0.75] } else { [0.75, 0.25] },
+            front: !thin,
+            source: Source::Primary(thin),
+            physical_thin,
+            optical: true,
+        });
+    }
+    // Selecting an opaque, unproven coating on a physical thin optical sheet must
+    // preserve the medium flag without authorizing that coating's SSS/vertex thin flag.
+    let id = faces.len();
+    let mut coated = SurfaceFace::from_quad(quad(id, 0));
+    coated.material_thin = true;
+    coated.media = [7, 0];
+    coated.optics = Some(optics(true));
+    coated.detail = Some(detail(LayerMode::OverlayBoth, false, 3));
+    assert_eq!(crate::packing::format(&coated), 3);
+    faces.push(coated);
+    for (uv, source, optical) in [
+        ([0.25, 0.75], Source::Secondary(false), false),
+        ([0.75, 0.25], Source::Primary(true), true),
+    ] {
+        witnesses.push(Witness {
+            label: format!("physical thin coating uv={uv:?}"),
+            face: id,
+            uv,
+            front: true,
+            source,
+            physical_thin: true,
+            optical,
+        });
+    }
+    let raw_id = faces.len();
+    for (front, uv) in [(true, [0.75, 0.25]), (false, [0.25, 0.75])] {
+        witnesses.push(Witness {
+            label: format!("raw closed quad default proof=false front={front}"),
+            face: raw_id,
+            uv,
+            front,
+            source: Source::Primary(false),
+            physical_thin: false,
+            optical: false,
+        });
+    }
+    assert_eq!(witnesses.len(), 40);
+    let mut fixture = realtime_tests::scene(1, faces);
+    fixture.meshes.insert(
+        (100, 1),
+        SceneMesh {
+            revision: 1,
+            flags: 1,
+            origin: [0.; 3],
+            triangles: MeshGeometry::Quads(vec![quad(raw_id, 1)].into()),
+        },
+    );
+    for (id, width, pixels) in [
+        (1, 1, vec![255, 0, 0, 255]),
+        (2, 1, vec![0, 0, 255, 255]),
+        (3, 2, vec![0, 0, 255, 255, 0, 0, 255, 0]),
+    ] {
+        let mut color = realtime_tests::texture(width, 1, pixels);
+        color.material = Some(Arc::new(TextureMaterial {
+            specular: Some(realtime_tests::texture(
+                width,
+                1,
+                [128, 10, 190, 255].repeat(width as usize),
+            )),
+            ..Default::default()
+        }));
+        fixture.textures.insert(id, color);
+    }
+    let input: Vec<_> = witnesses
+        .iter()
+        .flat_map(|w| {
+            [
+                (w.face * 2) as f32 + w.uv[0],
+                w.uv[1],
+                if w.front { 9. } else { 7. },
+                2.,
+                0.,
+                0.,
+                if w.front { -1. } else { 1. },
+                1.,
+                0.,
+                0.,
+                0.,
+                0.,
+            ]
+            .map(f32::to_bits)
+        })
+        .collect();
+    let context = Context::new().unwrap();
+    // One geometry/TLAS and one dispatch; disable OMM to exercise shader coverage selection.
+    let mut geometry = Geometry::new_with_omm(
+        &context,
+        (&fixture).into(),
+        Arc::new(prime_scene::workers::CpuWorkers::new(1).unwrap()),
+        false,
+    )
+    .unwrap();
+    geometry
+        .prepare_dynamic(
+            &context,
+            &fixture,
+            &InstanceScene::default(),
+            0,
+            &mut cpu_profile::FrameCpu::default(),
+        )
+        .unwrap();
+    let output = crate::shader_tests::run(
+        &context,
+        prime_shader_tests::optics(),
+        &input,
+        input.len(),
+        [4, witnesses.len() as u32],
+        Some(&geometry),
+    );
+    for (w, row) in witnesses.iter().zip(output.as_chunks::<12>().0) {
+        let (proof, color) = match w.source {
+            Source::Primary(proof) => (proof, [1., 0., 0., 1.]),
+            Source::Secondary(proof) => (proof, [0., 0., 1., 1.]),
+        };
+        assert_eq!(
+            row[..4],
+            [
+                1,
+                u32::from(proof),
+                u32::from(w.physical_thin),
+                u32::from(w.optical)
+            ],
+            "{}: selected source proof and physical optics",
+            w.label,
+        );
+        // Independent ABI expectations: dielectric bit17, thin bit16, SSS byte8 and G=10.
+        let control = if w.optical {
+            (1 << 17) | (u32::from(w.physical_thin) << 16)
+        } else if proof {
+            (1 << 16) | (190 << 8) | 10
+        } else {
+            10
+        };
+        assert_eq!(
+            row[4..8],
+            [control, 2, u32::from(w.front), 190],
+            "{}: Full vertex control",
+            w.label
+        );
+        for (actual, expected) in row[8..12]
+            .iter()
+            .map(|&bits| f32::from_bits(bits))
+            .zip(color)
+        {
+            assert!(
+                (actual - expected).abs() < 2e-7,
+                "{}: source color actual={actual} expected={expected}",
+                w.label
+            );
+        }
+    }
 }
 
 #[cfg(feature = "shader-tests")]
@@ -1894,6 +2244,7 @@ fn compound_emitters_sample_the_visible_layer_without_leaking_hidden_emission() 
         LayerMode::OverlayBoth,
     ] {
         let face = SurfaceFace {
+            material_thin: false,
             geometry,
             repeat: None,
             emission: Emission {
@@ -1908,6 +2259,7 @@ fn compound_emitters_sample_the_visible_layer_without_leaking_hidden_emission() 
             detail: Some(Arc::new(SurfaceDetail {
                 mode,
                 layer: SurfaceLayer {
+                    material_thin: false,
                     colors: [[1.; 4]; 4],
                     uvs: geometry.uvs,
                     texture_id: 1,

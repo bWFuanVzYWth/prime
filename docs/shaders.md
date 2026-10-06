@@ -9,15 +9,13 @@
 | `math/ray_offset.slang` | 三角形交点重建、误差界与双侧安全起点；无资源依赖 |
 | `math/rigid_motion.slang` | 已证明同一有序局部几何的前帧仿射命中重建；不含安全起点偏移或未知形变对应 |
 | `math/transport.slang` | 面积 PDF、MIS、稳定乘除、Beer、eta 补偿及 roulette；无资源依赖 |
-| `bsdf/common/` | 材质值类型、事件 flags、默认初始化、坐标框架、标量数学与内部介质栈；无闭包或纹理资源 |
 | `bsdf/full/` | 旧完整 OpenPBR 数学的 opaque/solid/thin 支持子域、显式 energy 资源接口与生产窄构造 |
-| `bsdf/lite/` | LitePBR opaque、solid/thin dielectric、foliage 的状态、支持域、evaluate/sample/PDF 与事件数学 |
 | `model/material/` | 已规范化 LabPBR 通道、默认值、Fresnel 身份和颜色/IOR 转换 |
 | `service/bsdf/`、`service/material/normal_mapping.slang` | BSDF 消费契约、数值清洗和法线有效反射修正 |
 | `pbr/vertex.slang` | canonical 顶点、分类控制字、frame 与物理 IOR 接口；不构造 closure |
 | `pbr/delta.slang` | 整闭包 delta 判定、普通离散采样、首纯 delta 透明条件 pair，以及独立的几何 guide 方向；无 LUT/NEE |
 | `pbr/guide_albedo.slang` | 独立方向能量与清洗；不导入通用 PBR 分派或完整 closure |
-| `pbr.slang` | 生产 Full opaque/dielectric 源适配、thick-SSS Lite 扩展与历史 Lite 材质参考 API；重导出窄顶点/guide 接口 |
+| `pbr.slang` | 仅Full opaque/dielectric/已证明薄SSS源适配与结果清洗；重导出窄顶点/guide接口 |
 | `tree_sampling.slang`、`light_distance.slang` | 双层功率距离树、24-bit支持保留及同接收点路径重放PDF；窄距离数学模块，无资源绑定 |
 | `light_sampling.slang` | 显式采样实验保留的 32B 功率树节点与选择，无资源绑定 |
 | `display/prime_drt.slang` | 当前可替换的显示策略；显式显示变换与艺术调整，只依赖颜色数学库 |
@@ -41,13 +39,13 @@
 | `reconstruct/primary_guides.slang`、`reconstruct/primary_psr.slang` | 主表面提升、仿射PSR、独立反射guide与各分支完成状态 |
 | `reconstruct/reflection_motion.slang`、`reconstruct/rr_guides.slang` | 输入像素单位运动、普通粗糙反射的距离代理与全图specular motion补全；无射线查询 |
 | `reconstruct/visible_guides.slang` | FG真实第一可见界面的device depth；不使用RR的PSR提升终点代替首界面 |
-| `rr_display.slang`、`rr_linear.slang` | 输出分辨率RR显示/FP32线性selector；失败或未解析guide足迹使用当前raw，非有限alpha保守为前景 |
+| `rr_display.slang`、`rr_linear.slang` | 输出分辨率RR显示/FP32线性selector；SDK安全失败或非法guide足迹使用临时导向空间滤波，非有限alpha保守为前景；显式含噪诊断另选raw |
 
 库不声明描述符、push constant 或全局可变状态，不通过 DCE 消除不需要的资源。入口按阶段显式传入场景、OpenPBR energy 或显示资源；私有辅助函数保持模块可见，只公开跨模块所需类型、字段和函数。大气物理库显式接收 `AtmModel`；K1/K2消费窄 `AtmLighting`，post消费 `AtmAerial`，Offline保留 `AtmEnvironment`；绑定与极线 groupshared 工作区只存在于入口或入口专用 include。构建按 Slang 实际 import/include 闭包缓存每个入口变体，并跟踪搜索命名空间变化，不因无关 Rust 或 shader 内容编辑重编所有入口。
 
 ReSTIR 的 `restir/parameters.slang` 只声明 uniform/pass 布局；线性地址与边界计算位于 `restir/indexing.slang`，邻居变换位于 `restir/pairing.slang`。入口专用 `bindings.slang` 不统一导入路径、shift、pairwise MIS 或 paired-neighbor 算法，各入口显式导入实际消费者。生成入口不依赖 shift/pairwise，retrace 不依赖 shift；这些编译边界不改变 GPU 布局、路径数学、随机域或 pass 调度。
 
-实时与离线入口共同使用旧完整 OpenPBR 的实际源支持子域；math/state/evaluate/sample 保持同一数学核，生产窄构造不建立完整 generic Material 默认图。能量表 binding 由实际消费者入口声明：Offline和K2传入完整BSDF，RR的K1只在guide能量尾声消费；delta循环无energy参数，库不声明描述符。精确 Fresnel、multiple scattering、支持与过滤边界见[材质契约](materials.md)。厚壁 authored SSS 仍使用明确隔离的历史 Lite 近似；foliage API 不表示已按 MC 类型或旧 preset 自动分类。
+实时与离线入口共同使用旧完整 OpenPBR 的实际源支持子域；math/state/evaluate/sample 保持同一数学核，生产窄构造不建立完整 generic Material 默认图。能量表 binding 由实际消费者入口声明：Offline和K2传入完整BSDF，RR的K1只在guide能量尾声消费；delta循环无energy参数，库不声明描述符。精确 Fresnel、multiple scattering、支持与过滤边界见[材质契约](materials.md)。厚/未知SSS回退普通opaque，CPU证明真正薄壁才接受SSS；Lite和厚近似已删除，foliage不按名称或cutout自动分类。
 
 实时为 K1主表面/delta/guides → K2主要输运 → post 三段，两种PT kernel均只调度一次。K1遇到粗糙首面只完成一次主查询及landing发布；K2从NEE开始，不重复纹理、Beer、cone或发光。Offline保留原通用输运和逐样本循环。阶段资源/参数不共用完整Frame；交接布局、预算、跨查询状态及缓存取舍维护在 [PT 依赖与性能设计](pt-state-design.md)，这些结构变化不代表已测得性能提升。
 
@@ -109,6 +107,6 @@ Offline 保持逐样本在线均值、原 sequence 与随机域。当前单样�
 
 `shader-tests` feature 构建专用入口，GPU 直接执行生产数学模块。独立 u64/top-down/标量 Sobol oracle、f64 颜色与几何参考、冻结的旧 DRT shader 分别检查整数一致性、数值误差与移植等价。实际 AS 查询覆盖仿射、镜像、非均匀缩放、平移、掠射及邻近遮挡；图像测试检查 resize、历史、显示参数与宿主在途资源。
 
-PBR 检查分别覆盖 LitePBR sample/evaluate/PDF、delta/TIR/薄壁与数值清洗，以及实际纹理描述符、规范通道、法线分布、动画、atlas lookup 和发光消费。窄delta/guide夹具对拍Full入口，检查整闭包分类、0.5条件估计器期望、same-event方向逐分量数值精确相等和窄albedo；正负零位差单独统计，不使用误差容忍。K1夹具另检查照明终止后guide继续、预算末步/耗尽与PSR边界；生产RR图像夹具读回真实格式通道，检查固定相机/jitter时跨照明种子的稳定性，以及相机运动、双分支完成状态和post补全。底层闭包数学、资源翻译和生产输运是不同验证层；单个数值域或无窗口夹具不能外推完整游戏材质和帧率。
+PBR 检查分别覆盖 Full真实LUT、完整sample/evaluate/PDF与CPU薄壁许可、delta/TIR/薄壁与数值清洗，以及实际纹理描述符、规范通道、法线分布、动画、atlas lookup 和发光消费。窄delta/guide夹具对拍Full入口，检查整闭包分类、0.5条件估计器期望、same-event方向逐分量数值精确相等和窄albedo；正负零位差单独统计，不使用误差容忍。K1夹具另检查照明终止后guide继续、预算末步/耗尽与PSR边界；生产RR图像夹具读回真实格式通道，检查固定相机/jitter时跨照明种子的稳定性，以及相机运动、双分支完成状态和post补全。底层闭包数学、资源翻译和生产输运是不同验证层；单个数值域或无窗口夹具不能外推完整游戏材质和帧率。
 
 显示无窗口夹具另执行生产FP32 RR selector→BC6H星图、image/BDA曝光与显示、HDR合成及两种FG HUDless/mask输出，核对独立数学参考和实际像素/同步；不等于已经验证真实显示器亮度或SDK帧生成Present。测试入口的读回只用于无窗口行为验证，不进入游戏流水线。它们不替代两版 Minecraft 的窗口/全屏/HUD 验收。操作入口见 [CONTRIBUTING](../CONTRIBUTING.md)。

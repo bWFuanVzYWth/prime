@@ -3,11 +3,12 @@
 #language slang 2026
 module "bsdf/full/pt.slang";
 
-import "bsdf/common/common.slang";
-import "service/bsdf/support/conversion.slang";
-import "bsdf/full/math/spectrum.slang";
+import "bsdf/full/contract/material.slang";
+import "bsdf/full/math/frame.slang";
 import "bsdf/full/contract/sample.slang";
 import "bsdf/full/contract/flags.slang";
+import "service/bsdf/support/conversion.slang";
+import "bsdf/full/math/spectrum.slang";
 import "bsdf/full/dielectric/contract.slang";
 import "bsdf/full/opaque/lobes.slang";
 import "bsdf/full/opaque/state.slang";
@@ -109,13 +110,7 @@ primeFullPtTransmissionState<Energy>(Energy energy, float roughness, float inter
 public PrimeFullOpenPbrSample primeFullPtOpaqueSample(float3 wi, float3 randomValue,
                                                       PrimeFullCompactOpaqueState state) {
     PrimeFullOpenPbrSample sampled = primeFullCompactOpaqueSample(wi, randomValue, state);
-    PrimeOpenPbrSample bridge;
-    bridge.wo = sampled.wo;
-    bridge.throughput.value = sampled.throughput.value;
-    bridge.throughput.flags = sampled.throughput.flags;
-    bridge.pdf = sampled.pdf;
-    bridge.eta = sampled.eta;
-    if (state.kind != PRIME_FULL_COMPACT_OPAQUE_CONDUCTOR && primeOpenPbrHasSample(bridge) &&
+    if (state.kind != PRIME_FULL_COMPACT_OPAQUE_CONDUCTOR && primeFullOpenPbrHasSample(sampled) &&
         !primeFullOpenPbrIsDelta(sampled.throughput.flags)) {
         PrimeFullCompactOpaqueEvaluation evaluated =
                 primeFullCompactOpaqueEvaluate(wi, sampled.wo, state);

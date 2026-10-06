@@ -99,7 +99,8 @@ PrimePbrVertex primePrimaryMaterial(SurfaceHit hit, float3 direction) {
             dot(hit.shadingNormal, direction) > 0.0 ? -hit.shadingNormal : hit.shadingNormal;
     return primePbrVertex(sourceToWorking(saturate(hit.sourceColor.rgb)), normal,
                           hit.normalSample.a, hit.specularSample.rgb, (hit.materialFlags & 1) != 0,
-                          (hit.materialFlags & 2) != 0, hit.materialThin, hit.optical, -direction);
+                          (hit.materialFlags & 2) != 0, hit.optical ? hit.thin : hit.materialThin,
+                          hit.optical, -direction);
 }
 
 PrimePrimaryGuideSeed primePrimaryNextGuide(SurfacePoint surface, PrimePbrVertex material,

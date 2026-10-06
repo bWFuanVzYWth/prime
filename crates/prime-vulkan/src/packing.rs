@@ -31,6 +31,7 @@ struct Source<'a> {
 }
 fn closed(geometry: Quad) -> SurfaceFace {
     SurfaceFace {
+        material_thin: false,
         optics: None,
         geometry,
         repeat: None,
@@ -415,6 +416,10 @@ pub(crate) fn encode(
         .ok_or("Texture has not been captured")?;
     bytes[160..164].copy_from_slice(&texture.to_le_bytes());
     bytes[164..168].copy_from_slice(&q.flags.to_le_bytes());
+    // Reserved word shared by every existing format; coverage and optical flags stay separate.
+    let material_control = u32::from(face.material_thin)
+        | (u32::from(face.detail.as_ref().is_some_and(|d| d.layer.material_thin)) << 1);
+    bytes[172..176].copy_from_slice(&material_control.to_le_bytes());
     if format != 0 {
         let at = 176;
         let mut properties =

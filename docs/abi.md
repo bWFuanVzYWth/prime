@@ -1,6 +1,6 @@
-# FFM ABI v16
+# FFM ABI v17
 
-Java 适配器与 Rust 核心作为同一构建产物配套使用。公共 ABI 为16，Minecraft 源 schema 为7，设置文件 schema 为13；版本用于边界拒绝，不承诺不同发布之间的二进制兼容。两版适配器共享同次构建的核心，JAR 和引擎不能混用。
+Java 适配器与 Rust 核心作为同一构建产物配套使用。公共 ABI 为17，Minecraft 源 schema 为7，设置文件 schema 为13；版本用于边界拒绝，不承诺不同发布之间的二进制兼容。两版适配器共享同次构建的核心，JAR 和引擎不能混用。
 
 ## 唯一结构契约与生成
 
@@ -10,7 +10,7 @@ Java 适配器与 Rust 核心作为同一构建产物配套使用。公共 ABI �
 
 固定输入以 `PrimeHeader { struct_size, abi_version }` 开始，两者精确匹配当前根结构。MC 根输入以 `PrimeMcIdentity` 开始，前两字段相同，另外携带 source/game version、resource generation、world epoch 和 batch。自然 padding 不传递语义，不要求清零，也不参与内容比较；显式 reserved 字段须为零。
 
-`prime_create(16)` 返回非零 handle，普通 status=0 成功、-1 失败；`prime_last_error` 返回 UTF-8 完整长度（不含 NUL），容量允许时补 NUL。除不使用 session 的真实 Present 转发外，所有 handle 调用都在创建它的 OS 线程执行。库名仍为 `prime_engine`。
+`prime_create(17)` 返回非零 handle，普通 status=0 成功、-1 失败；`prime_last_error` 返回 UTF-8 完整长度（不含 NUL），容量允许时补 NUL。除不使用 session 的真实 Present 转发外，所有 handle 调用都在创建它的 OS 线程执行。库名仍为 `prime_engine`。
 
 ## 诊断控制与排空
 
@@ -42,6 +42,9 @@ Java 适配器与 Rust 核心作为同一构建产物配套使用。公共 ABI �
 | `PrimePrepareResources` | 24 B | prepare_resources；活动command与真实提交serial，仅准备设备/全局资源 |
 | `PrimeDisplayOutput` | 24 B | 实际HDR surface启用状态、绝对峰值及系统参考白，reserved=0 |
 | `PrimeHdrTarget` | 64 B | 最终呈现的活动command、UI及输出image/view、serial和尺寸；UI为sampled RGBA8、HDR输出为storage RGBA16F，均为GENERAL |
+| `PrimePresentationStats` | 40 B | `prime_streamline_present_stats`；进程级epoch、实际呈现累计数、新鲜sample编号和active/valid，固定CPU快照 |
+
+呈现统计输出须初始化header并保持自然对齐、可写到同步返回；status=0已复制，1表示已有SDK API锁暂忙且输出未改，-1拒绝边界。读取不调用SDK、不等待GPU、无session指针或资源借用；CPU-only库返回inactive/invalid。统计按每帧唯一GetState返回的呈现数量累计；SDK getter不清零缓存，同一帧不能多读多加，退休查询不计数。不能按FG开关/请求倍数推算。
 
 相机基须单位正交，位置、FOV和太阳时角须有限且在支持范围内。累积在相机、场景、尺寸变化或sample index=0时重置，其余样本计数由renderer维护。冻结期间帧仍须合法，但仅采用新宽高/序号，姿态、时角和光输运来自已显示快照。
 
@@ -171,7 +174,7 @@ flags 的 bit0 表示已在这台逻辑设备启用 `VK_EXT_opacity_micromap` �
 
 ## 设置结构与文件 schema
 
-`prime_configure(handle,&settings)` 借用216 B `PrimeSettings`，header使用公共ABI v16，JAR与DLL须配套重建。原有字段位置保持：`native_noisy_output` 位于64字节偏移，1为禁用降噪并使用原生分辨率含噪输出，0为默认允许RR；此字段与旧公共ABI v13的RR布尔语义相反。`light_sampling` 位于96字节偏移，1为功率距离Tree，旧0/2均规范化到Tree，其他值拒绝；生产仅保留Tree，字段迁移不重建管线或重置历史。`integrator` 位于100字节偏移，0为PathTrace、1为RestirPt，其他值拒绝。`ignore_global_history_resets`位于104字节偏移，0为默认关闭、1为忽略显式全局历史重置的诊断，其他值拒绝。`restir_spatial_only`位于108字节偏移，0为默认启用时间复用、1为跳过ReSTIR全部时间重采样阶段，其他值拒绝；不改变空间控制、DLSS RR历史或离线累积。
+`prime_configure(handle,&settings)` 借用216 B `PrimeSettings`，header使用公共ABI v17，JAR与DLL须配套重建。原有字段位置保持：`native_noisy_output` 位于64字节偏移，1为禁用降噪并使用原生分辨率含噪输出，0为默认允许RR；此字段与旧公共ABI v13的RR布尔语义相反。`light_sampling` 位于96字节偏移，1为功率距离Tree，旧0/2均规范化到Tree，其他值拒绝；生产仅保留Tree，字段迁移不重建管线或重置历史。`integrator` 位于100字节偏移，0为PathTrace、1为RestirPt，其他值拒绝。`ignore_global_history_resets`位于104字节偏移，0为默认关闭、1为忽略显式全局历史重置的诊断，其他值拒绝。`restir_spatial_only`位于108字节偏移，0为默认启用时间复用、1为跳过ReSTIR全部时间重采样阶段，其他值拒绝；不改变空间控制、DLSS RR历史或离线累积。
 
 其后追加26个4字节ReSTIR控制字段，占用`[112,216)`，最后字段起始偏移为212。完整字段顺序及偏移以头文件、生成的Rust编译断言和Java具名访问器为准，不维护另一份偏移表。Rust边界核验布尔0/1、枚举、整数范围及有限浮点后保存为`RenderSettings.restir`；Java的独立`RestirSettings`在写入同一C结构前执行相同范围校验。历史M上限控制置信计数而非样本年龄；初始路径数、空间开关/邻居数/轮数和配对距离控制实际生成、复用工作及配对资产；随机重投影、重复度降权和解耦着色分别由对应GPU阶段消费。Footprint/roughness阈值与标准差参与路径分类及Hybrid移位，距离阈值保留界面单位、GPU使用值除以100；法线/深度门槛控制空间邻居支持。样本诊断选择输出、重复度或寿命；`restir_rr_*`仅在有实际DLSS RR消费者时控制最终含噪输出去相关，不改变复用reservoir，权重限制不保证严格无偏。默认值、具体范围及资源条件见[ReSTIR PT](restir-pt.md)。这些新控制不参与全局transport重置比较；seed继续遵守原有transport规则。
 

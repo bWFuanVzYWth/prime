@@ -78,6 +78,259 @@ fn face() -> Quad {
         layer: 1,
     }
 }
+fn sss_catalog(mut quads: Vec<Quad>) -> Catalog {
+    for quad in &mut quads {
+        if quad.sprite == 0 {
+            quad.sprite = 1;
+        }
+    }
+    let mut c = catalog(quads);
+    let mut sprite = crate::sprite::Sprite {
+        name: "test:shared".into(),
+        bounds: [0., 0., 1., 1.],
+        extent: [1, 1],
+        images: vec![crate::sprite::Image {
+            width: 1,
+            height: 1,
+            pixels: Arc::from([255; 4]),
+        }],
+        frames: vec![],
+        frame_ends: vec![],
+        coverage_frames: Arc::from([]),
+        interpolate: false,
+        material: None,
+    };
+    sprite.material = Some(crate::labpbr::Material::from_images(
+        &sprite,
+        None,
+        Some(crate::sprite::Image {
+            width: 1,
+            height: 1,
+            pixels: Arc::from([0, 4, 255, 255]),
+        }),
+    ));
+    c.sprites.insert(
+        2,
+        crate::sprite::Sprite {
+            name: "test:ordinary".into(),
+            bounds: sprite.bounds,
+            extent: sprite.extent,
+            images: vec![crate::sprite::Image {
+                width: 1,
+                height: 1,
+                pixels: Arc::from([255; 4]),
+            }],
+            frames: vec![],
+            frame_ends: vec![],
+            coverage_frames: Arc::from([]),
+            interpolate: false,
+            material: None,
+        },
+    );
+    c.sprites.insert(1, sprite);
+    c.states.insert(
+        7,
+        State {
+            id: 7,
+            model: 1,
+            ..Default::default()
+        },
+    );
+    c.prepare();
+    c
+}
+#[test]
+fn complete_sheet_topology_proves_thin_without_names_coverage_or_duplicate_windings() {
+    for layer in 0..3 {
+        let mut a = face();
+        a.layer = layer;
+        let c = sss_catalog(vec![a]);
+        for name in [
+            "minecraft:oak_leaves",
+            "minecraft:short_grass",
+            "test:stone",
+        ] {
+            let (plain, rich, _) = emit(&c, name, 127);
+            assert!(plain.is_empty());
+            assert_eq!(rich.len(), 1);
+            assert!(rich[0].material_thin);
+            assert_eq!(rich[0].geometry.flags, layer as u32);
+            assert!(rich[0].optics.is_none());
+            assert_eq!(rich[0].media, [0; 2]);
+        }
+    }
+    let quads = vec![
+        cross_sheet(false),
+        reverse(cross_sheet(false)),
+        cross_sheet(true),
+        reverse(cross_sheet(true)),
+    ];
+    let c = sss_catalog(quads);
+    let (plain, rich, _) = emit(&c, "test:unrelated_name", 127);
+    assert!(plain.is_empty());
+    assert_eq!(rich.len(), 2);
+    assert!(rich.iter().all(|f| f.material_thin && f.optics.is_none()));
+}
+#[test]
+fn closed_parallel_inset_unknown_and_degenerate_sources_cannot_claim_material_thin() {
+    let mut cube = Vec::new();
+    for axis in 0..3 {
+        for side in 0..2 {
+            let mut q = face();
+            q.positions = q.positions.map(|p| {
+                let mut out = [0.; 3];
+                out[axis] = side as f32;
+                out[(axis + 1) % 3] = p[0];
+                out[(axis + 2) % 3] = p[1];
+                out
+            });
+            cube.push(q.clone());
+            cube.push(reverse(q));
+        }
+    }
+    let mut parallel = face();
+    parallel
+        .positions
+        .iter_mut()
+        .for_each(|p| p[2] = 2.0_f32.powi(-100));
+    let mut inset = face();
+    inset.positions.iter_mut().for_each(|p| p[2] = 0.002 / 16.);
+    let mut degenerate = face();
+    degenerate.positions = [[0.; 3]; 4];
+    let mut warped = face();
+    warped.positions[2][2] = 2.0_f32.powi(-100);
+    for quads in [
+        cube,
+        vec![face(), parallel],
+        vec![face(), reverse(inset)],
+        vec![degenerate],
+        vec![warped],
+    ] {
+        let c = sss_catalog(quads);
+        let (plain, rich, _) = emit(&c, "minecraft:oak_leaves", 127);
+        assert!(!plain.is_empty() || !rich.is_empty());
+        assert!(
+            rich.iter()
+                .all(|f| !f.material_thin
+                    && f.detail.as_ref().is_none_or(|d| !d.layer.material_thin))
+        );
+    }
+    let mut c = sss_catalog(vec![face()]);
+    c.models.insert(2, Model::Weighted(vec![(1, 1)], 1));
+    c.states.get_mut(&7).unwrap().model = 2;
+    c.prepare_delta(&[7], &[2], &[]);
+    let state = c.states[&7].clone();
+    let mut layers = Default::default();
+    let mut surfaces = Default::default();
+    c.emit(
+        &state,
+        [0; 3],
+        127,
+        &mut layers,
+        &mut Default::default(),
+        &mut Default::default(),
+        &mut surfaces,
+    );
+    assert_eq!(layers[1].len(), 1);
+    assert!(surfaces.iter().all(Vec::is_empty));
+}
+#[test]
+fn source_side_proofs_remain_independent_and_complete_when_culled() {
+    let mut a = cross_sheet(false);
+    a.face = 2;
+    let mut b = reverse(a.clone());
+    b.sprite = 2;
+    b.face = 3;
+    let c = sss_catalog(vec![a, b]);
+    let (plain, rich, _) = emit(&c, "test:sheet", 127);
+    assert!(plain.is_empty());
+    assert_eq!(rich.len(), 1);
+    assert!(rich[0].material_thin);
+    assert!(!rich[0].detail.as_ref().unwrap().layer.material_thin);
+    let (_, single, _) = emit(&c, "test:sheet", 1 << 2);
+    assert_eq!(single.len(), 1);
+    assert!(single[0].material_thin);
+    let (other, rich, _) = emit(&c, "test:sheet", 1 << 3);
+    assert_eq!(other.len(), 1);
+    assert!(rich.is_empty());
+}
+#[test]
+fn shared_sprite_uses_complete_parent_topology_and_rebuilds_proofs_for_appended_definitions() {
+    let mut c = sss_catalog(vec![face()]);
+    let mut perpendicular = face();
+    perpendicular.sprite = 1;
+    perpendicular.positions = perpendicular.positions.map(|p| [0., p[1], p[0]]);
+    c.models.insert(2, Model::Mesh(vec![perpendicular]));
+    c.models.insert(3, Model::Multipart(vec![1, 2]));
+    c.models.insert(4, Model::Weighted(vec![(1, 1)], 1));
+    c.models.insert(5, Model::Alias(3));
+    for id in 2..=5 {
+        c.states.insert(
+            id,
+            State {
+                id,
+                model: id,
+                ..Default::default()
+            },
+        );
+    }
+    c.prepare_delta(&[2, 3, 4, 5], &[2, 3, 4, 5], &[]);
+    let mut third = face();
+    third.sprite = 1;
+    third.positions = third.positions.map(|p| [p[0], 0., p[1]]);
+    c.models.insert(6, Model::Mesh(vec![third]));
+    c.models.insert(8, Model::Multipart(vec![3, 6]));
+    c.states.insert(
+        8,
+        State {
+            id: 8,
+            model: 8,
+            ..Default::default()
+        },
+    );
+    c.prepare_delta(&[8], &[6, 8], &[]);
+    for (id, expected_thin, expected_faces) in
+        [(3, true, 2), (4, false, 1), (5, true, 2), (8, false, 3)]
+    {
+        let state = &c.states[&id];
+        let mut layers = Default::default();
+        let mut surfaces = Default::default();
+        c.emit(
+            state,
+            [0; 3],
+            127,
+            &mut layers,
+            &mut Default::default(),
+            &mut Default::default(),
+            &mut surfaces,
+        );
+        let mut faces = surfaces.into_iter().flatten().collect::<Vec<_>>();
+        faces.extend(layers.into_iter().flatten().map(SurfaceFace::from_quad));
+        assert_eq!(faces.len(), expected_faces);
+        let mesh = prime_scene::surface::SurfaceMesh::from_resolved(1, faces).unwrap();
+        assert!(
+            mesh.quads
+                .iter()
+                .all(|f| f.material_thin == expected_thin && f.optics.is_none()),
+            "model {id}"
+        );
+    }
+    let image = c.sprites[&1]
+        .image(0, &prime_scene::SourceScene::default())
+        .unwrap();
+    assert_eq!(
+        image
+            .material
+            .as_ref()
+            .unwrap()
+            .specular
+            .as_ref()
+            .unwrap()
+            .pixels[2],
+        190,
+        "the same authored sprite remains available to the proven thin parent"
+    );
+}
 fn reverse(mut q: Quad) -> Quad {
     q.positions = [0, 3, 2, 1].map(|i| q.positions[i]);
     q.uvs = [0, 3, 2, 1].map(|i| q.uvs[i]);

@@ -86,13 +86,15 @@ specular 分类 G/B 使用当前帧 mip0 点采样身份；可靠的 CPU 全域�
 
 CPU 证明必须说明生产者、覆盖域、未知情况和失效路径。当前可见像素、单帧动画或旧资源代次不能证明整个 resident 场景没有某种材质；不能证明时使用通用路径。增加 CPU 扫描、复制、缓存和重编译也有成本，须分别评估稳态、加载与更新，不把 GPU 节省无条件视作整帧收益。
 
+LabPBR SSS强度在CPU清洗为0..190，资源准备对完整确定性源建立薄片证明；所有动画帧的SSS能力复用已有源像素扫描，只有证明薄片且可能含SSS的简单quad转入rich表面。主/第二层证明使用现有word43的两个bit，176/240/272/432B记录stride、上传容量、描述符和GPU退休合同不变；每次实际保留该字段的`loadQuad`新增4B逻辑读取，真实事务及寄存器成本未测。资源更新重算CPU证明，未知/厚体按普通opaque消费；不新增纹理副本、全图状态、pass、队列或GPU等待。CPU rich记录的容量与实际整帧成本另行测量，不由删Lite和厚SSS分支推断加速。
+
 ## 必须保持的语义与可复用简化
 
 物理介质端点来自选择着色涂层之前的原边界；selected shading material 决定表面 BSDF。physical thin 与 material thin 的用途不同，不能合并成一个未经证明的分类。有限灯的 BSDF 方向基于原表面位置，阴影 segment 使用两端安全偏移后的点；改变其中一条方向不能顺带改变另一条。
 
 局部灯源先从线性 BT.709 转为 working RGB，再乘同域 extinction 产生的 RGB visibility；普通 PT 与 ReSTIR 的 NEE/BSDF-emitter 采用同一顺序，不能把彩色 Beer 乘法移过非对角颜色矩阵。保持 alpha/coverage、光源实际 PMF、完整混合 PDF、MIS、薄壁/TIR、介质、随机域及 roulette 契约。有连续散射的末预算顶点仍消费NEE与对应MIS，只省去没有下一跳消费者的采样和roulette；整闭包纯delta顶点没有连续NEE消费者。源输入规范化不能证明 BSDF response/PDF、方向、eta、throughput 或最终 radiance 有限；实际结果清洗继续在其消费者边界执行。
 
-当前源码显式结束或删除生产路径不消费的字段、参数、默认构造和不可达拓扑，而不把支持边界藏在编译器 DCE 中。生产窄构造与旧完整 OpenPBR 支持子域 API 复用同一数学核；厚壁 SSS 扩展单独保留 Lite 数学；通用库的合法能力不因生产暂未接入而删除。AO、height、porosity 或 generic 默认字段的源码简化不自动证明 GPU 加速；packed 纹理仍可能执行同一次事务。
+当前源码显式结束或删除生产路径不消费的字段、参数、默认构造和不可达拓扑，而不把支持边界藏在编译器 DCE 中。生产窄构造与旧完整 OpenPBR 支持子域 API 复用同一数学核；按用户范围删除Lite及厚SSS近似，只保留Full支持子域；厚/未知SSS由CPU判定为普通opaque，GPU不猜源码分类。AO、height、porosity 或 generic 默认字段的源码简化不自动证明 GPU 加速；packed 纹理仍可能执行同一次事务。
 
 `traceClosest` 与局部灯采样当前显式初始化返回值，miss 或无灯的无效分量没有消费。定义这些分量可避免未初始化成员形成上一跳到下一跳的无用 Phi 依赖。committed 标识和动态变换在几何重建阶段消费完，后续纹理和介质计算不再调用 query getter。
 
@@ -126,7 +128,7 @@ FG guide 初始化直接消费 K1 push 中已验证的输入尺寸，depth/motio
 
 显示参数只在路径后的post/显示消费。Realtime的几何PSR和guide遍历属于K1；K2只有一个按需传递的实际specular reflection次段距离职责，不访问完整guide。RR post消费当前/前相机、主depth、该距离及完成状态，零距离非天空像素另消费现有主motion，补全无需额外光追的反射motion；它不恢复材质或路径状态。Offline仍只消费通用输运的radiance，单样本/多样本历史读写保持原顺序。共同返回类型或入口参数大小不等于所有字段始终占据GPR。
 
-星图、曝光、HDR和FG无HUD输出在PT之后消费；仅FG的首次可见guide复用K1现有主查询，不增加光追dispatch。RR选择重建/同帧raw后做星图与测光；Offline测光/显示直接读取FP32累积BDA。新增全图FP32写读、直方图、HDR快照和UI合成均是真实成本，详见[显示](display.md)。BDA是否启用由push中的32位标志声明；不在shader比较64位空指针，因此不新增`shaderInt64`设备要求。仅产物变小或消除能力要求不构成整帧提速证明。
+星图、曝光、HDR和FG无HUD输出在PT之后消费；仅FG的首次可见guide复用K1现有主查询，不增加光追dispatch。RR选择SDK重建或临时导向空间滤波后做星图与测光，显式含噪诊断另选raw；Offline测光/显示直接读取FP32累积BDA。新增全图FP32写读、直方图、HDR快照和UI合成均是真实成本，详见[显示](display.md)。BDA是否启用由push中的32位标志声明；不在shader比较64位空指针，因此不新增`shaderInt64`设备要求。仅产物变小或消除能力要求不构成整帧提速证明。
 
 RR 的 input/output 尺寸、抖动、格式、运动和历史边界见[重建契约](reconstruction.md)。默认Performance降低内部像素和射线数，应与原生1920×1080基准区分；scratch、SL私有资源、重建和显示都是真实成本。
 

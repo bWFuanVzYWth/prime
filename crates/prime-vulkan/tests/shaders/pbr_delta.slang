@@ -4,7 +4,9 @@ module pbr_delta_test;
 import "../../shaders/pbr.slang";
 import "pbr/delta.slang";
 import "pbr/guide_albedo.slang";
-import "bsdf/common/common.slang";
+import "bsdf/full/math/frame.slang";
+import "bsdf/full/contract/material.slang";
+import "bsdf/full/math/spectrum.slang";
 import "bsdf/full/contract/flags.slang";
 import "bsdf/full/contract/sample.slang";
 import "bsdf/full/pt.slang";
@@ -16,8 +18,6 @@ import "bsdf/full/opaque/state.slang";
 import "bsdf/full/opaque/energy.slang";
 import "bsdf/full/math/microfacet_measure.slang";
 import "bsdf/full/math/microfacet_energy.slang";
-import "bsdf/lite/pt.slang";
-import "bsdf/lite/bsdf.slang";
 import "model/material/defaults.slang";
 import "model/material/fresnel_code.slang";
 import "model/material/translation.slang";
@@ -54,27 +54,27 @@ bool same(PrimePbrSample a, PrimePbrSample b) {
            close(a.medium.x, b.medium.x) && close(a.medium.yzw, b.medium.yzw);
 }
 
-PrimePbrSample referenceFrame(PrimeFullOpenPbrSample fullSample, PrimeOpenPbrOnb onb,
+PrimePbrSample referenceFrame(PrimeFullOpenPbrSample fullSample, PrimeFullOpenPbrOnb onb,
                               PrimePbrVertex vertex, float3 view, float3 geometric, float4 incident,
                               float4 transmitted) {
     PrimePbrSample result;
     result.bsdfSample = primeInvalidBsdfSample();
     result.medium = incident;
-    PrimeOpenPbrSample sampled;
+    PrimeFullOpenPbrSample sampled;
     sampled.wo = fullSample.wo;
     sampled.throughput.value = fullSample.throughput.value;
     sampled.throughput.flags = fullSample.throughput.flags;
     sampled.pdf = fullSample.pdf;
     sampled.eta = fullSample.eta;
-    if (!primeOpenPbrHasSample(sampled))
+    if (!primeFullOpenPbrHasSample(sampled))
         return result;
-    result.bsdfSample.direction = primeOpenPbrOnbToWorld(onb, sampled.wo);
-    if ((sampled.throughput.flags & PRIME_OPENPBR_FLAG_DELTA_REFLECTION) != 0u)
+    result.bsdfSample.direction = primeFullOpenPbrOnbToWorld(onb, sampled.wo);
+    if ((sampled.throughput.flags & PRIME_FULL_OPENPBR_FLAG_DELTA_REFLECTION) != 0u)
         result.bsdfSample.direction = normalize(reflect(-view, onb.normal));
     result.bsdfSample.response = sampled.throughput.value;
     result.bsdfSample.pdf = sampled.pdf;
     result.bsdfSample.relativeEta = sampled.eta;
-    result.bsdfSample.eventFlags = primeOpenPbrToBsdfEventFlags(sampled.throughput.flags);
+    result.bsdfSample.eventFlags = primeFullOpenPbrToBsdfEventFlags(sampled.throughput.flags);
     result.bsdfSample = primeSanitizeBsdfSample(result.bsdfSample);
     if (!primeGeometricSampleSupport(primePbrVertexHasNormal(vertex), geometric, view,
                                      result.bsdfSample))
@@ -91,7 +91,7 @@ PrimeFullCompactOpaqueState referenceOpaque(PrimePbrVertex vertex, float3 wi, fl
     PrimeConductorFresnel fresnel = primeConductorFresnel(vertex.baseColor, code);
     return primeFullPtOpaqueState(
             DeltaTestEnergy(), vertex.baseColor, vertex.roughness,
-            conductor ? 1.0 : primeOpenPbrF0ToIor(primeDecodeDielectricF0(code)) / incident.x,
+            conductor ? 1.0 : primeFullOpenPbrF0ToIor(primeDecodeDielectricF0(code)) / incident.x,
             conductor ? 0.0
                       : float((vertex.control >> PRIME_OPTICAL_SUBSURFACE_SHIFT) & 0xffu) / 190.0,
             conductor, conductor ? fresnel.f0 : float3(0.0),
@@ -100,8 +100,8 @@ PrimeFullCompactOpaqueState referenceOpaque(PrimePbrVertex vertex, float3 wi, fl
 
 PrimeDenoiseAlbedos referenceAlbedo(PrimePbrVertex vertex, float3 view, float4 incident,
                                     float4 transmitted) {
-    PrimeOpenPbrOnb onb = primePbrVertexFrame(vertex, view, incident, transmitted);
-    float3 wi = primeOpenPbrOnbToLocal(onb, view);
+    PrimeFullOpenPbrOnb onb = primePbrVertexFrame(vertex, view, incident, transmitted);
+    float3 wi = primeFullOpenPbrOnbToLocal(onb, view);
     PrimeDenoiseAlbedos result;
     if (primePbrVertexIsDielectric(vertex)) {
         PrimeFullCompactTransmissionState state = primeFullPtTransmissionState(
@@ -112,18 +112,6 @@ PrimeDenoiseAlbedos referenceAlbedo(PrimePbrVertex vertex, float3 view, float4 i
                                                             PRIME_FULL_OPENPBR_FLAG_TRANSMISSION);
         result.specular = primeFullCompactTransmissionEnergy(DeltaTestEnergy(), wi, state,
                                                              PRIME_FULL_OPENPBR_FLAG_REFLECTION);
-    } else if (primePbrVertexUsesLegacyThickSss(vertex)) {
-        uint code = vertex.control & PRIME_OPTICAL_FRESNEL_MASK;
-        uint subsurface = (vertex.control >> PRIME_OPTICAL_SUBSURFACE_SHIFT) & 0xffu;
-        PrimeLitePtOpaqueState state =
-                primeLitePtOpaqueStateInit(vertex.baseColor, vertex.roughness,
-                                           primeOpenPbrF0ToIor(primeDecodeDielectricF0(code)),
-                                           1.0 / incident.x, float(subsurface) / 190.0, false, wi);
-        result.diffuse =
-                primeLiteBaseEnergyCore(state.kind, state.baseColor, state.subsurfaceWeight,
-                                        state.thinWalled, state.baseColor) *
-                state.layer.transmittanceIn;
-        result.specular = float3(1.0 - state.layer.transmittanceIn);
     } else {
         PrimeFullCompactOpaqueEnergy state =
                 primeFullCompactOpaqueEnergy(wi, referenceOpaque(vertex, wi, incident));
@@ -173,14 +161,14 @@ uint4 pbrDeltaCase(uint index, uint mode) {
     PrimePbrVertex vertex = primePbrVertex(
             base, normal, 0.0,
             float3(1.0, float(fresnel) / 255.0,
-                   category == 1u || category == 2u ? 190.0 / 255.0 : 0.0),
+                   category == 1u || category == 2u ? 126.0 / 255.0 : 0.0),
             normalIndex != 0u, true, category == 2u || category == 6u, category >= 5u, view);
     vertex.roughness = roughnesses[roughnessIndex];
     float4 incident = float4(iors[iorIndex].x, 0.01, 0.03, 0.02);
     float4 transmitted =
             float4(iors[iorIndex].y, absorptionIndex == 0u ? float3(0.1, 0.2, 0.3) : float3(1.0e8));
-    PrimeOpenPbrOnb onb = primePbrVertexFrame(vertex, view, incident, transmitted);
-    float3 wi = primeOpenPbrOnbToLocal(onb, view);
+    PrimeFullOpenPbrOnb onb = primePbrVertexFrame(vertex, view, incident, transmitted);
+    float3 wi = primeFullOpenPbrOnbToLocal(onb, view);
     PrimeFullCompactTransmissionState state = primeFullPtTransmissionState(
             DeltaTestEnergy(), vertex.roughness,
             primePbrVertexInterfaceIor(vertex, incident, transmitted),

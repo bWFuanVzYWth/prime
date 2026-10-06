@@ -585,6 +585,7 @@ mod tests {
                     face.detail = Some(Arc::new(SurfaceDetail {
                         mode: LayerMode::Bilateral,
                         layer: SurfaceLayer {
+                            material_thin: false,
                             colors: [[1.; 4]; 4],
                             uvs: [[0.; 2]; 4],
                             texture_id: 0,

@@ -4,6 +4,7 @@
 
 #include <cassert>
 #include <cstdlib>
+#include <future>
 #include <limits>
 #include <map>
 #include <set>
@@ -47,6 +48,8 @@ std::vector<int> retirement;
 VkResult fg_wait_result = VK_SUCCESS;
 uint32_t fg_min_extent = 128;
 int fg_io_failure{};
+uint32_t fg_presented_count{};
+uint32_t fg_state_calls{}, fg_state_options_calls{}, fg_tag_calls{};
 
 sl::Result mock_init(const sl::Preferences &preferences, uint64_t sdk_version) {
     assert(sdk_version == sl::kSDKVersion && preferences.renderAPI == sl::RenderAPI::eVulkan);
@@ -195,12 +198,24 @@ void report_present_error(VkResult result) {
 }
 sl::Result mock_fg_state(const sl::ViewportHandle &, sl::DLSSGState &state,
                          const sl::DLSSGOptions *options) {
+    ++fg_state_calls;
+    if (options) {
+        ++fg_state_options_calls;
+        assert(options->mode == sl::DLSSGMode::eOn && options->numFramesToGenerate == 1);
+        assert((static_cast<uint32_t>(options->flags) &
+                static_cast<uint32_t>(sl::DLSSGFlags::eRequestVRAMEstimate)) == 0);
+    }
     state.numFramesToGenerateMax = 1;
     state.minWidthOrHeight = fg_min_extent;
-    state.status = sl::DLSSGStatus::eOk;
+    state.status = fg_io_failure == 5 ? sl::DLSSGStatus::eFailCommonConstantsInvalid
+                                      : sl::DLSSGStatus::eOk;
     state.inputsProcessingCompletionFence = reinterpret_cast<void *>(81);
     state.lastPresentInputsProcessingCompletionFenceValue = 83;
-    return fg_io_failure == (options ? 2 : 5) ? sl::Result::eErrorIO : sl::Result::eOk;
+    // The guide calls this both "since last GetState" and a per-application-frame count.
+    // Exercise persistent repeated reads (2, then 2), rather than claiming to emulate every
+    // SDK implementation or silently clearing a second query that doubles bridge statistics.
+    state.numFramesActuallyPresented = fg_presented_count;
+    return fg_io_failure == 2 ? sl::Result::eErrorIO : sl::Result::eOk;
 }
 VkResult VKAPI_CALL mock_fg_wait(VkDevice device, const VkSemaphoreWaitInfo *info,
                                  uint64_t timeout) {
@@ -225,6 +240,7 @@ sl::Result mock_marker(sl::PCLMarker marker, const sl::FrameToken &current) {
 }
 sl::Result mock_tags(const sl::FrameToken &current, const sl::ViewportHandle &,
                      const sl::ResourceTag *tags, uint32_t count, sl::CommandBuffer *command) {
+    ++fg_tag_calls;
     // Model the pinned SDK's manager choice: general tags share type/viewport,
     // while frame-based tags additionally belong to the supplied token.
     const uint32_t tag_frame = frame_tagging_enabled ? static_cast<uint32_t>(current) : 0;
@@ -504,6 +520,63 @@ int main() {
            sl::DLSSGQueueParallelismMode::eBlockPresentingClientQueue);
     assert(seen_fg.enableUserInterfaceRecomposition == sl::Boolean::eTrue);
     assert(seen_fg.onErrorCallback == on_present_error);
+    // One query provides both limits and runtime status. Re-reading persistent frame state
+    // would report 2 twice; the HUD must only snapshot the bridge's stored observation.
+    const auto prepare_one_state = [&] {
+        const auto prior_calls = fg_state_calls;
+        const auto prior_options = fg_state_options_calls;
+        const auto result = prime_sl_fg_prepare(ctx, &fg);
+        assert(fg_state_calls == prior_calls + 1 && fg_state_options_calls == prior_options + 1);
+        return result;
+    };
+    PrimeSlPresentationStats stats{};
+    assert(prime_sl_present_stats(&stats) == 0 && stats.active && !stats.valid);
+    const auto first_epoch = stats.epoch;
+    fg_presented_count = 2;
+    assert(prepare_one_state() == 0);
+    assert(prime_sl_present_stats(&stats) == 0 && stats.valid && stats.total_presented == 2);
+    fg_presented_count = 1; // One interpolation frame was dropped.
+    assert(prepare_one_state() == 0);
+    assert(prime_sl_present_stats(&stats) == 0 && stats.total_presented == 3);
+    const auto prior_sample = stats.sample_id;
+    fg_presented_count = 0; // A successful zero observation still advances the sample.
+    assert(prepare_one_state() == 0);
+    assert(prime_sl_present_stats(&stats) == 0 && stats.total_presented == 3 &&
+           stats.sample_id == prior_sample + 1);
+    fg_presented_count = 3; // Delayed asynchronous presentation is counted as reported.
+    assert(prepare_one_state() == 0);
+    assert(prime_sl_present_stats(&stats) == 0 && stats.total_presented == 6 &&
+           stats.epoch == first_epoch);
+    const auto query_calls = fg_state_calls;
+    auto repeated = stats;
+    assert(prime_sl_present_stats(&repeated) == 0 &&
+           !std::memcmp(&stats, &repeated, sizeof(stats)) && fg_state_calls == query_calls);
+    assert(prime_sl_present_stats(nullptr) < 0 && fg_state_calls == query_calls);
+    std::promise<void> locked, unlock;
+    auto allow_unlock = unlock.get_future();
+    std::thread api_owner([&] {
+        std::lock_guard held(api_mutex);
+        locked.set_value();
+        allow_unlock.wait();
+    });
+    locked.get_future().wait();
+    assert(prime_sl_present_stats(&repeated) == 1 &&
+           !std::memcmp(&stats, &repeated, sizeof(stats)));
+    unlock.set_value();
+    api_owner.join();
+    fg_presented_count = 99;
+    fg_io_failure = 2;
+    assert(prepare_one_state() == -101);
+    assert(prime_sl_present_stats(&stats) == 0 && !stats.active && !stats.valid &&
+           stats.total_presented == 0 && stats.epoch != first_epoch);
+    fg_io_failure = 0;
+    fg_presented_count = 80; // OFF/unknown-period counts cannot enter a new epoch.
+    assert(prepare_one_state() == 0);
+    assert(prime_sl_present_stats(&stats) == 0 && stats.active && !stats.valid &&
+           stats.total_presented == 0);
+    fg_presented_count = 4;
+    assert(prepare_one_state() == 0);
+    assert(prime_sl_present_stats(&stats) == 0 && stats.valid && stats.total_presented == 4);
     present_result = VK_SUCCESS;
     swapchain_result = VK_SUBOPTIMAL_KHR;
     callback_result = swapchain_result;
@@ -522,6 +595,30 @@ int main() {
                                sl::PCLMarker::eSimulationStart, sl::PCLMarker::eSimulationEnd,
                                sl::PCLMarker::eRenderSubmitStart, sl::PCLMarker::eRenderSubmitEnd,
                                sl::PCLMarker::ePresentStart, sl::PCLMarker::ePresentEnd}));
+    // Advance actual logical application frames while every frame reports the same value.
+    // Equal counts on different frames are valid observations, not duplicate samples.
+    const auto steady_epoch = stats.epoch;
+    const auto steady_total = stats.total_presented;
+    const auto steady_sample = stats.sample_id;
+    const auto steady_queries = fg_state_calls;
+    const auto steady_presents = presents;
+    fg_presented_count = 2;
+    for (uint32_t app_frame = 0; app_frame < 60; ++app_frame) {
+        ++expected_token;
+        assert(prime_sl_frame(0, 1) == 0 && prime_sl_frame(1, 1) == 0);
+        assert(prepare_one_state() == 0);
+        assert(prime_sl_present_stats(&stats) == 0 && stats.active && stats.valid &&
+               stats.epoch == steady_epoch &&
+               stats.total_presented - steady_total == 2ULL * (app_frame + 1) &&
+               stats.sample_id - steady_sample == app_frame + 1);
+        assert(prime_sl_frame(2, 1) == 0);
+        assert(prime_sl_present(50, reinterpret_cast<uint64_t>(&present_info)) ==
+               VK_SUBOPTIMAL_KHR);
+        assert(presents == steady_presents + app_frame + 1 &&
+               fg_state_calls == steady_queries + app_frame + 1);
+    }
+    assert(stats.total_presented - steady_total == 120 && stats.sample_id - steady_sample == 60 &&
+           fg_state_calls - steady_queries == 60 && presents - steady_presents == 60);
     for (VkResult result :
          {VK_SUCCESS, VK_SUBOPTIMAL_KHR, VK_ERROR_OUT_OF_DATE_KHR, VK_ERROR_DEVICE_LOST}) {
         swapchain_result = result;
@@ -532,6 +629,7 @@ int main() {
     swapchain_result = VK_SUBOPTIMAL_KHR;
     callback_result = swapchain_result;
     assert(prime_sl_present(50, reinterpret_cast<uint64_t>(&present_info)) == VK_ERROR_DEVICE_LOST);
+    assert(prime_sl_present_stats(&stats) == 0 && !stats.active && !stats.valid);
     present_result = VK_SUCCESS;
     publish_present_result = false;
     callback_result = VK_SUCCESS;
@@ -562,6 +660,7 @@ int main() {
     fg_wait_result = VK_SUCCESS;
     retirement.clear();
     assert(prime_sl_fg_suspend(ctx) == 0 && !ctx->fg_enabled);
+    assert(prime_sl_present_stats(&stats) == 0 && !stats.active && !stats.valid);
     assert(seen_fg.onErrorCallback == on_present_error); // OFF must retain API error routing.
     assert((retirement == std::vector<int>{1, 2, 4, 3}));
     assert(prime_sl_fg_prepare(ctx, &fg) == 0 && ctx->fg_enabled);
@@ -588,8 +687,9 @@ int main() {
     assert(frame_tags.at({first_frame, sl::kBufferTypeDepth}) ==
            reinterpret_cast<void *>(first_depth));
     fg.images[0].image = first_depth;
-    // Every SDK stage, including retirement on an unavailable extent, preserves
-    // eErrorIO as an error rather than the bridge's +1 unavailable result.
+    // Every SDK call failure, including retirement on an unavailable extent, preserves
+    // eErrorIO instead of the bridge's +1 unavailable result. Stage5 is a runtime status
+    // rejection from the same non-null-options query, before SetOptions or resource tags.
     for (int stage = 1; stage <= 7; ++stage) {
         ++expected_token;
         assert(prime_sl_frame(0, 1) == 0);
@@ -598,9 +698,21 @@ int main() {
             fg_min_extent = 2000;
         }
         fg_io_failure = stage;
-        assert(prime_sl_fg_prepare(ctx, &fg) == -101);
-        assert(std::strstr(prime_sl_last_error(), "sl"));
-        if (stage >= 3)
+        const auto prior_state_calls = fg_state_calls;
+        const auto prior_state_options = fg_state_options_calls;
+        const auto prior_fg_options = fg_options_calls;
+        const auto prior_fg_tags = fg_tag_calls;
+        assert(prime_sl_fg_prepare(ctx, &fg) == (stage == 5 ? -20 : -101));
+        if (stage == 5) {
+            assert(std::strstr(prime_sl_last_error(), "runtime status"));
+            assert(fg_state_calls == prior_state_calls + 1 &&
+                   fg_state_options_calls == prior_state_options + 1 &&
+                   fg_options_calls == prior_fg_options && fg_tag_calls == prior_fg_tags &&
+                   !ctx->fg_enabled);
+        } else {
+            assert(std::strstr(prime_sl_last_error(), "sl"));
+        }
+        if (stage == 3 || stage == 4 || stage >= 6)
             assert(ctx->fg_enabled);
         fg_io_failure = 0;
         fg_min_extent = 128;

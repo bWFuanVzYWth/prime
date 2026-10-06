@@ -90,6 +90,9 @@ impl RepeatUv {
 #[derive(Clone, Debug, PartialEq)]
 pub struct SurfaceFace {
     pub geometry: Quad,
+    /// Complete source topology proves this material is a zero-thickness sheet.
+    /// Independent of alpha coverage and the optical medium's physical thin flag.
+    pub material_thin: bool,
     pub repeat: Option<RepeatUv>,
     pub emission: Emission,
     /// Negative/positive relative to the actual triangle winding, never the viewing ray.
@@ -142,6 +145,8 @@ pub struct SurfaceLayer {
     pub uvs: [[f32; 2]; 4],
     pub texture_id: u32,
     pub flags: u32,
+    /// Proof belonging to this source material, never inherited from the primary layer.
+    pub material_thin: bool,
     pub repeat: Option<RepeatUv>,
     pub emission: Emission,
 }
@@ -165,6 +170,7 @@ impl SurfaceFace {
     pub fn from_quad(geometry: CompiledQuad) -> Self {
         Self {
             geometry: geometry.into(),
+            material_thin: false,
             repeat: None,
             emission: Emission::default(),
             media: [0; 2],

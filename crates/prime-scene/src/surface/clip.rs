@@ -487,6 +487,7 @@ pub fn intersect_surfaces(
                 uvs: std::array::from_fn(|i| values[i].geometry.uvs[0]),
                 texture_id: other.geometry.texture_id,
                 flags: other.geometry.flags,
+                material_thin: other.material_thin,
                 repeat: other.repeat,
                 emission: other.emission,
             };

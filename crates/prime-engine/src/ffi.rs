@@ -81,6 +81,49 @@ pub extern "C" fn prime_streamline_frame(action: u32, enabled: u32) -> i32 {
 }
 
 /// # Safety
+/// The initialized header is readable and the aligned output is writable until return.
+/// No pointer or SDK/GPU resource is retained; busy leaves the output unchanged.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn prime_streamline_present_stats(
+    output: *mut PrimePresentationStats,
+) -> i32 {
+    boundary(-1, || {
+        if output.is_null()
+            || !(output as usize).is_multiple_of(std::mem::align_of::<PrimePresentationStats>())
+        {
+            return Err("Null or misaligned presentation statistics output".into());
+        }
+        let header = unsafe { output.cast::<PrimeHeader>().read() };
+        if header.abi_version != ABI_VERSION
+            || header.struct_size != std::mem::size_of::<PrimePresentationStats>() as u32
+        {
+            return Err("Unsupported presentation statistics header".into());
+        }
+        #[cfg(not(feature = "vulkan"))]
+        let value = PrimePresentationStats {
+            header,
+            ..Default::default()
+        };
+        #[cfg(feature = "vulkan")]
+        let value = {
+            let Some(stats) = prime_vulkan::streamline_presentation_stats()? else {
+                return Ok(1);
+            };
+            PrimePresentationStats {
+                header,
+                epoch: stats.epoch,
+                total_presented: stats.total_presented,
+                sample_id: stats.sample_id,
+                active: stats.active,
+                valid: stats.valid,
+            }
+        };
+        unsafe { output.write(value) };
+        Ok(0)
+    })
+}
+
+/// # Safety
 /// The host handles/features/queue/timeline remain live through explicit surface shutdown.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn prime_hdr_surface_create(host: *const PrimeVulkanHost) -> u64 {
@@ -1199,6 +1242,56 @@ mod abi_tests {
         assert_eq!(unsafe { prime_configure(handle, &valid) }, 0);
         assert_eq!(prime_destroy(handle), 0);
     }
+    #[test]
+    fn presentation_snapshot_checks_header_and_writes_without_a_session() {
+        let header = PrimeHeader {
+            struct_size: std::mem::size_of::<PrimePresentationStats>() as u32,
+            abi_version: ABI_VERSION,
+        };
+        let mut output = PrimePresentationStats {
+            header,
+            epoch: 23,
+            total_presented: 45,
+            sample_id: 67,
+            active: 89,
+            valid: 91,
+        };
+        assert_eq!(
+            unsafe { prime_streamline_present_stats(std::ptr::null_mut()) },
+            -1
+        );
+        let misaligned = (&mut output as *mut PrimePresentationStats)
+            .cast::<u8>()
+            .wrapping_add(1)
+            .cast();
+        assert_eq!(unsafe { prime_streamline_present_stats(misaligned) }, -1);
+        for invalid in [
+            PrimeHeader {
+                abi_version: ABI_VERSION - 1,
+                ..header
+            },
+            PrimeHeader {
+                struct_size: header.struct_size - 1,
+                ..header
+            },
+        ] {
+            output.header = invalid;
+            assert_eq!(unsafe { prime_streamline_present_stats(&mut output) }, -1);
+            assert_eq!(
+                (output.epoch, output.total_presented, output.valid),
+                (23, 45, 91)
+            );
+        }
+        output.header = header;
+        assert_eq!(unsafe { prime_streamline_present_stats(&mut output) }, 0);
+        assert_eq!(output.header.abi_version, ABI_VERSION);
+        assert_eq!(output.header.struct_size, 40);
+        assert_eq!(
+            (output.active, output.valid, output.total_presented),
+            (0, 0, 0)
+        );
+    }
+
     #[test]
     fn host_descriptor_requires_enabled_capabilities_and_known_flag_bits() {
         let valid = PrimeVulkanHost {

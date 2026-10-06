@@ -550,6 +550,7 @@ fn emit(job: &mut Job, bound: Bound) {
     let face = &bound.face;
     let g = &face.geometry;
     if face.detail.is_none()
+        && !face.material_thin
         && face.optics.is_none()
         && face.repeat.is_none()
         && face.emission == Default::default()

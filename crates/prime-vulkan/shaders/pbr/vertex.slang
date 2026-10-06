@@ -3,27 +3,14 @@
 #language slang 2026
 module "pbr/vertex.slang";
 
-import "bsdf/common/common.slang";
+import "bsdf/full/contract/material.slang";
+import "bsdf/full/math/frame.slang";
 import "model/material/labpbr.slang";
 import "model/material/defaults.slang";
 import "model/material/optical.slang";
 import "model/material/fresnel_code.slang";
 import "model/material/translation.slang";
-import "model/material/defaults.slang";
 import "service/bsdf/contract/sample.slang";
-
-public struct PrimePbrSource {
-    // Linear Rec.2020 color and an already reconstructed world-space shading normal.
-    public float3 baseColor;
-    public float3 normal;
-    // Normal atlas A contains derived distribution roughness. Optical G/B are canonical
-    // categorical LabPBR bytes sampled from the current animation frame's base layer.
-    public float4 normalSample;
-    public float4 specularSample;
-    public bool hasNormal;
-    public bool hasSpecular;
-    public bool thinWalled;
-};
 
 public struct PrimePbrSample {
     public BsdfSample bsdfSample;
@@ -79,9 +66,10 @@ public PrimePbrVertex primePbrVertex(float3 baseColor, float3 normal, float norm
             vertex.control |= fresnelCode;
             if (primeIsSupportedConductorCode(fresnelCode)) {
                 vertex.control |= PRIME_PBR_VERTEX_CONDUCTOR;
-            } else {
-                uint scattering = uint(round(opticalSample.b * 255.0));
-                uint subsurface = scattering > 64u ? scattering - 64u : 0u;
+            } else if (thinWalled) {
+                // CPU publishes a proven thin surface and canonical SSS strength 0..190.
+                // Unsupported thick sources use ordinary opaque shading, without transmission.
+                uint subsurface = uint(round(opticalSample.b * 255.0));
                 vertex.control |= subsurface << PRIME_OPTICAL_SUBSURFACE_SHIFT;
             }
         }
@@ -90,12 +78,6 @@ public PrimePbrVertex primePbrVertex(float3 baseColor, float3 normal, float norm
         vertex.roughness = primeCombineLabPbrNormalRoughness(vertex.roughness,
                                                              clamp(normalVariance, 0.0, 1.0));
     return vertex;
-}
-
-public PrimePbrVertex primePbrVertex(PrimePbrSource source, float3 viewDirection, bool dielectric) {
-    return primePbrVertex(source.baseColor, source.normal, source.normalSample.a,
-                          source.specularSample.rgb, source.hasNormal, source.hasSpecular,
-                          source.thinWalled, dielectric, viewDirection);
 }
 
 public float3 primePbrVertexFrameNormal(PrimePbrVertex vertex, float3 viewDirection,
@@ -110,9 +92,9 @@ public float3 primePbrVertexFrameNormal(PrimePbrVertex vertex, float3 viewDirect
     return normal;
 }
 
-public PrimeOpenPbrOnb primePbrVertexFrame(PrimePbrVertex vertex, float3 viewDirection,
-                                           float4 incidentMedium, float4 transmittedMedium) {
-    PrimeOpenPbrOnb onb = primeOpenPbrOnbFromNormal(vertex.normal);
+public PrimeFullOpenPbrOnb primePbrVertexFrame(PrimePbrVertex vertex, float3 viewDirection,
+                                               float4 incidentMedium, float4 transmittedMedium) {
+    PrimeFullOpenPbrOnb onb = primeFullOpenPbrOnbFromNormal(vertex.normal);
     if (primePbrVertexIsDielectric(vertex)) {
         bool exiting =
                 !primePbrVertexIsThinWalled(vertex) && incidentMedium.x > transmittedMedium.x;
@@ -131,13 +113,4 @@ public float primePbrVertexInterfaceIor(PrimePbrVertex vertex, float4 incidentMe
     float materialIor = exiting ? incidentMedium.x : transmittedMedium.x;
     float inverseOutsideIor = 1.0 / (exiting ? transmittedMedium.x : incidentMedium.x);
     return materialIor * inverseOutsideIor;
-}
-
-// Thick authored SSS was not a supported legacy full-model compact topology.
-// Retain the current source approximation on that explicit extension instead
-// of dropping its diffuse-transmission event or claiming reference equivalence.
-public bool primePbrVertexUsesLegacyThickSss(PrimePbrVertex vertex) {
-    return !primePbrVertexIsDielectric(vertex) && !primePbrVertexIsConductor(vertex) &&
-           !primePbrVertexIsThinWalled(vertex) &&
-           ((vertex.control >> PRIME_OPTICAL_SUBSURFACE_SHIFT) & 0xffu) != 0u;
 }

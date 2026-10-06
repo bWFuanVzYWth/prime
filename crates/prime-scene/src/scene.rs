@@ -34,7 +34,7 @@ pub struct Texture {
 pub struct TextureMaterial {
     /// RG tangent direction, B source AO, A GGX distribution perceptual roughness.
     pub normal: Option<Texture>,
-    /// Complement roughness, canonical Fresnel identity, tagged SSS/porosity, emission.
+    /// Complement roughness, canonical Fresnel identity, SSS intensity byte 0..190, emission.
     pub specular: Option<Texture>,
     /// Per-texel presence bits, or identities when `atlas_lookup` is set.
     pub coverage: Option<Texture>,

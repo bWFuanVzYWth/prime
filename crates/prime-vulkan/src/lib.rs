@@ -116,6 +116,12 @@ pub fn streamline_frame(action: u32, enabled: bool) -> Result<(), String> {
     reconstruction::frame(action, enabled)
 }
 
+pub use reconstruction::PresentationStats;
+/// CPU-only, nonblocking snapshot; None means the existing SDK API lock is busy.
+pub fn streamline_presentation_stats() -> Result<Option<PresentationStats>, String> {
+    reconstruction::presentation_stats()
+}
+
 /// Last recorded frame's object work; independent of opt-in timing instrumentation.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct InstanceWork {

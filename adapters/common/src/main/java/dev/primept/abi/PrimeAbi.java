@@ -7,7 +7,7 @@ import static java.lang.foreign.ValueLayout.*;
 
 public final class PrimeAbi {
     private PrimeAbi() {}
-    public static final int PRIME_ABI_VERSION = 16;
+    public static final int PRIME_ABI_VERSION = 17;
     public static final int PRIME_MAX_BATCH_BYTES = 268435456;
     public static final int PRIME_DIAGNOSTICS_ENABLED = 1;
     public static final int PRIME_DIAGNOSTICS_CAPTURE = 2;
@@ -47,6 +47,68 @@ public final class PrimeAbi {
         }
         public static void abi_version(MemorySegment value, int field) {
             value.set(JAVA_INT, 4L, field);
+        }
+    }
+    public static final class PrimePresentationStats {
+        private PrimePresentationStats() {}
+        public static final long SIZE = 40, ALIGN = 8;
+        public static final MemoryLayout LAYOUT =
+                MemoryLayout
+                        .structLayout(PrimeHeader.LAYOUT.withName("header"),
+                                      JAVA_LONG.withName("epoch"),
+                                      JAVA_LONG.withName("total_presented"),
+                                      JAVA_LONG.withName("sample_id"), JAVA_INT.withName("active"),
+                                      JAVA_INT.withName("valid"))
+                        .withName("PrimePresentationStats");
+        static {
+            if (LAYOUT.byteSize() != SIZE || LAYOUT.byteAlignment() != ALIGN)
+                throw new ExceptionInInitializerError("PrimePresentationStats layout");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("header")) != 0)
+                throw new ExceptionInInitializerError("PrimePresentationStats.header offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("epoch")) != 8)
+                throw new ExceptionInInitializerError("PrimePresentationStats.epoch offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("total_presented")) != 16)
+                throw new ExceptionInInitializerError(
+                        "PrimePresentationStats.total_presented offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("sample_id")) != 24)
+                throw new ExceptionInInitializerError("PrimePresentationStats.sample_id offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("active")) != 32)
+                throw new ExceptionInInitializerError("PrimePresentationStats.active offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("valid")) != 36)
+                throw new ExceptionInInitializerError("PrimePresentationStats.valid offset");
+        }
+        public static MemorySegment header(MemorySegment value) {
+            return value.asSlice(0L, 8);
+        }
+        public static long epoch(MemorySegment value) {
+            return value.get(JAVA_LONG, 8L);
+        }
+        public static void epoch(MemorySegment value, long field) {
+            value.set(JAVA_LONG, 8L, field);
+        }
+        public static long total_presented(MemorySegment value) {
+            return value.get(JAVA_LONG, 16L);
+        }
+        public static void total_presented(MemorySegment value, long field) {
+            value.set(JAVA_LONG, 16L, field);
+        }
+        public static long sample_id(MemorySegment value) {
+            return value.get(JAVA_LONG, 24L);
+        }
+        public static void sample_id(MemorySegment value, long field) {
+            value.set(JAVA_LONG, 24L, field);
+        }
+        public static int active(MemorySegment value) {
+            return value.get(JAVA_INT, 32L);
+        }
+        public static void active(MemorySegment value, int field) {
+            value.set(JAVA_INT, 32L, field);
+        }
+        public static int valid(MemorySegment value) {
+            return value.get(JAVA_INT, 36L);
+        }
+        public static void valid(MemorySegment value, int field) {
+            value.set(JAVA_INT, 36L, field);
         }
     }
     public static final class PrimeByteSpan {
@@ -3636,6 +3698,8 @@ public final class PrimeAbi {
             FunctionDescriptor.of(JAVA_INT);
     public static final FunctionDescriptor PRIME_STREAMLINE_FRAME_DESCRIPTOR =
             FunctionDescriptor.of(JAVA_INT, JAVA_INT, JAVA_INT);
+    public static final FunctionDescriptor PRIME_STREAMLINE_PRESENT_STATS_DESCRIPTOR =
+            FunctionDescriptor.of(JAVA_INT, ADDRESS);
     public static final FunctionDescriptor PRIME_MC_RESOURCES_DESCRIPTOR =
             FunctionDescriptor.of(JAVA_INT, JAVA_LONG, ADDRESS);
     public static final FunctionDescriptor PRIME_MC_PLAN_DESCRIPTOR =
@@ -3678,6 +3742,7 @@ public final class PrimeAbi {
             case "prime_streamline_present" -> PRIME_STREAMLINE_PRESENT_DESCRIPTOR;
             case "prime_streamline_bootstrap" -> PRIME_STREAMLINE_BOOTSTRAP_DESCRIPTOR;
             case "prime_streamline_frame" -> PRIME_STREAMLINE_FRAME_DESCRIPTOR;
+            case "prime_streamline_present_stats" -> PRIME_STREAMLINE_PRESENT_STATS_DESCRIPTOR;
             case "prime_mc_resources" -> PRIME_MC_RESOURCES_DESCRIPTOR;
             case "prime_mc_plan" -> PRIME_MC_PLAN_DESCRIPTOR;
             case "prime_mc_sections" -> PRIME_MC_SECTIONS_DESCRIPTOR;

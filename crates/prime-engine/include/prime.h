@@ -1,7 +1,7 @@
 #ifndef PRIME_PT_H
 #define PRIME_PT_H
 #include <stdint.h>
-#define PRIME_ABI_VERSION 16
+#define PRIME_ABI_VERSION 17
 #define PRIME_MAX_BATCH_BYTES 268435456
 #define PRIME_DIAGNOSTICS_ENABLED 1
 #define PRIME_DIAGNOSTICS_CAPTURE 2
@@ -23,6 +23,17 @@ typedef struct PrimeHeader {
     uint32_t struct_size;
     uint32_t abi_version;
 } PrimeHeader;
+
+/* Process-owned FG observation. SDK counts actually presented real+generated
+ * frames, not a configured multiplier. Inactive/invalid starts a new epoch. */
+typedef struct PrimePresentationStats {
+    PrimeHeader header;
+    uint64_t epoch;
+    uint64_t total_presented;
+    uint64_t sample_id;
+    uint32_t active;
+    uint32_t valid;
+} PrimePresentationStats;
 
 typedef struct PrimeByteSpan {
     const uint8_t *data;
@@ -329,6 +340,10 @@ int32_t prime_streamline_bootstrap(void);
 /* Logical-frame markers, render-thread-only. Suspend also proves the SDK's
  * published FG input-consumer completion before guide reconfiguration/release. */
 int32_t prime_streamline_frame(uint32_t action, uint32_t enabled);
+/* Writable aligned output with initialized header; no pointer is retained.
+ * 0 copies the CPU snapshot, 1 means temporarily busy with output unchanged,
+ * -1 rejects the boundary. No SDK query, GPU wait or new queue submission. */
+int32_t prime_streamline_present_stats(PrimePresentationStats *output);
 #include "prime_mc.h"
 #ifdef __cplusplus
 }

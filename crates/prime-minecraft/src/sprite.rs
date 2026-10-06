@@ -391,6 +391,11 @@ impl Sprite {
             .as_ref()
             .and_then(crate::labpbr::Material::emission_maximum)
     }
+    pub fn has_subsurface(&self) -> bool {
+        self.material
+            .as_ref()
+            .is_some_and(crate::labpbr::Material::has_subsurface)
+    }
     pub fn fresnel_code(&self, frame: u32, uv: [f32; 2]) -> Option<u8> {
         self.material
             .as_ref()

@@ -79,6 +79,8 @@ GPU preparation 从 PT 帧的起始 marker 开始，独立的早期 `prepare_hos
 
 ## 内存、导出与失败
 
+F3呈现帧率消费独立的进程级`PrimePresentationStats`，不解析性能JSON。SDK实际呈现累计数与宿主原始渲染FPS分别显示；单调统计窗口、失效及busy合同见[重建](reconstruction.md#帧生成与最后消费者)。它不改`gpu.total`、CPU帧时、游戏限帧或采集数据，也不把请求生成一帧当作实际翻倍。
+
 native 逐帧排空已完成事件，Java 通过有界队列交给本次采集专用后台 writer，使用 NDJSON spool 保存再流式组装最终 JSON，不把整场会话加载到内存。队列满时背压，保留样本并累计等待时间；采集负载本身是测量条件，不能从任务时长中猜测扣除。停止时仍在运行的 Java scope 完成后进入同一会话，writer 等待这些 scope 后结束。
 
 队列按记录条数限额，单个 native 块仍随该帧任务量增长，因此不是固定字节上限。停止原因与 writer 损坏状态分开；异常结束的已有 scope 仍保存失败尾部，不因为 `partial` 说明而拒收。
@@ -87,4 +89,4 @@ native 逐帧排空已完成事件，Java 通过有界队列交给本次采集�
 
 诊断 configure/frame/clock/read 控制失败会清除采集请求、尽力排空并标记 `partial`，独立通知失败，不单因诊断错误退役正常 renderer。真实渲染的设备丢失仍按渲染错误处理。默认恢复按钮结束本次会话的采集。
 
-FFI 使用 ABI v16，owner-thread 控制和排空缓冲协议见 [ABI](abi.md)。固定场景、原生1920×1080、种子、画质、预算、硬件和工具链；分开 CPU/GPU、实时/离线、稳态/更新以及采集开销。游戏开关、world exit、后端切换、重新采集和实际 GPU 查询由用户手动验收，命令见 [CONTRIBUTING](../CONTRIBUTING.md)。
+FFI 使用 ABI v17，owner-thread 控制和排空缓冲协议见 [ABI](abi.md)。固定场景、原生1920×1080、种子、画质、预算、硬件和工具链；分开 CPU/GPU、实时/离线、稳态/更新以及采集开销。游戏开关、world exit、后端切换、重新采集和实际 GPU 查询由用户手动验收，命令见 [CONTRIBUTING](../CONTRIBUTING.md)。

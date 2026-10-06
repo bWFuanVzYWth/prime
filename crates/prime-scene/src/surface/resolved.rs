@@ -7,6 +7,7 @@ struct Group {
     detail: Option<Arc<SurfaceDetail>>,
     media: [u32; 2],
     optics: Option<Optics>,
+    material_thin: bool,
 }
 
 impl SurfaceCompiler {
@@ -36,6 +37,7 @@ impl SurfaceCompiler {
             let mut key = vec![
                 face.detail.as_ref().map_or(0, |d| d.mode as u32),
                 u32::from(face.optics.is_some()),
+                u32::from(face.material_thin),
             ];
             key.extend(face.media);
             if let Some(o) = face.optics {
@@ -63,7 +65,13 @@ impl SurfaceCompiler {
                     retained.push(face);
                     continue;
                 };
-                key.extend([d.mode as u32, d.layer.texture_id, d.layer.flags, map.axes]);
+                key.extend([
+                    d.mode as u32,
+                    d.layer.texture_id,
+                    d.layer.flags,
+                    u32::from(d.layer.material_thin),
+                    map.axes,
+                ]);
                 key.extend(d.layer.colors[0].map(f32::to_bits));
                 key.extend(
                     [map.origin, map.du, map.dv]
@@ -85,6 +93,7 @@ impl SurfaceCompiler {
                 detail: normalized,
                 media: face.media,
                 optics: face.optics,
+                material_thin: face.material_thin,
             });
             group.quads.push(SurfaceQuad {
                 geometry,
@@ -105,6 +114,7 @@ impl SurfaceCompiler {
                 detail,
                 media,
                 optics,
+                material_thin,
             },
         ) in groups
         {
@@ -112,6 +122,7 @@ impl SurfaceCompiler {
             for face in &mut merged {
                 face.media = media;
                 face.optics = optics;
+                face.material_thin = material_thin;
                 if let Some(d) = &detail {
                     let mut d = (**d).clone();
                     d.layer.uvs = face.geometry.uvs;

@@ -114,37 +114,14 @@ Sample, copyright 2017 Intel Corporation, Apache-2.0, reference commit
 See [notice](licenses/intel-outdoor-light-scattering-NOTICE.txt) and
 [license](licenses/intel-outdoor-light-scattering-Apache-2.0.txt).
 
-`crates/prime-vulkan/shaders/bsdf/common/common.slang` and `material.slang`
-adapt the common value types, event flags, scalar/frame/Fresnel/roughness and
-volume utilities carried by legacy Prime. Its BSDF mathematical basis identifies
-[RoboCute](https://github.com/RoboCute/RoboCute), base source revision
-`5985e989254b4685e3885d876b33f4874d233dcd`, copyright RoboCute contributors,
-Apache-2.0. The incorporated scope is these shared foundations and default
-initialization, as used by LitePBR. See the [RoboCute notice](licenses/robocute-NOTICE.txt)
-and unmodified [Apache-2.0 license](licenses/robocute-Apache-2.0.txt).
-
-`crates/prime-vulkan/shaders/bsdf/lite/bsdf.slang` ports the formal LitePBR
-implementation from legacy Prime revision
-`ca364b25c4b4c7de5c8eae82115b401bf1932b3e`, copyright (c) 2026 linlin, under this
-project's [LICENSE](LICENSE) and [LICENSE-EXCEPTIONS](LICENSE-EXCEPTIONS), with
-the shared foundations attributed above. Module imports and resource boundaries
-are adapted; the low-order BSDF remains as a historical reference API and the
-thick-wall SSS approximation shared by realtime and offline rendering. The current
-production Full OpenPBR supported domain is attributed separately below.
-The thin-wall Snell TIR endpoint explicitly returns full reflection and zero
-transmission. Refractive sampling removes a redundant incident-side sign factor
-from its initial reflection-candidate guard so exit reflection and TIR are not
-discarded. Half-vector orientation, subsequent support checks, relative eta and
-medium state are preserved. It uses scalar directional-energy fits without
-transmission-GGX energy assets.
-
 `crates/prime-minecraft/src/labpbr.rs`, Java's `LabPbrSources`, the canonical
 material modules, numerical services and `pbr.slang` adapt legacy Prime's
 LabPBR source translation and material consumers, copyright (c) 2026 linlin,
 under this project's [LICENSE](LICENSE) and [LICENSE-EXCEPTIONS](LICENSE-EXCEPTIONS).
 The port moves resource decoding, filtering and animation into Rust, changes
-texture metadata and resource ownership, and preserves the source numerical
-contracts. Legacy PBR presets are outside the incorporated scope.
+texture metadata and resource ownership, and preserves the supported source numerical
+contracts. CPU-proven thin sheets support subsurface; unsupported thick or
+unproven LabPBR SSS falls back to ordinary diffuse. LitePBR is not included. Legacy PBR presets are outside the incorporated scope.
 
 `crates/prime-vulkan/shaders/bsdf/full/` adapts the exact supported-domain
 OpenPBR kernels from legacy Prime revision
@@ -155,7 +132,8 @@ is included under RoboCute's Apache-2.0 permission in
 `crates/prime-vulkan/assets/openpbr/`; its hashes and reference-approved
 differences are recorded in the adjacent lock JSON and author notice.
 Prime's Slang ports and narrow source adapters remain under the project's
-LICENSE and LICENSE-EXCEPTIONS. Existing RoboCute license/notice above apply.
+LICENSE and LICENSE-EXCEPTIONS. See the [RoboCute notice](licenses/robocute-NOTICE.txt) and unmodified
+[Apache-2.0 license](licenses/robocute-Apache-2.0.txt).
 The incorporated production scope excludes presets and arbitrary nonzero
 coat/fuzz/film/diffraction/dispersion parameters. No full arbitrary material
 API or GPU performance improvement is implied by this mathematical reference.

@@ -1,5 +1,78 @@
 use super::*;
 
+#[test]
+fn resolved_material_thin_proofs_survive_merging_clipping_and_side_binding() {
+    for primary in [false, true] {
+        for secondary in [false, true] {
+            let mut a = SurfaceFace::from_quad(quad(0., 0.).geometry);
+            a.material_thin = primary;
+            let mut top = a.clone();
+            top.material_thin = secondary;
+            top.geometry.texture_id = 9;
+            let parts = intersect_surfaces(&a, &top).unwrap();
+            assert!(!parts.is_empty());
+            for (mut face, layer) in parts {
+                assert_eq!(face.material_thin, primary);
+                assert_eq!(layer.material_thin, secondary);
+                face.detail = Some(Arc::new(SurfaceDetail {
+                    mode: LayerMode::Bilateral,
+                    layer,
+                }));
+                let mut b = face.clone();
+                for p in &mut b.geometry.positions {
+                    p[0] += 1.;
+                }
+                // Adjacent cells repeat the same local source UV tile. A shifted UV origin
+                // is a different merge label, even if it forms a global affine function.
+                let merged = SurfaceCompiler::new()
+                    .merge_resolved(vec![face.clone(), b.clone()])
+                    .unwrap();
+                assert_eq!(merged.len(), 1);
+                assert_eq!(merged[0].material_thin, primary);
+                assert_eq!(
+                    merged[0].detail.as_ref().unwrap().layer.material_thin,
+                    secondary
+                );
+                let mut half = merged[0].clone();
+                half.keep_half(1);
+                assert_eq!(half.material_thin, primary);
+                assert_eq!(half.detail.as_ref().unwrap().layer.material_thin, secondary);
+                let mut shifted_uv = b.clone();
+                for uv in &mut shifted_uv.geometry.uvs {
+                    uv[0] += 0.25;
+                }
+                assert_eq!(
+                    SurfaceCompiler::new()
+                        .merge_resolved(vec![face.clone(), shifted_uv])
+                        .unwrap()
+                        .len(),
+                    2,
+                    "different source UV tiles must remain independent"
+                );
+                b.material_thin = !primary;
+                assert_eq!(
+                    SurfaceCompiler::new()
+                        .merge_resolved(vec![face.clone(), b.clone()])
+                        .unwrap()
+                        .len(),
+                    2
+                );
+                b.material_thin = primary;
+                Arc::make_mut(b.detail.as_mut().unwrap())
+                    .layer
+                    .material_thin = !secondary;
+                assert_eq!(
+                    SurfaceCompiler::new()
+                        .merge_resolved(vec![face, b])
+                        .unwrap()
+                        .len(),
+                    2
+                );
+            }
+        }
+    }
+}
+
 fn disconnected_range_quads(
     origin: f32,
     rotation: usize,
@@ -122,6 +195,7 @@ fn disconnected_resolved_rectangle_edits_preserve_optics_and_all_layer_maps() {
                         face.detail = Some(Arc::new(SurfaceDetail {
                             mode,
                             layer: SurfaceLayer {
+                                material_thin: false,
                                 colors: [[0.5, 0.25, 0.125, 0.75]; 4],
                                 uvs: face.geometry.uvs.map(|[u, v]| [v, 1. - u]),
                                 texture_id: 19,
@@ -809,6 +883,7 @@ fn contact_clipping_preserves_triangle_interpolation_and_secondary_uvs() {
         }
         let layer = SurfaceLayer {
             uvs: face.geometry.uvs.map(|uv| [1. - uv[1], uv[0] * 2.]),
+            material_thin: false,
             colors: face.geometry.colors,
             texture_id: 9,
             flags: 1,

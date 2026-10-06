@@ -52,6 +52,7 @@ public struct SurfaceRecord {
     public float4 negative;
     public float4 positive;
     public uint positiveIorTexture;
+    public uint materialControl; // CPU thin proofs: bit0 primary, bit1 secondary; no media flags.
 };
 public struct TrianglePage {
     uint *quads;
@@ -332,6 +333,7 @@ public SurfaceRecord loadQuad(uint *base, uint format, uint primitive) {
     result.mode = surfaceFeatures >= 2 && format == 3 ? record[42] : 0;
     result.negative = result.positive = float4(1, 0, 0, 0);
     result.positiveIorTexture = 0;
+    result.materialControl = record[43];
     result.half = primitive & 1;
     if (surfaceFeatures != 0 && format != 0) {
         float4 *extra = (float4 *)(record + 44);
@@ -405,6 +407,7 @@ public SurfaceRecord secondary(SurfaceRecord base) {
     base.triangle.uv2 = uvs[c];
     base.triangle.texture = data[24];
     base.triangle.flags = data[25];
+    base.materialControl = (base.materialControl & ~1u) | ((base.materialControl >> 1u) & 1u);
     base.identity.w = data[26] | (base.identity.w & 224);
     base.uvU = ((float4 *)data)[7];
     base.uvV = ((float4 *)data)[8];
@@ -550,8 +553,7 @@ public SurfaceHit resolveSurfaceHit(TraceScene resources, SurfaceRecord record, 
     hit.physicalFront = front;
     hit.optical = opticalFeatures != 0 && (record.identity.w & 128) != 0;
     hit.thin = opticalFeatures != 0 && (record.identity.w & 64) != 0;
-    hit.materialThin = primePbrSourceThinWalled(hit.thin, record.triangle.flags,
-                                                uint(round(hit.specularSample.b * 255.0)));
+    hit.materialThin = (record.materialControl & 1u) != 0u;
     hit.staticGeometry = (instance & 0x00800000) == 0;
     return hit;
 }

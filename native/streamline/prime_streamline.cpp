@@ -28,6 +28,7 @@ static_assert(sizeof(PrimeSlImage) == 48);
 static_assert(sizeof(PrimeSlFrame) == 904);
 static_assert(offsetof(PrimeSlFrame, images) == 472);
 static_assert(sizeof(PrimeSlFgFrame) == 216);
+static_assert(sizeof(PrimeSlPresentationStats) == 32);
 
 thread_local char error_text[512]{};
 thread_local bool evaluating{};
@@ -137,6 +138,51 @@ Context *active{};
 // Host Vulkan lifetime outlives any selected world renderer. Early SDK initialization is
 // process-owned; renderer retirement frees feature resources without shutting the interposer.
 Context *bootstrapped{};
+
+// Process-owned scalar observation, under the existing API lock. No GPU resource owner.
+PrimeSlPresentationStats presentation_stats{};
+std::array<uint32_t, 4> presentation_domain{};
+
+void invalidate_presentation_stats() {
+    if (presentation_stats.active || presentation_stats.valid || presentation_stats.sample_id) {
+        const auto epoch = presentation_stats.epoch + 1;
+        presentation_stats = {};
+        presentation_stats.epoch = epoch;
+    }
+}
+
+void update_presentation_stats(const PrimeSlFgFrame &frame, const sl::DLSSGState &state) {
+    const std::array<uint32_t, 4> domain{frame.images[2].width, frame.images[2].height,
+                                         frame.back_buffer_format, frame.back_buffer_count};
+    if (!presentation_stats.active || presentation_domain != domain) {
+        const auto epoch = presentation_stats.epoch + 1;
+        presentation_stats = {};
+        presentation_stats.epoch = epoch;
+        presentation_stats.active = 1;
+        presentation_domain = domain;
+        return; // Discard OFF/unknown-period counts when establishing a new domain.
+    }
+    // GetState copies the latest presentation count; it does not consume/clear it.
+    // Only the frame's one successful preparation records it. Retirement and HUD
+    // reads must not count that same presentation again; equal counts in new frames are valid.
+    if (UINT64_MAX - presentation_stats.total_presented < state.numFramesActuallyPresented ||
+        presentation_stats.sample_id == UINT64_MAX) {
+        invalidate_presentation_stats();
+    } else {
+        presentation_stats.total_presented += state.numFramesActuallyPresented;
+        ++presentation_stats.sample_id;
+        presentation_stats.valid = 1;
+    }
+}
+
+int32_t query_fg_state(Context &ctx, sl::DLSSGState &state, const sl::DLSSGOptions *options,
+                       const char *operation) {
+    const auto result = check(ctx.fg_state(ctx.viewport, state, options), operation);
+    if (result || state.status != sl::DLSSGStatus::eOk) {
+        invalidate_presentation_stats();
+    }
+    return result;
+}
 
 // The loader is process-owned. It must remain available when RR is disabled or
 // its context has already been retired but the host continues presenting.
@@ -404,10 +450,13 @@ int32_t set_common_constants(Context &ctx, const PrimeSlFrame &frame, sl::FrameT
 }
 
 int32_t suspend_fg(Context &ctx) {
-    if (!ctx.fg_enabled)
+    if (!ctx.fg_enabled) {
+        invalidate_presentation_stats();
         return 0;
+    }
     sl::DLSSGState state;
-    int32_t result = check(ctx.fg_state(ctx.viewport, state, nullptr), "slDLSSGGetState(retire)");
+    int32_t result = query_fg_state(ctx, state, nullptr, "slDLSSGGetState(retire)");
+    invalidate_presentation_stats();
     if (result)
         return result;
     if (state.lastPresentInputsProcessingCompletionFenceValue) {
@@ -737,8 +786,7 @@ extern "C" int32_t prime_sl_fg_suspend(void *context) {
     return suspend_fg(*active);
 }
 
-extern "C" int32_t prime_sl_fg_prepare(void *context, const PrimeSlFgFrame *frame) {
-    std::lock_guard lock(api_mutex);
+static int32_t prepare_fg(void *context, const PrimeSlFgFrame *frame) {
     // +1 is reserved for the explicit unavailable gates below. SDK eErrorIO is
     // also numerically 1 and must remain a failure, including after partial tags.
     const auto error = [](int32_t result) { return result == 1 ? -101 : result; };
@@ -799,8 +847,10 @@ extern "C" int32_t prime_sl_fg_prepare(void *context, const PrimeSlFgFrame *fram
         options.queueParallelismMode = sl::DLSSGQueueParallelismMode::eBlockPresentingClientQueue;
         options.enableUserInterfaceRecomposition = sl::Boolean::eTrue;
         sl::DLSSGState state;
-        if ((result = check(ctx.fg_state(ctx.viewport, state, &options),
-                            "slDLSSGGetState(support)")))
+        // GetState is the per-frame statistics producer as well as the capability/status
+        // query. Two reads around SetOptions/tags can repeat the same presentation count.
+        // None of those operations presents a frame, so consume one state for both checks.
+        if ((result = query_fg_state(ctx, state, &options, "slDLSSGGetState(frame)")))
             return error(result);
         if (state.numFramesToGenerateMax < 1 || hudless.width < state.minWidthOrHeight ||
             hudless.height < state.minWidthOrHeight) {
@@ -808,6 +858,8 @@ extern "C" int32_t prime_sl_fg_prepare(void *context, const PrimeSlFgFrame *fram
                 return error(result);
             return fail("DLSS FG output extent or generated frame count is unsupported", 1);
         }
+        if (state.status != sl::DLSSGStatus::eOk)
+            return fail("DLSS FG runtime status rejected this frame", -20);
         ctx.fg_enabled = true; // Options may allocate resources even if the following call fails.
         if ((result = check(ctx.fg_options(ctx.viewport, options), "slDLSSGSetOptions(ON)")))
             return error(result);
@@ -828,15 +880,19 @@ extern "C" int32_t prime_sl_fg_prepare(void *context, const PrimeSlFgFrame *fram
                                   reinterpret_cast<sl::CommandBuffer *>(frame->command_buffer)),
                      "slSetTagForFrame(FG)")))
             return error(result);
-        if ((result =
-                     check(ctx.fg_state(ctx.viewport, state, nullptr), "slDLSSGGetState(runtime)")))
-            return error(result);
-        return state.status == sl::DLSSGStatus::eOk
-                       ? 0
-                       : fail("DLSS FG runtime status rejected this frame", -20);
+        update_presentation_stats(*frame, state);
+        return 0;
     } catch (...) {
         return fail("Exception during DLSS FG recording; submission ownership is unresolved", -100);
     }
+}
+
+extern "C" int32_t prime_sl_fg_prepare(void *context, const PrimeSlFgFrame *frame) {
+    std::lock_guard lock(api_mutex);
+    const auto result = prepare_fg(context, frame);
+    if (result)
+        invalidate_presentation_stats();
+    return result;
 }
 
 extern "C" int32_t prime_sl_destroy(void *context) {
@@ -863,8 +919,7 @@ extern "C" int32_t prime_sl_destroy(void *context) {
     return result ? result : shutdown_result;
 }
 
-extern "C" int32_t prime_sl_present(uint64_t queue, uint64_t present_info) {
-    std::lock_guard lock(api_mutex);
+static int32_t present_locked(uint64_t queue, uint64_t present_info) {
     Context *context = active ? active : bootstrapped;
     auto present = context && context->interposed ? context->interposed_present : native_present();
     if (!present)
@@ -916,4 +971,24 @@ extern "C" int32_t prime_sl_present(uint64_t queue, uint64_t present_info) {
         return result;
     }
     return present_with_hooks(active, present, native_queue, info);
+}
+
+extern "C" int32_t prime_sl_present(uint64_t queue, uint64_t present_info) {
+    std::lock_guard lock(api_mutex);
+    const auto result = present_locked(queue, present_info);
+    if (result < VK_SUCCESS)
+        invalidate_presentation_stats();
+    return result;
+}
+
+extern "C" int32_t prime_sl_present_stats(PrimeSlPresentationStats *output) {
+    if (!output || reinterpret_cast<uintptr_t>(output) % alignof(PrimeSlPresentationStats))
+        return fail("Invalid presentation statistics output");
+    std::unique_lock lock(api_mutex, std::try_to_lock);
+    if (!lock.owns_lock())
+        return 1;
+    if (pending_present_result.load(std::memory_order_relaxed) < VK_SUCCESS)
+        invalidate_presentation_stats();
+    *output = presentation_stats;
+    return 0;
 }

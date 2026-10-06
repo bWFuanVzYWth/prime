@@ -67,6 +67,7 @@
     "FabricMeshFeatureMixin",
     "FabricBufferCacheMixin",
     "MinecraftMixin",
+    "DebugEntryFpsMixin",
     "VideoSettingsScreenMixin"
   ],
   "injectors": {

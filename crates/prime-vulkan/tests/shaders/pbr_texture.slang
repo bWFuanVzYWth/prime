@@ -48,6 +48,7 @@ import "ray_query.slang";
     record.triangle.texture = control.x;
     record.identity = uint4(inputs[i * 4 + 2].w, 0u, 0u, 0u);
     record.positiveIorTexture = inputs[i * 4 + 3].x;
+    record.materialControl = 0u; // Synthetic material query has no CPU source topology proof.
     record.emission = float4(asfloat(inputs[i * 4 + 2]).xyz, 0.0);
     record.negative = float4(1.5, 0.1, 0.2, 0.3);
     record.positive = float4(1.333, 0.4, 0.5, 0.6);

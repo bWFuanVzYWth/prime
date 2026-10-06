@@ -85,12 +85,12 @@ const NORMAL: [[u8; 4]; 4] = [
 ];
 const NORMAL_MIP: [u8; 4] = [128, 128, 160, 192];
 const SPECULAR: [[u8; 4]; 4] = [
-    [0, 5, 64, 0],
-    [255, 231, 254, 254],
+    [0, 5, 0, 0],
+    [255, 231, 190, 254],
     [64, 230, 0, 255],
-    [128, 239, 200, 127],
+    [128, 239, 136, 127],
 ];
-const SPECULAR_MIP: [u8; 4] = [112, 239, 200, 96];
+const SPECULAR_MIP: [u8; 4] = [112, 239, 136, 96];
 const ATLAS_COLORS: [[u8; 4]; 8] = [
     [16, 32, 48, 255],
     [32, 48, 64, 255],
@@ -544,7 +544,7 @@ fn gpu_labpbr_material_frame_updates_keep_texture_identity_and_reuse_slots() {
         let pixel = if frame & 1 == 0 {
             [255, 21, 0, 254]
         } else {
-            [0, 81, 254, 0]
+            [0, 81, 190, 0]
         };
         let mut texture = scene.textures[&20].clone();
         texture.material = Some(Arc::new(TextureMaterial {

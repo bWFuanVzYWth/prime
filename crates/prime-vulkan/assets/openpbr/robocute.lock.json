@@ -22,7 +22,7 @@
     "math": "exact OpenPBR supported-domain kernels, narrow current canonical vertex adaptation",
     "sourceRevision": "b35438684203200b6ab8c0b19977bd06625faaea",
     "sourceKernels": "shaders/bsdf/compact",
-    "thickSubsurface": "current Lite approximation retained separately; outside old supported compact domain",
+    "thickSubsurface": "unsupported LabPBR thick or unproven source falls back to ordinary diffuse; only CPU-proven thin sheets support subsurface",
     "excluded": [
       "presets",
       "automatic foliage",

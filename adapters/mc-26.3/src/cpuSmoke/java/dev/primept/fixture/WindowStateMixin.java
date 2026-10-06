@@ -3,6 +3,8 @@ package dev.primept.fixture;
 import com.mojang.blaze3d.platform.Monitor;
 import com.mojang.blaze3d.platform.Window;
 import dev.primept.capture.SettingsCpuSmoke;
+import dev.primept.capture.FpsDisplayCpuSmoke;
+import com.mojang.blaze3d.platform.VideoMode;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -15,5 +17,11 @@ public abstract class WindowStateMixin {
     private void test$monitor(CallbackInfoReturnable<Monitor> result) {
         if (SettingsCpuSmoke.windowProbe)
             result.setReturnValue(null);
+    }
+
+    @Inject(method = "getActiveVideoMode", at = @At("HEAD"), cancellable = true)
+    private void test$refreshRate(CallbackInfoReturnable<VideoMode> result) {
+        if (FpsDisplayCpuSmoke.nativeVideoModeProbe)
+            result.setReturnValue(new VideoMode(1920, 1080, 8, 8, 8, 144));
     }
 }

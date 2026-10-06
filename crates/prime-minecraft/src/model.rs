@@ -96,6 +96,8 @@ pub(crate) struct Catalog {
     face_masks: HashMap<u32, u32>,
     combined: HashMap<u32, Vec<Quad>>,
     prepared: HashMap<u32, Vec<crate::surfaces::Recipe>>,
+    /// Complete deterministic model topology; independent of the current visible subset.
+    material_thin_models: HashSet<u32>,
     pub volumes: HashMap<u32, crate::volume::Volume>,
     pub glass_references: HashMap<u32, [f32; 4]>,
     pub optical_materials: HashMap<(u32, u32), (u32, prime_scene::surface::Medium, bool)>,
@@ -389,6 +391,7 @@ impl Catalog {
             self.combined.remove(id);
             self.volume_quads.remove(id);
             self.volumes.remove(id);
+            self.material_thin_models.remove(id);
         }
         // State-only appends may introduce the first geometry/volume consumer of an existing root.
         let roots = states
@@ -427,6 +430,18 @@ impl Catalog {
                     self.prepared.insert(id, crate::surfaces::prepare(&quads));
                     self.combined.insert(id, quads);
                 }
+            }
+            let quads = match self.models.get(&id) {
+                Some(Model::Mesh(quads)) => Some(quads.as_slice()),
+                Some(Model::Alias(_) | Model::Multipart(_)) => {
+                    self.combined.get(&id).map(Vec::as_slice)
+                }
+                _ => None,
+            };
+            if quads.is_some_and(crate::surfaces::material_thin) {
+                self.material_thin_models.insert(id);
+            } else {
+                self.material_thin_models.remove(&id);
             }
         }
         fn collect(
@@ -633,6 +648,13 @@ impl Catalog {
     pub fn has_contacts(&self) -> bool {
         self.contact_capable
     }
+    pub(crate) fn material_thin(&self, complete_sheet: bool, quad: &Quad) -> bool {
+        complete_sheet
+            && self
+                .sprites
+                .get(&quad.sprite)
+                .is_some_and(crate::sprite::Sprite::has_subsurface)
+    }
     #[cfg(test)]
     pub fn refresh_contact_capability(&mut self) {
         self.contact_capable = !self.fluids.is_empty()
@@ -799,6 +821,7 @@ fn emit_prepared(
     tints: &mut crate::tint::Deferred,
     surfaces: &mut [Vec<prime_scene::surface::SurfaceFace>; 3],
 ) {
+    let complete_sheet = catalog.material_thin_models.contains(&state.model);
     for recipe in recipes {
         let a = &quads[recipe.source];
         let active = |q: &Quad| visible & (1 << q.face) != 0;
@@ -807,7 +830,7 @@ fn emit_prepared(
             if active(a)
                 && active(b)
                 && let Some((face, slots)) =
-                    crate::surfaces::resolve(catalog, state, a, b, pair, offset)
+                    crate::surfaces::resolve(catalog, state, a, b, pair, offset, complete_sheet)
             {
                 let layer = face.flags() as usize;
                 let start = surfaces[layer].len();
@@ -829,10 +852,21 @@ fn emit_prepared(
                     tints,
                     surfaces,
                     recipe.two_sided,
+                    complete_sheet,
                 );
             }
             if active(b) {
-                emit_source(catalog, state, b, offset, layers, tints, surfaces, false);
+                emit_source(
+                    catalog,
+                    state,
+                    b,
+                    offset,
+                    layers,
+                    tints,
+                    surfaces,
+                    false,
+                    complete_sheet,
+                );
             }
             continue;
         }
@@ -846,6 +880,7 @@ fn emit_prepared(
                 tints,
                 surfaces,
                 recipe.two_sided,
+                complete_sheet,
             );
         }
     }
@@ -860,13 +895,16 @@ fn emit_source(
     tints: &mut crate::tint::Deferred,
     surfaces: &mut [Vec<prime_scene::surface::SurfaceFace>; 3],
     two_sided: bool,
+    complete_sheet: bool,
 ) {
     let layer = crate::surfaces::flags(state, q);
     let emission = crate::surfaces::emission(catalog, state, q, two_sided);
-    if emission != prime_scene::surface::Emission::default() {
+    let material_thin = catalog.material_thin(complete_sheet, q);
+    if material_thin || emission != prime_scene::surface::Emission::default() {
         let mut face =
             prime_scene::surface::SurfaceFace::from_quad(crate::surfaces::closed(state, q, offset));
         face.emission = emission;
+        face.material_thin = material_thin;
         let start = surfaces[layer].len();
         surfaces[layer].push(face);
         if q.tint >= 0 {

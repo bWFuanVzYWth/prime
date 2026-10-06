@@ -57,7 +57,7 @@ Single、Local 与 Global palette 的状态行都包含同一份接触、光学�
 
 玻璃必须来自实际玻璃类型标志、无未知 tint，并具有确定性的闭合轴对齐体积或共面薄片证明；复杂开放/随机模型保留源 coverage，计入 `hacks.optics`。同介质身份包括颜色族与光学参数；仅在两侧都是实体透射、无涂层/发光/tint 时消去相同介质边界，不因名字或平均颜色相同猜测。
 
-实时与离线路径共同消费 Full OpenPBR opaque 与 solid/thin dielectric 的支持子域；sample/evaluate/PDF、Fresnel/TIR、Beer 吸收与 eta² 辐亮度权重保持同一生产核，LabPBR 法线和粗糙度进入相同消费。精确 Fresnel、transmission 能量补偿及厚壁 SSS 的单独 Lite 退路见[材质契约](materials.md)。首条射线从首个已知边界或介质中的 opaque 接触面确定入射介质；没有足够边界证明的复杂场景不保证初始介质正确。薄片用 1/16 m 有效厚度及双界面 Fresnel。NEE 的直线连接积累端点/路径长度、Fresnel 与薄片吸收，不解算折射焦散连接。foliage 底层接口已保留，MC 树叶未按旧 PBR preset 自动选择该拓扑。
+实时与离线路径共同消费 Full OpenPBR opaque 与 solid/thin dielectric 的支持子域；sample/evaluate/PDF、Fresnel/TIR、Beer 吸收与 eta² 辐亮度权重保持同一生产核，LabPBR 法线和粗糙度进入相同消费。精确 Fresnel、transmission 能量补偿及CPU薄壁证明与厚SSS拒绝见[材质契约](materials.md)。首条射线从首个已知边界或介质中的 opaque 接触面确定入射介质；没有足够边界证明的复杂场景不保证初始介质正确。薄片用 1/16 m 有效厚度及双界面 Fresnel。NEE 的直线连接积累端点/路径长度、Fresnel 与薄片吸收，不解算折射焦散连接。Full foliage生产未接入，MC 树叶未按旧 PBR preset 自动选择该拓扑。
 
 未知 translucent 材料仍使用原 stochastic coverage；这与有证明的介质输运分别表示。大气阴影列存 opaque 深度，忽略透射边界，不存彩色透射；空气透视不在已知水/玻璃内重复叠加空气段。动态实例未接入光学介质，不能由静态夹具推断它已经支持。
 

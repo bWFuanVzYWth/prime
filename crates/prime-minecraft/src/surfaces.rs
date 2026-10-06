@@ -68,6 +68,72 @@ fn nondegenerate(positions: [[f32; 3]; 4]) -> bool {
         count != 0
     })
 }
+
+#[derive(Clone, Copy, PartialEq)]
+struct SheetPlane {
+    // Canonical leading +1: axis planes and x/y/z pair sums or differences.
+    normal: [i8; 3],
+    distance: [u64; 2],
+}
+fn sheet_plane(q: &Quad) -> Option<SheetPlane> {
+    if q.positions.iter().flatten().any(|v| !v.is_finite())
+        || !affine(q.positions)
+        || !nondegenerate(q.positions)
+    {
+        return None;
+    }
+    for normal in [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+        [1, 1, 0],
+        [1, -1, 0],
+        [1, 0, 1],
+        [1, 0, -1],
+        [0, 1, 1],
+        [0, 1, -1],
+    ] {
+        let value = |p: [f32; 3]| {
+            let mut components = normal
+                .into_iter()
+                .zip(p)
+                .filter(|(n, _)| *n != 0)
+                .map(|(n, v)| f64::from(n) * f64::from(v));
+            let (high, low) =
+                exact_sum(components.next().unwrap(), components.next().unwrap_or(0.));
+            [high, low].map(|v| if v == 0. { 0 } else { v.to_bits() })
+        };
+        let distance = value(q.positions[0]);
+        if q.positions.into_iter().all(|p| value(p) == distance) {
+            return Some(SheetPlane { normal, distance });
+        }
+    }
+    None
+}
+/// A complete source contains one planar sheet or two intersecting planar sheets.
+/// This positive zero-thickness proof rejects parallel shells, closed objects and unknown
+/// geometry. Coverage, names, winding duplicates and a failed volume proof play no role.
+pub(crate) fn material_thin(quads: &[Quad]) -> bool {
+    let mut first = None::<SheetPlane>;
+    let mut second = None::<SheetPlane>;
+    for q in quads {
+        let Some(plane) = sheet_plane(q) else {
+            return false;
+        };
+        let Some(a) = first else {
+            first = Some(plane);
+            continue;
+        };
+        if plane == a || second == Some(plane) {
+            continue;
+        }
+        if plane.normal == a.normal || second.is_some() {
+            return false;
+        }
+        second = Some(plane);
+    }
+    first.is_some()
+}
 fn mapping(a: &Quad, b: &Quad) -> Option<([usize; 4], bool)> {
     for reverse in [false, true] {
         // Even offsets preserve the source diagonal and both exact triangle interpolants.
@@ -247,9 +313,11 @@ pub(crate) fn resolve(
     b: &Quad,
     pair: Pair,
     offset: [f32; 3],
+    complete_sheet: bool,
 ) -> Option<(SurfaceFace, [i32; 2])> {
     if pair.inner || same(a, b, pair.corners) {
         let mut face = SurfaceFace::from_quad(closed(state, a, offset));
+        face.material_thin = catalog.material_thin(complete_sheet, a);
         face.emission = emission(catalog, state, a, pair.reverse);
         return Some((face, [a.tint, -1]));
     }
@@ -264,6 +332,7 @@ pub(crate) fn resolve(
         return None;
     };
     let mut face = SurfaceFace::from_quad(closed(state, base, offset));
+    face.material_thin = catalog.material_thin(complete_sheet, base);
     face.emission = emission(catalog, state, base, false);
     face.detail = Some(Arc::new(SurfaceDetail {
         mode,
@@ -272,6 +341,7 @@ pub(crate) fn resolve(
             uvs: corners.map(|i| top.uvs[i]),
             texture_id: crate::sprite::texture(top.sprite),
             flags: flags(state, top) as u32,
+            material_thin: catalog.material_thin(complete_sheet, top),
             repeat: None,
             emission: emission(catalog, state, top, false),
         },

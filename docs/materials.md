@@ -16,7 +16,7 @@ Java 读取资源包的实际声明、RGBA8 图像和 Minecraft sprite 字段；
 | 法线页 A | 过滤法线分布对应的 GGX 感知粗糙度，替代原 height |
 | `_s.R` | 光滑度字节；光学解码在过滤与字节量化后取 `clamp(1-R/255,0,1)` |
 | `_s.G` | 源 `0..237 → +1`，`255 → 239`，保留码 `238..254 → 0`；规范码 0 为默认 dielectric，1..230 为 dielectric 身份，231..238 为八种标准金属，239 为自定义金属 |
-| `_s.B` | `0..64` 保留 porosity；65 清洗为0；66..255 减1，规范 65..254 对应 SSS 1..190；porosity 当前不直接参与着色 |
+| `_s.B` | CPU将porosity/保留码0..65清洗为0，66..255翻译为SSS强度1..190；规范B只表达强度，GPU以B/190消费，不再分类或清洗源码 |
 | `_s.A` | 0..254 为发光强度，255 为未 authored 的 sentinel |
 
 规范 dielectric F0 为 `clamp((code-1)/255,0.02,0.17)`；默认、保留码和需要 dielectric 退路的金属码使用 0.04。不同源身份即使清洗后 F0 相同也保留不同分类码，不能据此消除空气边界。标准金属保留源 eta/k 常量、BT.709/Rec.2020 颜色转换和 F82 tint；自定义金属使用规范基色。
@@ -33,27 +33,25 @@ Rust 为每个辅助图生成与基色帧尺寸对应的规范 mip。法线 foot
 
 ## 闭包与数值契约
 
-`shaders/bsdf/lite/bsdf.slang` 保留旧 Prime 正式 LitePBR 的 opaque、solid/thin dielectric 和 foliage 状态、支持谓词、evaluate、sample、PDF、离散事件与体积端点。`pbr.slang` 提供自持的统一材质 API 与生产源适配入口。实时与离线的生产 opaque/dielectric 使用 `bsdf/full/` 的高质量 OpenPBR 支持子域数学；离线增加采样并冻结场景，不改变材质模型。LitePBR 通用 API 保留为历史参考及旧支持域之外的 thick-SSS 扩展。
+生产与测试只使用 `bsdf/full/` 的 OpenPBR 支持子域；LitePBR、旧通用材质 facade 及厚SSS近似已删除。`pbr.slang` 只适配实际源到Full窄构造，离线增加采样并冻结场景，不另选材质模型。Full框架、事件、sample/evaluate/完整PDF、介质和实际结果清洗保留；源清洗由CPU负责，不能由源合法性推断BSDF求值结果必然有限。
 
-`bsdf/common/common.slang` 与 `material.slang` 提供材质值类型、事件 flags、坐标框架、标量数学、介质栈与默认初始化；历史 `PrimeOpenPbr*` 类型名作为内部 API 保留，不表示实现完整 OpenPBR。三个 LitePBR 家族的支持谓词拒绝 coat、fuzz、thin-film 等未支持组合；生产源适配只建立已有证明的拓扑。
+Full来自锁定旧Prime `bsdf/compact`，使用精确介电Fresnel、F82 conductor、GGX方向能量、作者transmission-GGX LUT的多次散射补偿、thin-wall几何级数和完整marginal PDF。支持opaque/conductor、证明为薄表面的SSS及solid/thin dielectric；不声明任意coat/fuzz/thin-film等完整OpenPBR参数API。旧预设及独立轻量PT不移植。
 
-生产源适配当前使用 `PrimePbrVertex`，输入只消费 normal A 与 specular RGB；emission A 在交点发光阶段消费，AO 和 porosity 不进入闭包。粗糙度仍先按当前 UV/LOD 过滤、量化，再与 normal 分布组合。后续 opaque/transmission 窄构造直接消费 `bsdf/full/` 的旧完整模型支持子域数学核；完整响应、总 PDF、事件、eta、介质切换及数值检查与通用入口遵守同一契约。当前值接口、消费切面与可修改的性能策略见 [PT 依赖与性能设计](pt-state-design.md)。
+**LabPBR厚SSS不支持。** 厚体和无法证明薄壁的来源忽略SSS强度，回到常规Full opaque漫反射/反射，保留基色、F0、粗糙度、法线与发光；不再白色漫透射，不做厚介质random walk。cutout、双面重复、树叶/草名称、体积证明失败均不能作为薄壁证据。
 
-生产 Full 路径来自旧 Prime 的 `bsdf/compact`，使用精确介电 Fresnel、F82 conductor 与 GGX 方向能量、作者 transmission-GGX LUT 的反射/透射分支多次散射补偿、精确 thin-wall 几何级数及完整 marginal PDF。生产支持 opaque dielectric、conductor、薄壁 subsurface 的精确零/一/分数混合，以及 solid/thin dielectric；这是完整 OpenPBR 数学在实际源拓扑上的支持子域，不是任意 coat/fuzz/thin-film/diffraction/dispersion 参数 API。普通源不自动选择 foliage，也不移植预设。LabPBR 厚壁 authored SSS 超出旧 compact 支持域，继续单独使用现有 Lite 厚壁近似，事件与介质身份保持当前契约。
+CPU在资源准备时检查完整确定性model source：全部quad须有限、精确affine且非退化，完整来源仅处于一个平面或两个相交平面才接受。当前可证明轴平面和两坐标的±和，使用精确和而非epsilon；两平行壳、闭体、未知/非确定性/更广曲面来源回退。该证明在可见性剔除前完成，资源/模型失效后重新准备；SSS能力覆盖全部源动画帧，并复用已有发光扫描。
 
-不可变 transmission 能量表为44×32×159 HALF4，解码后1,790,976 bytes，使用归一化线性clamp过滤。发行资产为 `assets/openpbr/trans_ggx.ktx2`，内部Zstd 22，参数轴与原位模式保持；作者原始表与overlay仍锁在 [robocute.lock.json](../crates/prime-vulkan/assets/openpbr/robocute.lock.json)，不改动锁定参考目录。入口在set0/binding9绑定图像/采样器并显式传入库；资源位于device-local memory，构造时直接解入pending staging，首次实际命令录制上传，随后复用，按已有宿主完成/失败隔离契约退休。overlay不与thick-glass eta修复混淆。
+材质薄壁证明与物理介质薄片分开。主表面/第二层分别携带bool，裁切、合并、侧选择保留来源；普通quad的已有word43存bit0/bit1，不扩176B记录或描述符。GPU只消费CPU证明和规范强度，同sprite可同时服务薄片与厚体，不复制整套图或全局抹薄片强度。已证明的物理介质薄片继续按原Fresnel/Beer合同处理，不用SSS证明改写介质。
 
-保留的 LitePBR 是低阶散射模型，不符合完整 OpenPBR。opaque dielectric 使用 single-scatter anisotropic GGX，将缺失方向能量以标量闭合压回现有 GGX 瓣，并以当前入射方向剩余能量混合基底；conductor 使用 single-scatter GGX 与 generalized Schlick/F82。方向能量来自无纹理的 GGX/Schlick 解析拟合。该闭合不恢复多次散射的低频角分布；opaque dielectric 的层叠以当前入射方向为条件，不声明反射互易性。
+`PrimePbrVertex`消费normal A、specular RGB和证明，emission A在发光阶段消费；AO/porosity不参与闭包。roughness仍先按实际UV/LOD过滤并量化，再组合normal分布。G的源身份由CPU规范化，视角相关F0/IOR、方向能量、BSDF采样/求值及结果清洗仍在实际消费者处。
 
-solid dielectric 使用 Walter GGX 反射/折射、相关 Smith masking-shadowing、Snell/TIR 与 Beer-Lambert 吸收；thin-wall 保留两界面 Fresnel/吸收解析级数和轻量 single-scatter GGX。漫反射使用余弦半球，GGX 使用可见法线采样；分量选择概率与所选分量的响应/PDF 成对。没有 transmission directional-energy LUT、表驱动多次散射补偿或对应 GPU binding。高粗糙度反射/透射的角分布和能量仍需按此近似边界评估。
+不可变transmission能量表为44×32×159 HALF4，解码后1,790,976 B，归一化线性clamp过滤。发行 `assets/openpbr/trans_ggx.ktx2` 使用Zstd22，作者原表与overlay锁在[来源清单](../crates/prime-vulkan/assets/openpbr/robocute.lock.json)，third_party原始参考不改。入口set0/binding9显式传入图像/采样器，初始化上传后按现有完成/失败隔离合同退休；不新增SSS查表、pass或全屏状态。
 
-物理薄片的 negative side 是 authored 内部材料，positive side 是已解析外部介质；查询保留选择 coating 前的物理正反侧。inside/outside 不按 IOR 大小推断，因此材料 IOR 低于邻水时仍使用该材料的吸收及正确 TIR。直线阴影逐片使用真实外部 IOR 与 Full 相同的内部 Snell 余弦和两界面 RGB 级数：`A=exp(-sigma*t/cosInternal)`，`T=(1-F)^2*A/(1-F^2*A^2)`，有效厚度 t=1/16 m；不以外部余弦 Beer 乘无吸收级数替代。IOR 比恰为1时 Fresnel 为零并直接保留入射余弦，避免 grazing 的0/0。厚边界的终点介质取最远候选，吸收 moment 累积保持 BVH 顺序无关；直线连接仍不解算折射焦散。
+物理薄片的negative side是内部材料，positive side是外部介质，不按IOR大小猜inside/outside。直线阴影保留内部Snell余弦与两界面RGB级数：`A=exp(-sigma*t/cosInternal)`、`T=(1-F)^2*A/(1-F^2*A^2)`，有效厚度1/16m；IOR比为1时直接保留入射余弦，TIR拒绝透射。厚边界端点和吸收moment保持遍历顺序无关；直线连接不解算折射焦散。
 
-LitePBR 数学保留两项支持修正：thin-wall 对外侧 IOR 大于内侧、Snell 折射余弦平方不大于0的情况显式返回 `R=1, T=0`，修正历史端点的非零透射；折射采样的反射候选检查从 `dot(wi,wi+wo)*wi.z` 去掉重复的 `wi.z` 符号因子，避免退出侧反射及 TIR 被提前丢弃。归一化且朝 +Z 的半向量和后续两侧支持检查保留；薄壁 relative eta=1 与介质身份保持规则不变，其余 LitePBR 数学按历史来源保留。
+薄SSS使用Full有色余弦双半球反射/透射及其精确零/一/分数混合，介质身份不变、relative eta=1；连续sample与NEE使用同一完整response和总方向PDF，不能把分量joint PDF当完整PDF。opaque缺图参考roughness为0.9，已证明dielectric缺图为光滑边界，normal分布仍参与。
 
-生产根据已有表面分类使用 opaque 和已证明水/玻璃的 dielectric 闭包；普通 opaque 缺图参考粗糙度为0.9，已证明的 dielectric 缺 specular 图时为光滑边界，法线分布仍可提高粗糙度。非金属且规范 specular B>64 的 authored SSS 进入 opaque 的 subsurface 分支。optical thin 或 cutout authored SSS 使用 Full thin-material 的有色余弦双半球 reflection/transmission，thin-material 与介质几何薄片标志分别表示；其余使用历史 thick 分支的白色 diffuse transmission，SSS 分量的采样概率为反射0、透射1，介质身份不变。该 thick 分支是低阶近似，不表示厚介质 random-walk 散射。已证明介质薄片保留 1/16 m 有效厚度，foliage 底层 API 不意味着 Minecraft 树叶已自动采用该拓扑或旧固定 15% 透射权重。旧 PBR presets、`MaterialRecipeResolver` 的名称配方和用户材质预设不移植。
-
-材质边界保留粗糙度端点、F0 清洗和法线有效反射修正；两种后端保留 delta/连续事件区别、Fresnel/TIR、薄壁与 eta² 辐亮度权重。BSDF evaluate 的 response/PDF 必须有限且非负；任一通道非法时整组 response/PDF 清零，分量 evaluate 也整组清零。sample 还要求非零事件、有限单位方向（长度平方误差≤0.001）、正 PDF 和正 relative eta；非法结果成为零贡献无事件样本，不能携带非法介质继续传播。denoise albedo 逐通道将非有限值置零、有限值限制到 `[0,1]`。normal-mapped NEE 的反射/透射分类与 continuation 使用相同支持语义。功率启发式、乘除及 eta/roulette 数值辅助保留；生产 MIS 先计算带权 inverse PDF，再使用稳定 triple product 组合贡献。生产 facade 的有效连续 sample 与 NEE 使用相同的完整 response 和总方向 PDF：多瓣 opaque/foliage 在同一 state 对采样方向重新完整 evaluate，保留原 flags/eta；底层历史 sample 仍保留所选 component response/joint PDF，delta 保持所选离散测度。生产路径从第二次有效散射开始 RR，存活率为 clamp(maxRGB(throughput) × etaScale, 0, 1)；透射后 etaScale 乘 relativeEta²，反射/TIR 不改变它，薄壁透射的 relativeEta 为 1。存活路径按概率重加权；零概率直接终止，单位概率不生成 RR 样本。未知或缺失输入与合法零值分别表示。代码来源与许可见[第三方声明](../THIRD_PARTY_NOTICES.md)。
+evaluate要求response/PDF有限非负，非法时整组清零；sample要求有效事件、有限单位方向（长度平方误差≤0.001）、正PDF和正relative eta，非法结果是零贡献/无事件。guide albedo逐通道清洗至[0,1]。实际MIS、稳定乘除、eta-aware roulette和medium交接继续共用数学核；删Lite不改变这些结果边界。真实Full LUT、独立双半球oracle、厚回退逐位等价、CPU共享sprite/动画/几何负例及ReSTIR薄SSS行为分别验证，源码删除不替代行为证据。
 
 ## 发光与介质
 

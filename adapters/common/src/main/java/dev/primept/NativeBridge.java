@@ -19,6 +19,7 @@ import static java.lang.foreign.ValueLayout.*;
 /** One render-thread owner. Native code consumes borrowed input before return and owns all retained data. */
 public final class NativeBridge implements AutoCloseable {
     private static volatile MethodHandle vulkanPresent;
+    private static volatile MethodHandle presentationStats;
     private final Thread owner = Thread.currentThread();
     private final MethodHandle reset, textures, retireTextures, dynamic, instances,
             renderDiagnostic, attachVulkan, configure, record, submissionAccepted, displayOutput,
@@ -53,8 +54,10 @@ public final class NativeBridge implements AutoCloseable {
                 throw new IllegalStateException("Native ABI version mismatch");
             if (System.getProperty("os.name", "")
                         .toLowerCase(java.util.Locale.ROOT)
-                        .startsWith("windows"))
+                        .startsWith("windows")) {
                 vulkanPresent = PrimeAbi.bind(lookup, "prime_streamline_present");
+            }
+            bindPresentationStats(lookup);
             var create = PrimeAbi.bind(lookup, "prime_create");
             reset = PrimeAbi.bind(lookup, "prime_reset");
             textures = PrimeAbi.bind(lookup, "prime_textures");
@@ -273,6 +276,23 @@ public final class NativeBridge implements AutoCloseable {
 
     public static boolean hasVulkanPresent() {
         return vulkanPresent != null;
+    }
+
+    static void bindPresentationStats(SymbolLookup lookup) {
+        presentationStats = PrimeAbi.bind(lookup, "prime_streamline_present_stats");
+    }
+
+    /** 0 copied, 1 busy with output unchanged, -1 unavailable; no SDK query or GPU wait. */
+    public static int presentationStatistics(MemorySegment output) {
+        MethodHandle query = presentationStats;
+        if (query == null)
+            return -1;
+        header(PrimePresentationStats.header(output), PrimePresentationStats.SIZE);
+        try {
+            return (int)query.invokeExact(output);
+        } catch (Throwable unavailable) {
+            return -1;
+        }
     }
 
     /** Borrows the host descriptor for one call; returns SDK status merged with API errors. */

@@ -9,9 +9,11 @@ use std::sync::Arc;
 
 #[path = "streamline.rs"]
 mod streamline;
+pub use streamline::PresentationStats;
 pub(crate) use streamline::bootstrap;
 pub(crate) use streamline::frame;
 pub(crate) use streamline::present;
+pub(crate) use streamline::presentation_stats;
 
 const FORMATS: [vk::Format; 9] = [
     vk::Format::R16G16B16A16_SFLOAT, // noisy linear BT.709

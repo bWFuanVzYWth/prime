@@ -1,91 +1,8 @@
-//! Checks material translation, Full and retained Lite closures, and sanitizers.
-use super::{Context, shader_tests::run};
+//! Checks canonical source inputs, production Full closures and numeric boundaries.
+use super::Context;
 
 const INPUT_WORDS: usize = 32;
 const OUTPUT_WORDS: usize = 64;
-
-#[test]
-#[ignore = "requires Vulkan; compares compact PT vertex against the retained source facade"]
-fn gpu_compact_pbr_vertex_preserves_source_closure() {
-    let views = [
-        [0.0, 0.0, 1.0, 0.0],
-        [0.6, 0.0, 0.8, 0.0],
-        [0.99995, 0.0, 0.01, 0.0],
-        [0.0, 0.8, -0.6, 0.0],
-    ];
-    let iors = [
-        [1.0, 1.5],
-        [1.5, 1.0],
-        [1.0, 1.0],
-        [1.5, 1.33],
-        [1.33, 1.5],
-        [1.5, 0.9],
-    ];
-    let colors = [[0.4, 0.6, 0.2], [0.0; 3], [1.0; 3], [1.25, 0.1, 0.7]];
-    let proposal_z = [0.0, 0.03, 0.25, 0.499999, 0.5, 0.75, 0.97, 0.999999];
-    let mut cases = Vec::new();
-    for g in 0..=255u8 {
-        for b in [0, 64, 65, 96, 190, 254] {
-            for r in [0, 64, 128, 254, 255] {
-                for a in [0, 128, 255] {
-                    for flags in 0..4 {
-                        for thin in [false, true] {
-                            for dielectric in [false, true] {
-                                let index = cases.len();
-                                let control =
-                                    flags | u32::from(thin) << 2 | u32::from(dielectric) << 3;
-                                let mut case = source_case([r, g, b, 255], control, dielectric);
-                                // Include reserved canonical G codes as well as all supported classes.
-                                case[0] = rgba([128, 128, 191, a]);
-                                case[1] = rgba([r, g, b, 255]);
-                                let color = colors[(index >> 2) % 4];
-                                case[4..8]
-                                    .copy_from_slice(&bits([color[0], color[1], color[2], 0.0]));
-                                case[8..12].copy_from_slice(&bits(views[(index >> 4) % 4]));
-                                case[12..16].copy_from_slice(&bits([
-                                    ((index * 17) % 1009) as f32 / 1009.0,
-                                    ((index * 53 + 1) % 1013) as f32 / 1013.0,
-                                    proposal_z[(index >> 5) % 8],
-                                    0.0,
-                                ]));
-                                let ior = iors[(index >> 7) % 6];
-                                case[16..20].copy_from_slice(&bits([ior[0], 0.01, 0.03, 0.02]));
-                                case[20..24].copy_from_slice(&bits([ior[1], 0.1, 0.2, 0.3]));
-                                case[24..28].copy_from_slice(&bits(views[(index >> 9) % 4]));
-                                let sign = if index >> 3 & 1 == 0 { 1.0 } else { -1.0 };
-                                case[28..32].copy_from_slice(&bits(if index >> 6 & 1 == 0 {
-                                    [0.0, 0.0, sign, 0.0]
-                                } else {
-                                    [0.6 * sign, 0.0, 0.8 * sign, 0.0]
-                                }));
-                                cases.push(case);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    assert_eq!(cases.len(), 368_640);
-    for (index, result) in execute(13, &cases).iter().enumerate() {
-        for word in 0..24 {
-            if (8..16).contains(&word) {
-                assert_eq!(
-                    result[word],
-                    result[word + 24],
-                    "compact event/medium case {index} word {word}"
-                );
-            } else {
-                close(
-                    f32::from_bits(result[word + 24]),
-                    f32::from_bits(result[word]),
-                    2.0e-5,
-                    "compact sample/evaluation/PDF",
-                );
-            }
-        }
-    }
-}
 
 fn bits(values: [f32; 4]) -> [u32; 4] {
     values.map(f32::to_bits)
@@ -103,13 +20,7 @@ fn canonical([r, g, b, a]: [u8; 4]) -> u32 {
     } else {
         0
     };
-    let scattering = if b <= 64 {
-        b
-    } else if b == 65 {
-        0
-    } else {
-        b - 1
-    };
+    let scattering = b.saturating_sub(65);
     rgba([r, fresnel, scattering, a])
 }
 
@@ -133,13 +44,12 @@ fn source_case(specular: [u8; 4], flags: u32, dielectric: bool) -> [u32; INPUT_W
 fn execute(mode: u32, cases: &[[u32; INPUT_WORDS]]) -> Vec<[u32; OUTPUT_WORDS]> {
     let context = Context::new().unwrap();
     let input: Vec<_> = cases.iter().flatten().copied().collect();
-    run(
+    super::shader_tests::run_full_openpbr_config(
         &context,
         prime_shader_tests::pbr(),
         &input,
         cases.len() * OUTPUT_WORDS,
         [mode, cases.len() as u32],
-        None,
     )
     .as_chunks::<OUTPUT_WORDS>()
     .0
@@ -193,11 +103,10 @@ fn gpu_labpbr_translation_preserves_codes_endpoints_and_defaults() {
         } else {
             (f32::from(fresnel - 1) / 255.0).clamp(0.02, 0.17)
         };
-        let subsurface = specular[2].saturating_sub(64);
-        let porosity = if specular[2] <= 64 { specular[2] } else { 0 };
+        let subsurface = specular[2];
         assert_eq!(
             words[4],
-            u32::from(fresnel) | u32::from(subsurface) << 8 | u32::from(porosity) << 16,
+            u32::from(fresnel) | u32::from(subsurface) << 8,
             "canonical optical control case {index}"
         );
         close(
@@ -245,7 +154,7 @@ fn gpu_labpbr_translation_preserves_codes_endpoints_and_defaults() {
         );
         close(
             f32::from_bits(words[11]),
-            if has_specular && !metal {
+            if has_specular && !metal && case[2] & 4 != 0 {
                 f32::from(subsurface) / 190.0
             } else {
                 0.0
@@ -348,200 +257,6 @@ fn gpu_pbr_sanitization_rejects_invalid_payloads_without_clipping_valid_values()
 }
 
 #[test]
-#[ignore = "requires Vulkan; checks production opaque LitePBR sampling and evaluation"]
-fn gpu_litepbr_opaque_events_and_conductor_pdf_match_evaluation() {
-    let mut cases = Vec::new();
-    for roughness_byte in [0, 128, 254, 255] {
-        for fresnel in [0, 4, 229, 230, 237, 255] {
-            for cosine in [0.01, 0.5, 1.0] {
-                for sample in 0..128 {
-                    let mut case = source_case([roughness_byte, fresnel, 0, 255], 2, false);
-                    case[8..12].copy_from_slice(&bits(direction(cosine, 0.7)));
-                    case[12..16].copy_from_slice(&bits(random(sample)));
-                    cases.push(case);
-                }
-            }
-        }
-    }
-    let results = execute(2, &cases);
-    let mut accepted = 0;
-    for words in results {
-        let flags = words[8];
-        if flags == 0 {
-            assert_eq!(&words[..3], &[0; 3]);
-            assert_eq!(&words[4..8], &[0; 4]);
-            continue;
-        }
-        accepted += 1;
-        assert_ne!(flags & 1, 0, "opaque event reflects");
-        assert_eq!(flags & 2, 0, "opaque event has no volume transmission");
-        let values = words.map(f32::from_bits);
-        close(
-            values[..3].iter().map(|v| v * v).sum(),
-            1.0,
-            3e-5,
-            "sample direction",
-        );
-        assert!(values[2] > 0.0);
-        assert!(values[4..8].iter().all(|v| v.is_finite() && *v >= 0.0));
-        assert!(values[7] > 0.0);
-        assert!(values[16..24].iter().all(|v| v.is_finite() && *v >= 0.0));
-        if flags & 16 == 0 {
-            for channel in 0..4 {
-                close(
-                    values[4 + channel],
-                    values[16 + channel],
-                    1e-4,
-                    "complete continuous sample/eval",
-                );
-            }
-        }
-    }
-    assert!(
-        accepted > cases.len() / 2,
-        "closure accepted {accepted} proposals"
-    );
-}
-
-#[test]
-#[ignore = "requires Vulkan; checks historical LitePBR thin and solid dielectric continuation"]
-fn gpu_litepbr_dielectric_preserves_medium_handoff_and_thin_wall_measure() {
-    let mut cases = Vec::new();
-    for thin in [false, true] {
-        for smoothness in [0, 128, 255] {
-            for cosine in [0.02, 0.5, 1.0] {
-                for sample in 0..128 {
-                    let mut case =
-                        source_case([smoothness, 4, 0, 255], 2 | (u32::from(thin) * 4), true);
-                    case[8..12].copy_from_slice(&bits(direction(cosine, 0.4)));
-                    case[12..16].copy_from_slice(&bits(random(sample)));
-                    cases.push(case);
-                }
-            }
-        }
-    }
-    let results = execute(2, &cases);
-    let mut reflection = 0;
-    let mut transmission = 0;
-    for (case, words) in cases.iter().zip(results) {
-        let flags = words[8];
-        let thin = case[2] & 4 != 0;
-        let values = words.map(f32::from_bits);
-        if flags == 0 {
-            assert_eq!(
-                &words[12..16],
-                &case[16..20],
-                "rejected event preserves medium"
-            );
-            continue;
-        }
-        close(
-            values[..3].iter().map(|v| v * v).sum(),
-            1.0,
-            3e-5,
-            "dielectric direction",
-        );
-        assert!(values[3].is_finite() && values[3] > 0.0);
-        assert!(values[4..8].iter().all(|v| v.is_finite() && *v >= 0.0));
-        assert!(values[7] > 0.0);
-        assert!(values[16..24].iter().all(|v| v.is_finite() && *v >= 0.0));
-        assert_ne!(flags & 3, 3, "each event has one boundary side");
-        let transmitted = flags & 2 != 0;
-        assert_eq!(transmitted, values[2] < 0.0);
-        if transmitted {
-            transmission += 1;
-        } else {
-            reflection += 1;
-        }
-        let expected_medium = if transmitted && !thin {
-            &case[20..24]
-        } else {
-            &case[16..20]
-        };
-        for channel in 0..4 {
-            close(
-                values[12 + channel],
-                f32::from_bits(expected_medium[channel]),
-                3e-6,
-                "medium handoff",
-            );
-        }
-        if thin {
-            close(values[3], 1.0, 0.0, "thin wall eta");
-        }
-        if case[1].to_le_bytes()[0] == 255 {
-            assert_ne!(flags & 16, 0, "zero roughness is a discrete event");
-        }
-    }
-    assert!(
-        reflection > 100 && transmission > 100,
-        "both dielectric events are exercised"
-    );
-}
-
-#[test]
-#[ignore = "requires Vulkan; exercises LitePBR foliage energy, components and event properties"]
-fn gpu_litepbr_foliage_components_and_energy_obey_closure_contract() {
-    let mut cases = Vec::new();
-    for fresnel in [4, 230, 255] {
-        for scattering in [0, 160, 255] {
-            for cosine in [0.02, 0.5, 1.0] {
-                for sample in 0..128 {
-                    let mut case = source_case([128, fresnel, scattering, 255], 6, false);
-                    case[8..12].copy_from_slice(&bits(direction(cosine, 0.7)));
-                    case[12..16].copy_from_slice(&bits(random(sample)));
-                    case[24..28].copy_from_slice(&bits(direction(
-                        if sample & 1 == 0 { 0.6 } else { -0.6 },
-                        1.2,
-                    )));
-                    cases.push(case);
-                }
-            }
-        }
-    }
-    let results = execute(3, &cases);
-    let mut accepted = 0;
-    for words in results {
-        assert_eq!(
-            words[9], 1,
-            "declared LitePBR foliage topology is supported"
-        );
-        let values = words.map(f32::from_bits);
-        for &value in &values[12..32] {
-            assert!(
-                value.is_finite() && value >= 0.0,
-                "foliage finite nonnegative result"
-            );
-        }
-        for channel in 0..3 {
-            close(
-                values[12 + channel],
-                values[16 + channel] + values[20 + channel],
-                5e-5,
-                "foliage component sum",
-            );
-            assert!(
-                values[24 + channel] + values[28 + channel] <= 1.03,
-                "directional energy"
-            );
-        }
-        close(values[15], values[19], 5e-5, "foliage components PDF");
-        if words[8] != 0 {
-            accepted += 1;
-            close(
-                values[..3].iter().map(|v| v * v).sum(),
-                1.0,
-                3e-5,
-                "foliage sample direction",
-            );
-            assert!(values[4..8].iter().all(|v| v.is_finite() && *v >= 0.0));
-            assert!(values[7] > 0.0);
-        }
-    }
-    assert!(accepted > cases.len() / 2);
-}
-
-#[test]
 #[ignore = "requires Vulkan; checks production valid-reflection correction at grazing angles"]
 fn gpu_labpbr_normal_correction_retains_the_geometric_reflection_hemisphere() {
     let mut cases = Vec::new();
@@ -592,7 +307,7 @@ fn gpu_labpbr_normal_correction_retains_the_geometric_reflection_hemisphere() {
 
 #[test]
 #[ignore = "requires Vulkan; checks source transport mathematics with extreme finite factors"]
-fn gpu_litepbr_transport_products_and_mis_avoid_intermediate_overflow() {
+fn gpu_transport_products_and_mis_avoid_intermediate_overflow() {
     let mut cases = Vec::new();
     for first in [0.0f32, 1e-30, 1e-10, 1.0, 1e10, 1e30] {
         for second in [1e-30f32, 1e-10, 1.0, 1e10, 1e30] {
@@ -640,16 +355,16 @@ fn gpu_litepbr_transport_products_and_mis_avoid_intermediate_overflow() {
 }
 
 #[test]
-#[ignore = "requires Vulkan; exercises authored cutout subsurface without a foliage preset"]
-fn gpu_labpbr_cutout_subsurface_selects_thin_closure_and_preserves_path_medium() {
+#[ignore = "requires Vulkan; exercises Full thin SSS and rejects unsupported thick/cutout assumptions"]
+fn gpu_full_sss_requires_cpu_thin_proof_and_preserves_path_medium() {
     let mut cases = Vec::new();
     for authored in [false, true] {
-        for optical_thin in [false, true] {
+        for proven_thin in [false, true] {
             for coverage in [0, 1, 2] {
                 for scattering in [0, 64, 65, 66, 255] {
                     for fresnel in [4, 230] {
                         for sample in 0..128 {
-                            let flags = u32::from(authored) * 2 + u32::from(optical_thin) * 4;
+                            let flags = u32::from(authored) * 2 + u32::from(proven_thin) * 4;
                             let mut case =
                                 source_case([128, fresnel, scattering, 255], flags, false);
                             case[12..16].copy_from_slice(&bits(random(sample)));
@@ -667,12 +382,12 @@ fn gpu_labpbr_cutout_subsurface_selects_thin_closure_and_preserves_path_medium()
     let mut thin_transmission = 0;
     for (case, words) in cases.iter().zip(results) {
         let authored = case[2] & 2 != 0;
-        let optical_thin = case[2] & 4 != 0;
+        let proven_thin = case[2] & 4 != 0;
         let specular = case[1].to_le_bytes();
-        let thin = optical_thin || authored && case[28] == 1 && specular[2] > 64;
+        let thin = proven_thin;
         let conductor = authored && (231..=239).contains(&specular[1]);
-        let subsurface = if authored && !conductor {
-            f32::from(specular[2].saturating_sub(64)) / 190.0
+        let subsurface = if authored && !conductor && thin {
+            f32::from(specular[2]) / 190.0
         } else {
             0.0
         };
@@ -680,7 +395,7 @@ fn gpu_labpbr_cutout_subsurface_selects_thin_closure_and_preserves_path_medium()
         assert_eq!(
             words[10],
             u32::from(thin && !conductor),
-            "LitePBR subsurface geometry"
+            "CPU proven thin SSS geometry"
         );
         close(
             f32::from_bits(words[11]),
@@ -717,10 +432,10 @@ fn gpu_labpbr_cutout_subsurface_selects_thin_closure_and_preserves_path_medium()
             assert!(values[4..8].iter().all(|v| v.is_finite() && *v > 0.0));
             assert!(values[16..20].iter().all(|v| v.is_finite() && *v > 0.0));
             close(values[3], 1.0, 0.0, "subsurface relative eta");
-            if specular[2] == 254 {
+            if specular[2] == 190 {
                 close(
                     values[5] / values[4],
-                    if thin { 1.5 } else { 1.0 },
+                    1.5,
                     3e-6,
                     "pure subsurface transmission color",
                 );
@@ -730,7 +445,7 @@ fn gpu_labpbr_cutout_subsurface_selects_thin_closure_and_preserves_path_medium()
             } else {
                 thick_transmission += 1;
             }
-            if !optical_thin && case[28] == 1 {
+            if !proven_thin && case[28] == 1 {
                 cutout_transmission += 1;
             }
         } else if subsurface == 0.0 {
@@ -738,15 +453,19 @@ fn gpu_labpbr_cutout_subsurface_selects_thin_closure_and_preserves_path_medium()
         }
     }
     assert!(
-        cutout_transmission > 40,
-        "cutout authored SSS must exercise diffuse transmission"
+        cutout_transmission == 0,
+        "coverage alone cannot authorize SSS transmission"
     );
-    assert!(thin_transmission > 40 && thick_transmission > 40);
+    assert!(thin_transmission > 40);
+    assert_eq!(
+        thick_transmission, 0,
+        "unsupported thick SSS never transmits"
+    );
 }
 
 #[test]
 #[ignore = "requires Vulkan; checks direct-light geometric support against actual closure values"]
-fn gpu_litepbr_normal_mapped_evaluation_rejects_the_wrong_physical_boundary_side() {
+fn gpu_full_normal_mapped_evaluation_rejects_the_wrong_physical_boundary_side() {
     let geometric = [0.0, 0.0, 1.0, 0.0];
     let shading = [0.5, 0.0, 3.0f32.sqrt() / 2.0, 0.0];
     let view = direction(0.2, 0.0);
@@ -828,7 +547,7 @@ fn gpu_litepbr_normal_mapped_evaluation_rejects_the_wrong_physical_boundary_side
 }
 
 #[test]
-fn pbr_spirv_bindings_match_full_production_and_lite_reference() {
+fn pbr_spirv_bindings_match_full_production_and_fixtures() {
     fn bindings(code: &[u8], descriptor_set: u32) -> Vec<u32> {
         use std::collections::{BTreeMap, BTreeSet};
         let words: Vec<_> = code
@@ -1083,446 +802,14 @@ fn pbr_spirv_bindings_match_full_production_and_lite_reference() {
     }
     assert_eq!(
         bindings(prime_shader_tests::pbr(), 0),
-        [0, 1],
-        "the retained Lite behavior fixture needs no energy table"
+        [0, 1, 9],
+        "production Full behavior fixture binds the actual energy table"
     );
     assert_eq!(
         bindings(prime_shader_tests::full_openpbr(), 0),
         [0, 1, 9],
         "the Full constructor oracle binds the actual energy table"
     );
-}
-
-#[test]
-#[ignore = "requires Vulkan; ports historical LitePBR properties for all six topologies"]
-fn gpu_litepbr_six_topologies_preserve_historical_properties() {
-    let roughnesses = [
-        0.0f32,
-        f32::from_bits(0.01f32.to_bits() - 1),
-        0.01,
-        f32::from_bits(0.01f32.to_bits() + 1),
-        0.05,
-        0.2,
-        0.5,
-        1.0,
-    ];
-    let iors = [1.0f32, 1.1, 1.333, 1.45, 1.5, 2.4];
-    let cosines = [1e-4f32, 0.01, 0.1, 0.35, 0.65, 0.9, 1.0];
-    let boundaries = [
-        0.0f32,
-        f32::from_bits(1),
-        0.5,
-        f32::from_bits(1.0f32.to_bits() - 1),
-    ];
-    let mut cases = Vec::new();
-    for kind in 0..6u32 {
-        for local in 0..4096usize {
-            let alternate = local & 1 != 0;
-            let wi =
-                cosines[local % cosines.len()] * if kind == 4 && alternate { -1.0 } else { 1.0 };
-            let magnitude = cosines[(local * 5 + 2) % cosines.len()];
-            let transmission = if kind == 2 {
-                !alternate || local & 2 != 0
-            } else {
-                kind >= 3 && local & 2 != 0
-            };
-            let wo = magnitude.copysign(wi) * if transmission { -1.0 } else { 1.0 };
-            let rng = random(local as u32 + 4096 * kind);
-            let proposal = if local < 16 {
-                [
-                    boundaries[local % 4],
-                    boundaries[(local / 4) % 4],
-                    boundaries[(local / 16) % 4],
-                ]
-            } else {
-                let values = random(local as u32 + 8192 * kind + 300);
-                [values[0], values[1], values[2]]
-            };
-            let mut case = [0; INPUT_WORDS];
-            case[0] = kind;
-            let params = [
-                roughnesses[local % roughnesses.len()],
-                iors[(local / roughnesses.len()) % iors.len()],
-                wi,
-                rng[0] * 2.0 * std::f32::consts::PI,
-                wo,
-                rng[1] * 2.0 * std::f32::consts::PI,
-                proposal[0],
-                proposal[1],
-                proposal[2],
-                if local % 31 == 0 {
-                    0.0
-                } else {
-                    0.02 + 0.98 * rng[0]
-                },
-                if local % 37 == 0 {
-                    0.0
-                } else {
-                    0.02 + 0.98 * rng[1]
-                },
-                if local % 41 == 0 {
-                    0.0
-                } else {
-                    0.02 + 0.98 * rng[2]
-                },
-                1.0,
-                0.001 + 16.0 * rng[2],
-                if alternate { 1.0 } else { 0.0 },
-            ];
-            case[1..16].copy_from_slice(&params.map(f32::to_bits));
-            cases.push(case);
-        }
-    }
-    let results = execute(9, &cases);
-    let mut accepted = [0; 6];
-    let mut discrete = [0; 6];
-    let mut transmitted = [0; 6];
-    for (index, (case, words)) in cases.iter().zip(results).enumerate() {
-        assert_eq!(
-            words[0], 0,
-            "historical property mask at case {index}: {case:?}; {words:?}"
-        );
-        assert_eq!(words[1], case[0]);
-        let kind = case[0] as usize;
-        let flags = words[28];
-        if flags == 0 {
-            continue;
-        }
-        accepted[kind] += 1;
-        if flags & 48 != 0 {
-            discrete[kind] += 1;
-        }
-        if flags & 42 != 0 {
-            transmitted[kind] += 1;
-        }
-        let eta = f32::from_bits(words[27]);
-        let expected = if kind == 4 && flags & 42 != 0 {
-            let ior = f32::from_bits(case[2]);
-            if f32::from_bits(case[3]) > 0.0 {
-                ior
-            } else {
-                1.0 / ior
-            }
-        } else {
-            1.0
-        };
-        close(eta, expected, 3e-6, "historical sample relative eta");
-    }
-    for kind in 0..6 {
-        assert!(accepted[kind] > 128, "topology {kind} accepted proposals");
-        assert!(
-            discrete[kind] > 0,
-            "topology {kind} discrete reflection/transmission exercised"
-        );
-    }
-    for (kind, &count) in transmitted.iter().enumerate().skip(2) {
-        assert!(count > 40, "topology {kind} transmission exercised");
-    }
-}
-
-#[test]
-#[ignore = "requires Vulkan; checks generic dispatch rejects unsupported closures"]
-fn gpu_litepbr_generic_dispatch_has_explicit_supported_topologies() {
-    let kinds: Vec<_> = (0..13).chain(100..106).collect();
-    let cases: Vec<_> = kinds
-        .iter()
-        .map(|&kind| {
-            let mut case = [0; INPUT_WORDS];
-            case[0] = kind;
-            case
-        })
-        .collect();
-    for (&kind, words) in kinds.iter().zip(execute(10, &cases)) {
-        if kind < 100 {
-            assert_eq!(&words[..3], &[0; 3], "unsupported kind {kind}");
-            assert_eq!(
-                &words[4..11],
-                &[0; 7],
-                "canonical rejected evaluation/direction {kind}"
-            );
-            assert_eq!(
-                &words[12..16],
-                &[0; 4],
-                "canonical rejected response/PDF {kind}"
-            );
-            assert_eq!(words[11], 1.0f32.to_bits(), "rejected relative eta");
-            assert_eq!(&words[16..20], &[0; 4], "rejected event");
-            assert_eq!(&words[20..24], &bits([1.0, 0.0, 0.0, 0.0]));
-        } else {
-            assert!(words[..3].iter().any(|&v| v != 0), "supported kind {kind}");
-            assert_ne!(words[16], 0, "supported sample {kind}");
-            assert!(f32::from_bits(words[15]) > 0.0, "supported PDF {kind}");
-            assert!(words[4..16].iter().all(|&v| f32::from_bits(v).is_finite()));
-        }
-    }
-}
-
-#[test]
-#[ignore = "requires Vulkan; verifies signed exit Fresnel/TIR and endpoint handoff"]
-fn gpu_litepbr_exit_tir_pdf_and_relative_eta_match_the_proven_endpoints() {
-    let mut cases = Vec::new();
-    for (incident_ior, transmitted_ior) in [(1.0, 1.5), (1.5, 1.0), (1.6, 1.3)] {
-        for smoothness in [128, 255] {
-            for cosine in [0.2, 0.5, 0.9, 1.0] {
-                for sample in 0..128 {
-                    let mut case = source_case([smoothness, 4, 0, 255], 2, true);
-                    case[8..12].copy_from_slice(&bits(direction(cosine, 0.7)));
-                    case[12..16].copy_from_slice(&bits(random(sample)));
-                    case[16..20].copy_from_slice(&bits([incident_ior, 0.2, 0.3, 0.4]));
-                    case[20..24].copy_from_slice(&bits([transmitted_ior, 0.3, 0.5, 0.7]));
-                    cases.push(case);
-                }
-            }
-        }
-    }
-    let mut exiting_transmission = 0;
-    let mut smooth_tir_reflection = 0;
-    let mut rejected = [0; 2];
-    for (case, words) in cases.iter().zip(execute(2, &cases)) {
-        let flags = words[8];
-        let incident = f32::from_bits(case[16]);
-        let transmitted = f32::from_bits(case[20]);
-        let eta = transmitted / incident;
-        let cosine = f32::from_bits(case[10]);
-        let smooth_tir = case[1].to_le_bytes()[0] == 255 && (1.0 - cosine * cosine) > eta * eta;
-        if smooth_tir {
-            // Check the event before handling rejected proposals: TIR must not disappear.
-            assert_eq!(
-                flags,
-                1 | 16,
-                "smooth TIR must produce discrete reflection for endpoints {incident}->{transmitted} at cosine {cosine}"
-            );
-        }
-        if flags == 0 {
-            rejected[usize::from(incident > transmitted)] += 1;
-            continue;
-        }
-        let values = words.map(f32::from_bits);
-        let transmits = flags & 2 != 0;
-        close(
-            values[3],
-            if transmits { eta } else { 1.0 },
-            3e-6,
-            "physical relative eta",
-        );
-        assert_eq!(
-            &words[12..16],
-            if transmits {
-                &case[20..24]
-            } else {
-                &case[16..20]
-            }
-        );
-        if transmits && incident > transmitted {
-            exiting_transmission += 1;
-        }
-        if flags & 16 == 0 {
-            for channel in 0..4 {
-                close(
-                    values[4 + channel],
-                    values[16 + channel],
-                    3e-4,
-                    "dielectric sample/eval and PDF",
-                );
-            }
-        }
-        if smooth_tir {
-            smooth_tir_reflection += 1;
-            assert_eq!(flags, 1 | 16, "smooth TIR is discrete reflection");
-            close(values[7], 1.0, 0.0, "TIR selection probability");
-            for &value in &values[4..7] {
-                close(value, 1.0, 0.0, "TIR unit reflection");
-            }
-        }
-    }
-    eprintln!(
-        "Lite exit endpoints: exiting transmission={exiting_transmission}, smooth TIR reflection={smooth_tir_reflection}, rejected entering/exiting={rejected:?}"
-    );
-    assert!(
-        exiting_transmission > 100 && smooth_tir_reflection > 100,
-        "exiting transmission={exiting_transmission}, smooth TIR reflection={smooth_tir_reflection}, rejected={rejected:?}"
-    );
-}
-
-#[test]
-#[ignore = "requires Vulkan; verifies lower-IOR thin-wall TIR has no transmission"]
-fn gpu_litepbr_thin_lower_ior_tir_reflects_without_changing_medium() {
-    let root = 0.02f32.sqrt();
-    let slab_ior = (1.0 + root) / (1.0 - root);
-    let mut cases = Vec::new();
-    for smoothness in [250, 255] {
-        for selector in [0.0, 0.5, f32::from_bits(1.0f32.to_bits() - 1)] {
-            let mut case = source_case([smoothness, 4, 0, 255], 6, true);
-            case[8..12].copy_from_slice(&bits(direction(0.05, 0.0)));
-            case[12..16].copy_from_slice(&bits([0.0, 0.0, selector, 0.0]));
-            case[16..20].copy_from_slice(&bits([1.333, 0.2, 0.3, 0.4]));
-            case[20..24].copy_from_slice(&bits([slab_ior, 0.3, 0.5, 0.7]));
-            cases.push(case);
-        }
-    }
-    for (case, words) in cases.iter().zip(execute(11, &cases)) {
-        let values = words.map(f32::from_bits);
-        assert_ne!(words[8] & 1, 0, "TIR reflects");
-        assert_eq!(words[8] & 2, 0, "TIR has no sampled transmission");
-        close(values[3], 1.0, 0.0, "thin-wall eta");
-        assert_eq!(&words[12..16], &case[16..20], "thin-wall path medium");
-        for &value in &values[24..27] {
-            close(value, 1.0, 0.0, "unit directional reflection");
-        }
-        assert_eq!(&words[20..24], &[0; 4], "zero transmitted evaluation/PDF");
-        assert_eq!(&words[28..31], &[0; 3], "zero directional transmission");
-        if case[1].to_le_bytes()[0] == 250 {
-            assert!(values[19] > 0.0, "rough TIR evaluation is nonzero");
-            for channel in 0..4 {
-                close(
-                    values[4 + channel],
-                    values[16 + channel],
-                    3e-4,
-                    "rough TIR sample/eval/PDF",
-                );
-            }
-        } else {
-            assert_ne!(words[8] & 16, 0, "smooth TIR is discrete");
-            close(values[7], 1.0, 0.0, "smooth TIR PDF");
-            for &value in &values[4..7] {
-                close(value, 1.0, 0.0, "smooth TIR response");
-            }
-        }
-    }
-}
-
-#[test]
-#[ignore = "requires Vulkan; checks marginal PDFs and complementary direct-light MIS"]
-fn gpu_litepbr_continuous_mixtures_match_evaluation_and_two_strategy_mis() {
-    let mut cases = Vec::new();
-    for kind in 0..4 {
-        for generic in [false, true] {
-            if kind == 3 && !generic {
-                continue;
-            }
-            for smoothness in [128, 255] {
-                for cosine in [0.05, 0.5, 0.95] {
-                    for proposal in 0..256 {
-                        let thin = kind == 1 || kind == 3;
-                        let mut case = source_case(
-                            [smoothness, 4, if kind == 0 { 0 } else { 180 }, 255],
-                            2 | (u32::from(thin) * 4),
-                            false,
-                        );
-                        case[8..12].copy_from_slice(&bits(direction(cosine, 0.7)));
-                        case[12..16].copy_from_slice(&bits(random(proposal)));
-                        case[28] = kind;
-                        case[29] = u32::from(generic);
-                        cases.push(case);
-                    }
-                }
-            }
-        }
-    }
-    let mut reflected = [0; 4];
-    let mut transmitted = [0; 4];
-    let mut discrete = [0; 4];
-    let mut corrected = [0; 4];
-    let mut raw_mis_mismatch = [0; 4];
-    for (case, words) in cases.iter().zip(execute(12, &cases)) {
-        let kind = case[28] as usize;
-        let flags = words[8];
-        if flags == 0 {
-            continue;
-        }
-        let values = words.map(f32::from_bits);
-        assert_eq!(
-            flags, words[28],
-            "selected event classification is retained"
-        );
-        close(
-            values[3],
-            values[27],
-            0.0,
-            "selected relative eta is retained",
-        );
-        assert_eq!(
-            &words[12..16],
-            &case[16..20],
-            "all surface mixtures keep their medium"
-        );
-        close(
-            values[34],
-            1.0,
-            3e-6,
-            "complementary two-strategy MIS weights",
-        );
-        for channel in 0..3 {
-            close(
-                values[36 + channel],
-                values[40 + channel],
-                5e-6,
-                "density-weighted direct-light plus continuation integrand",
-            );
-        }
-        if flags & 16 != 0 {
-            discrete[kind] += 1;
-            assert_eq!(
-                &words[4..8],
-                &words[20..24],
-                "discrete response and joint mass stay unchanged"
-            );
-            assert_eq!(
-                words[35], 0,
-                "discrete sample has no direct-light competition"
-            );
-            close(values[32], 0.0, 0.0, "discrete NEE weight");
-            close(values[33], 1.0, 0.0, "discrete continuation weight");
-            continue;
-        }
-        for channel in 0..4 {
-            close(
-                values[4 + channel],
-                values[16 + channel],
-                1e-4,
-                "complete continuous response and marginal PDF",
-            );
-        }
-        if (values[7] - values[23]).abs() > 1e-5 * values[7].max(1e-3) {
-            corrected[kind] += 1;
-        }
-        if flags & 1 != 0 {
-            reflected[kind] += 1;
-            assert_eq!(
-                words[35], words[7],
-                "reflection competes with its marginal BSDF density"
-            );
-            if (values[44] - 1.0).abs() > 1e-5 {
-                raw_mis_mismatch[kind] += 1;
-            }
-        } else {
-            transmitted[kind] += 1;
-            assert_ne!(flags & 2, 0, "the second hemisphere is transmission");
-            assert_eq!(
-                words[35], 0,
-                "opaque/foliage transmission has no reflection-only NEE competitor"
-            );
-            close(values[32], 0.0, 0.0, "transmission NEE weight");
-            close(values[33], 1.0, 0.0, "transmission continuation weight");
-        }
-    }
-    for kind in 0..4 {
-        assert!(
-            reflected[kind] > 40 && discrete[kind] > 0,
-            "reflection and discrete topology {kind}"
-        );
-        assert!(
-            corrected[kind] > 100,
-            "marginal PDF replacement exercised for topology {kind}"
-        );
-        assert!(
-            raw_mis_mismatch[kind] > 40,
-            "the fixture must expose historical joint-PDF MIS mismatch for topology {kind}"
-        );
-    }
-    for (kind, &count) in transmitted.iter().enumerate().skip(1) {
-        assert!(count > 40, "SSS/foliage transmission for topology {kind}");
-    }
 }
 
 #[test]
@@ -1589,4 +876,178 @@ fn gpu_full_openpbr_narrow_constructors_preserve_legacy_math() {
             }
         }
     }
+}
+
+#[test]
+#[ignore = "requires Vulkan; actual Full LUT, complete mixture PDFs, MIS and physical media"]
+fn gpu_full_production_samples_match_evaluation_mis_and_medium_handoff() {
+    let mut cases = Vec::new();
+    for (g, b, thin, dielectric) in [
+        (4, 0, false, false),
+        (230, 0, false, false),
+        (4, 255, true, false),
+        (4, 128, true, false),
+        (4, 0, false, true),
+        (4, 0, true, true),
+    ] {
+        for sample in 0..256 {
+            let mut case = source_case([128, g, b, 255], 2 | u32::from(thin) * 4, dielectric);
+            case[12..16].copy_from_slice(&bits(random(sample)));
+            case[8..12].copy_from_slice(&bits(direction(
+                [1.0, 0.8, 0.01, -0.8][sample as usize % 4],
+                0.3,
+            )));
+            if dielectric {
+                let ior = [[1.0, 1.5], [1.5, 1.0], [1.0, 1.0], [1.33, 1.5], [1.5, 0.9]]
+                    [sample as usize % 5];
+                case[16..20].copy_from_slice(&bits([ior[0], 0.01, 0.03, 0.02]));
+                case[20..24].copy_from_slice(&bits([ior[1], 0.1, 0.2, 0.3]));
+            }
+            cases.push(case);
+        }
+    }
+    let results = execute(12, &cases);
+    let mut valid = 0;
+    let mut diffuse_transmission = 0;
+    let mut solid_transmission = 0;
+    for (case, words) in cases.iter().zip(results) {
+        let flags = words[8];
+        if flags == 0 {
+            continue;
+        }
+        valid += 1;
+        let v = words.map(f32::from_bits);
+        close(
+            v[..3].iter().map(|x| x * x).sum(),
+            1.0,
+            1e-3,
+            "Full unit sample",
+        );
+        assert!(v[3] > 0.0 && v[3].is_finite());
+        assert!(v[4..8].iter().all(|x| x.is_finite() && *x >= 0.0));
+        assert!(v[7] > 0.0);
+        let thin = case[2] & 4 != 0;
+        let dielectric = case[3] != 0;
+        let transmission = flags & 2 != 0;
+        let expected_medium = if dielectric && !thin && transmission {
+            &case[20..24]
+        } else {
+            &case[16..20]
+        };
+        assert_eq!(&words[12..16], expected_medium, "Full endpoint medium");
+        if !dielectric && transmission {
+            assert!(thin && case[1].to_le_bytes()[2] > 0);
+            assert_ne!(flags & 4, 0, "thin SSS is diffuse");
+            close(v[3], 1.0, 0.0, "thin SSS eta");
+            diffuse_transmission += 1;
+        }
+        if dielectric && !thin && transmission {
+            solid_transmission += 1;
+        }
+        if flags & 16 != 0 {
+            continue;
+        }
+        for axis in 0..4 {
+            close(
+                v[16 + axis],
+                v[4 + axis],
+                3e-5,
+                "Full response/marginal PDF",
+            );
+        }
+        close(v[34], 1.0, 3e-6, "two-strategy MIS partition");
+        for axis in 0..3 {
+            close(
+                v[36 + axis],
+                v[40 + axis],
+                4e-5,
+                "MIS reconstructs complete integrand",
+            );
+        }
+    }
+    assert!(valid > 1_000 && diffuse_transmission > 40 && solid_transmission > 40);
+}
+
+#[test]
+#[ignore = "requires Vulkan; unsupported thick SSS equals ordinary Full opaque for identical samples"]
+fn gpu_full_thick_sss_fallback_matches_ordinary_opaque_exactly() {
+    let mut cases = Vec::new();
+    for sample in 0..128 {
+        for b in [0, 66, 128, 255] {
+            let mut case = source_case([128, 4, b, 255], 2, false);
+            case[12..16].copy_from_slice(&bits(random(sample)));
+            cases.push(case);
+        }
+    }
+    let results = execute(2, &cases);
+    for group in results.chunks_exact(4) {
+        for value in &group[1..] {
+            assert_eq!(value, &group[0], "thick source never enters SSS math");
+        }
+        assert_eq!(group[0][8] & 2, 0, "ordinary opaque has no transmission");
+    }
+}
+
+#[test]
+#[ignore = "requires Vulkan; Full thin SSS lobes against independent colored cosine and PDF oracle"]
+fn gpu_full_thin_sss_lobes_match_colored_two_hemisphere_cosine_oracle() {
+    let mut cases = Vec::new();
+    for thin in [false, true] {
+        for sample in 0..128 {
+            let mut case = source_case([128, 4, 255, 255], 2 | u32::from(thin) * 4, false);
+            case[12..16].copy_from_slice(&bits(random(sample)));
+            case[24..28].copy_from_slice(&bits(direction(
+                if sample % 2 == 0 { 0.6 } else { -0.8 },
+                0.7,
+            )));
+            cases.push(case);
+        }
+    }
+    let results = execute(14, &cases);
+    let mut reflection = 0;
+    let mut transmission = 0;
+    for (case, words) in cases.iter().zip(results) {
+        let thin = case[2] & 4 != 0;
+        assert_eq!(
+            words[28],
+            u32::from(thin),
+            "Full rejects thick subsurface topology"
+        );
+        if !thin {
+            assert!(words.iter().all(|w| *w == 0));
+            continue;
+        }
+        let v = words.map(f32::from_bits);
+        let cosine = f64::from(f32::from_bits(case[26])).abs();
+        let pdf = (cosine / (2.0 * std::f64::consts::PI)) as f32;
+        close(v[3], pdf, 3e-7, "Full two-hemisphere PDF");
+        for axis in 0..3 {
+            close(
+                v[axis],
+                pdf * f32::from_bits(case[4 + axis]),
+                3e-7,
+                "colored thin SSS response",
+            );
+        }
+        close(v[7], 1.0, 0.0, "thin lobe eta");
+        let sample_pdf = (f64::from(v[6]).abs() / (2.0 * std::f64::consts::PI)) as f32;
+        close(v[11], sample_pdf, 3e-7, "sampled hemisphere PDF");
+        for axis in 0..3 {
+            close(
+                v[8 + axis],
+                sample_pdf * f32::from_bits(case[4 + axis]),
+                3e-7,
+                "sampled colored response",
+            );
+        }
+        match words[12] {
+            1 => reflection += 1,
+            2 => transmission += 1,
+            flags => panic!("wrong thin lobe flags {flags}"),
+        }
+    }
+    assert!(
+        reflection > 40 && transmission > 40,
+        "both actual hemispheres sampled"
+    );
 }

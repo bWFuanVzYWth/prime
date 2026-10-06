@@ -2,6 +2,8 @@
 module optics_test;
 import "ray_query.slang";
 import "math/ray_offset.slang";
+import "math/color.slang";
+import "pbr/vertex.slang";
 [[vk::binding(0, 0)]] StructuredBuffer<float4> inputs;
 [[vk::binding(1, 0)]] RWStructuredBuffer<float4> outputs;
 [[vk::binding(2, 0)]] RaytracingAccelerationStructure acceleration;
@@ -17,6 +19,28 @@ import "math/ray_offset.slang";
     TraceScene resources = {acceleration, textures, texels, instanceMaterials, staticTrianglePages};
     float4 origin = inputs[i * 3], direction = inputs[i * 3 + 1];
     float4 medium = float4(direction.w, inputs[i * 3 + 2].xyz);
+    if (config.x == 4) {
+        // Query the resident packed records, including word43 and the selected coating.
+        // Only material adaptation is probed here; Full BSDF tests own the actual energy LUTs.
+        SurfaceHit hit = traceClosest(resources, origin.xyz, direction.xyz, 19);
+        if (!hit.found) {
+            outputs[i * 3] = outputs[i * 3 + 1] = outputs[i * 3 + 2] = float4(0);
+            return;
+        }
+        float3 normal = dot(hit.shadingNormal, direction.xyz) > 0.0 ? -hit.shadingNormal
+                                                                    : hit.shadingNormal;
+        PrimePbrVertex vertex = primePbrVertex(
+                sourceToWorking(saturate(hit.sourceColor.rgb)), normal, hit.normalSample.a,
+                hit.specularSample.rgb, (hit.materialFlags & 1) != 0, (hit.materialFlags & 2) != 0,
+                hit.optical ? hit.thin : hit.materialThin, hit.optical, -direction.xyz);
+        outputs[i * 3] =
+                asfloat(uint4(1, hit.materialThin ? 1 : 0, hit.thin ? 1 : 0, hit.optical ? 1 : 0));
+        outputs[i * 3 + 1] =
+                asfloat(uint4(vertex.control, hit.materialFlags, hit.physicalFront ? 1 : 0,
+                              uint(round(hit.specularSample.b * 255.0))));
+        outputs[i * 3 + 2] = hit.sourceColor;
+        return;
+    }
     if (config.x == 2) {
         LightSample light = sampleLocalLight(resources, float4(.5), float2(.5), 19, origin.xyz);
         SurfacePoint receiver = {origin.xyz, direction.xyz, 0.0};

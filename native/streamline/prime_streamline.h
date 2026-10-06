@@ -90,6 +90,14 @@ typedef struct PrimeSlFgFrame {
     uint32_t back_buffer_format;
 } PrimeSlFgFrame;
 
+typedef struct PrimeSlPresentationStats {
+    uint64_t epoch;
+    uint64_t total_presented;
+    uint64_t sample_id;
+    uint32_t active;
+    uint32_t valid;
+} PrimeSlPresentationStats;
+
 uint32_t prime_sl_abi_version(void);
 // Process-owned early initialization, before host Vulkan instance/device/surface creation.
 // Installs RR/FG/PCL/Reflex feature requests; actual support is checked against the host adapter.
@@ -113,6 +121,9 @@ int32_t prime_sl_destroy(void *context);
 // returns SDK status merged with reported underlying API errors (possibly from a prior call).
 // Safe on the host present thread; serialized with context operations.
 int32_t prime_sl_present(uint64_t queue, uint64_t present_info);
+// CPU-only snapshot of SDK counts recorded once per prepared frame. 1 means temporarily busy;
+// output is unchanged then. Never queries SDK, waits for GPU, or retains pointers.
+int32_t prime_sl_present_stats(PrimeSlPresentationStats *output);
 // Thread-local diagnostic text; copy before the next bridge call on this thread.
 const char *prime_sl_last_error(void);
 

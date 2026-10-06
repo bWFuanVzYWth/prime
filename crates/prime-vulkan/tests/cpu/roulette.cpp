@@ -1,4 +1,4 @@
-// Runs actual Slang-generated production math/BSDF code on the CPU; no Vulkan API.
+// Runs actual Slang-generated transport math and Full delta optics on the CPU; no Vulkan API.
 #include "roulette.generated.cpp"
 #include <algorithm>
 #include <cmath>
@@ -113,53 +113,48 @@ int main() {
             require(close(scale, double(media[i]) * media[i], 2e-5), "multiple medium crossings");
         }
     for (float invalid : {0.0f, -1.0f, infinity, nan}) {
-        require(rrCpuSanitize_0(invalid, 1, 1).eventFlags_0 == 0, "invalid relative eta");
-        require(rrCpuSanitize_0(1, invalid, 1).eventFlags_0 == 0, "invalid pdf");
+        require(rrCpuSanitizeFlags_0(invalid, 1, 1) == 0, "invalid relative eta");
+        require(rrCpuSanitizeFlags_0(1, invalid, 1) == 0, "invalid pdf");
     }
     for (float invalid : {-1.0f, infinity, nan})
-        require(rrCpuSanitize_0(1, 1, invalid).eventFlags_0 == 0, "invalid response");
-    require(rrCpuSanitize_0(1, 1, 0).eventFlags_0 != 0, "legal zero response is distinct");
+        require(rrCpuSanitizeFlags_0(1, 1, invalid) == 0, "invalid response");
+    require(rrCpuSanitizeFlags_0(1, 1, 0) != 0, "legal zero response is distinct");
 
     unsigned reflected = 0, transmittedCount = 0;
     for (bool thin : {false, true})
-        for (float roughness : {0.0f, 0.1f, 0.35f})
-            for (float cosine : {0.2f, 0.8f, 1.0f})
-                for (bool exiting : {false, true})
-                    for (unsigned i = 0; i < 256; ++i) {
-                        const Vector<float, 4> incident{exiting ? 1.5f : 1.0f, 0.01f, 0.02f, 0.03f};
-                        const Vector<float, 4> target{exiting ? 1.0f : 1.5f, 0.04f, 0.05f, 0.06f};
-                        const Vector<float, 3> random{rrCpuSobol_0(i, 17, 7),
-                                                      rrCpuSobol_0(i, 18, 7),
-                                                      rrCpuSobol_0(i, 17, 1281)};
-                        const auto sample =
-                                rrCpuBsdf_0(cosine, roughness, thin, incident, target, random);
-                        const auto bsdf = sample.bsdfSample_0;
-                        if (bsdf.eventFlags_0 == 0)
-                            continue; // finite geometric-support rejection is permitted.
-                        const bool transmission = (bsdf.eventFlags_0 & 2u) != 0;
-                        require(std::isfinite(bsdf.relativeEta_0) && bsdf.relativeEta_0 > 0,
-                                "sample eta finite");
-                        require(std::isfinite(bsdf.pdf_2) && bsdf.pdf_2 > 0, "sample pdf finite");
-                        const auto eta = rrCpuEta_0(1, bsdf.relativeEta_0, transmission);
-                        if (transmission) {
-                            ++transmittedCount;
-                            require(close(bsdf.relativeEta_0, thin ? 1.0 : target.x / incident.x),
-                                    "actual BSDF relative eta direction");
-                            require(sample.medium_0.x == (thin ? incident.x : target.x),
-                                    "transmission medium");
-                            if (!thin && roughness == 0) {
-                                const double beta = bsdf.response_0.x / bsdf.pdf_2;
-                                require(close(beta * eta.x, 1),
-                                        "smooth transmission RR metric compensates eta");
-                            }
-                        } else {
-                            ++reflected;
-                            require(eta.x == 1 && sample.medium_0.x == incident.x,
-                                    "reflection or TIR medium/eta");
+        for (float cosine : {0.2f, 0.8f, 1.0f})
+            for (bool exiting : {false, true})
+                for (unsigned i = 0; i < 256; ++i) {
+                    const Vector<float, 4> incident{exiting ? 1.5f : 1.0f, 0.01f, 0.02f, 0.03f};
+                    const Vector<float, 4> target{exiting ? 1.0f : 1.5f, 0.04f, 0.05f, 0.06f};
+                    const Vector<float, 3> random{rrCpuSobol_0(i, 17, 7), rrCpuSobol_0(i, 18, 7),
+                                                  rrCpuSobol_0(i, 17, 1281)};
+                    const auto bsdf = rrCpuDeltaMeasure_0(cosine, thin, incident, target, random);
+                    const auto medium = rrCpuDeltaMedium_0(cosine, thin, incident, target, random);
+                    if (bsdf.w == 0)
+                        continue; // finite geometric-support rejection is permitted.
+                    const bool transmission = (static_cast<unsigned>(bsdf.w) & 2u) != 0;
+                    require(std::isfinite(bsdf.x) && bsdf.x > 0, "sample eta finite");
+                    require(std::isfinite(bsdf.y) && bsdf.y > 0, "sample pdf finite");
+                    const auto eta = rrCpuEta_0(1, bsdf.x, transmission);
+                    if (transmission) {
+                        ++transmittedCount;
+                        require(close(bsdf.x, thin ? 1.0 : target.x / incident.x),
+                                "actual BSDF relative eta direction");
+                        require(medium.x == (thin ? incident.x : target.x), "transmission medium");
+                        if (!thin) {
+                            const double beta = bsdf.z / bsdf.y;
+                            require(close(beta * eta.x, 1),
+                                    "smooth transmission RR metric compensates eta");
                         }
-                        if (!thin && roughness == 0 && exiting && cosine == 0.2f)
-                            require(!transmission, "smooth TIR never changes eta/medium");
+                    } else {
+                        ++reflected;
+                        require(eta.x == 1 && medium.x == incident.x,
+                                "reflection or TIR medium/eta");
                     }
+                    if (!thin && exiting && cosine == 0.2f)
+                        require(!transmission, "smooth TIR never changes eta/medium");
+                }
     require(reflected > 0 && transmittedCount > 0, "BSDF covers both event types");
 
     for (unsigned budget = 1; budget <= 64; ++budget) {
@@ -188,6 +183,6 @@ int main() {
                     sum += weighted.y;
             require(close(sum / 256, beta), "actual Sobol RR finite-net expectation");
         }
-    std::printf("PASS checks=%u BSDF reflection=%u transmission=%u budget=1..64\n", checks,
-                reflected, transmittedCount);
+    std::printf("PASS checks=%u Full delta BSDF reflection=%u transmission=%u budget=1..64\n",
+                checks, reflected, transmittedCount);
 }

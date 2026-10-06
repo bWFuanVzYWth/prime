@@ -73,6 +73,7 @@ impl SurfaceCompiler {
                 t
             };
             let closed_triangle = |t| SurfaceFace {
+                material_thin: false,
                 optics: None,
                 geometry: Quad::from_triangle(offset(t)),
                 repeat: None,

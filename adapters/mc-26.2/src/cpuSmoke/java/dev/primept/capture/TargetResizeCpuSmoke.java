@@ -27,6 +27,7 @@ import sun.misc.Unsafe;
 /** Executes real transformed target allocation and resize; records textures without a GPU. */
 final class TargetResizeCpuSmoke {
     static void run() throws Exception {
+        FpsDisplayCpuSmoke.run();
         StreamlinePresentCpuSmoke.run("com.mojang.blaze3d.vulkan.VulkanGpuSurface");
         Field device = field(RenderSystem.class, "DEVICE");
         Field thread = field(RenderSystem.class, "renderThread");

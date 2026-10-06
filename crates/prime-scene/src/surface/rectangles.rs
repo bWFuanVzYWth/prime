@@ -262,6 +262,7 @@ fn label(q: &SurfaceQuad, mapping: RepeatUv) -> [u32; 18] {
 
 pub(super) fn append(out: &mut Vec<SurfaceFace>, q: &SurfaceQuad, repeat: Option<RepeatUv>) {
     out.push(SurfaceFace {
+        material_thin: false,
         optics: None,
         geometry: q.geometry.into(),
         repeat,

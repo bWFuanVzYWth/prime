@@ -16,9 +16,7 @@ public PrimeCanonicalOptics primeDecodeOpticalSample(float4 sampleValue) {
     // Preserve filter/quantization order. Contracted division/subtraction can make byte 255
     // slightly negative, so the encoding boundary must retain the exact zero endpoint.
     result.roughness = clamp(1.0 - float(bytes.x) / 255.0, 0.0, 1.0);
-    uint subsurface = bytes.z > 64u ? bytes.z - 64u : 0u;
-    uint porosity = bytes.z <= 64u ? bytes.z : 0u;
-    result.opticalControl = bytes.y | subsurface << PRIME_OPTICAL_SUBSURFACE_SHIFT |
-                            porosity << PRIME_OPTICAL_POROSITY_SHIFT;
+    // CPU canonical B contains only the supported SSS strength, not raw porosity/category bytes.
+    result.opticalControl = bytes.y | bytes.z << PRIME_OPTICAL_SUBSURFACE_SHIFT;
     return result;
 }

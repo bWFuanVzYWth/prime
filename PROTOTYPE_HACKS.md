@@ -15,7 +15,7 @@
 | P011 | 标准水与可证明闭合/共面薄片的玻璃已接入 Full OpenPBR dielectric 支持子域与 LabPBR 法线/粗糙度/IOR。未知 tint、复杂开放/随机玻璃模型仍按源 coverage，计入 optics；消光仍为 sprite 首帧中心颜色的 homogeneous 参考，自定义裁切 UV 的局部消光未独立建立。空间/动画 G 的当前负侧和邻接正侧按各自固定采样语义更新 IOR。直线NEE不解算折射焦散，大气遮挡列仍为opaque深度。 | 按真实源契约扩展光学模型与初始介质证明，保留稳态性能证据。 |
 | P012 | Sprite动画/mip已接入；明显跨sprite的UV保留原atlas采样并计入sprite，不保证该回退的动画/mip。射线锥仅估计主像素足迹，不含粗糙散射扩散。源资源仍按epoch整体保留。 | 为特殊UV、过滤和资源驱逐提供明确且有收益的契约。 |
 
-LabPBR 的源声明、canonical G/B、法线分布过滤、辅助动画和发光已接入，不再作为材质缺失替代；具体边界见[材质契约](docs/materials.md)。AO/porosity 保留但不直接乘着色，height 已解码逐帧 minimum，未移植旧 voxel displacement 几何；optical thin 或 cutout 的非金属 authored SSS 使用 Full thin-material 的有色双半球反射/透射，其余 thick SSS 单独保留历史 Lite 白色 diffuse transmission 近似，不执行体积 random walk；foliage 底层 API 尚无 MC 生产拓扑自动选择。旧 PBR presets 不移植。
+LabPBR源声明、CPU canonical通道、法线分布、动画和发光已接入。厚SSS不支持，厚体/未知薄壁回退普通Full漫反射；只接受完整source证明的平面/两相交平面薄片，cutout或名称不作证据，独立于物理介质薄片。LitePBR及厚近似已删除，G/B清洗由CPU完成；同sprite厚薄消费者不互相污染。支持域见[材质契约](docs/materials.md)。AO/height不直接乘色/位移，旧presets不恢复。
 
 
 标准 block/fluid tint 已保留实际 slot、ARGB、红石强度和群系混合结果，不再使用名称代表色。已识别原版源使用实际状态/常量、资源色表、seed 和 quart 群系字段，由 Rust 直接计算；未知源保留实际回调。对内置求色/群系选择算法的 Mixin 修改，以及自定义颜色回调的任意外部依赖失效尚未声明，第三方兼容不作保证。
