@@ -109,7 +109,7 @@ Java 从 `VulkanCommandEncoder.allocateAndBeginTransientCommandBuffer()` 获得�
 
 ## 尚存的 CPU 成本
 
-消除图像回读只解决输出传递。当前 Java 按 Rust 请求发送压缩 section 和烘焙资源字段；`prime_minecraft` 负责版本适配、源比较与同步编译，发布版本无关的逐段结果。翻译层仍等64个不同位置的段齐备后上传一个整格静态BLAS；空段算就绪，无源不算。CPU 保留逐段缓存供后续整格替换。相同压缩来源不重编译，资源或邻接变化则重新计算相关段。临时默认值与减少的兼容语义见 [原型清单](../PROTOTYPE_HACKS.md)，不能以减少语义的吞吐代表完整实现。
+消除图像回读只解决输出传递。当前 Java 按 Rust 请求发送压缩 section 和烘焙资源字段；`prime_minecraft` 负责版本适配、源比较与同步编译，发布版本无关的逐段结果。翻译层仍等64个不同位置的段齐备后上传一个整格静态BLAS；空段算就绪，无源不算。CPU 保留逐段缓存供后续整格替换。相同压缩来源不重编译，资源或邻接变化则重新计算相关段。临时默认值与减少的兼容语义见 [原型清单](../FIXME.md)，不能以减少语义的吞吐代表完整实现。
 
 原始动态回退数据从实际准备的批量 mesh 复制到可复用 native arena，随后一次 FFM 调用同步解码，省去该快照的 heap 包和二次 staging。PT 独占世界 pass 时保留实际 prepare/finishPrepare 回调，并在捕获后释放原始源页，省去原版世界 GPU upload/draw；未知输出仍有原版 CPU 展开和一次捕获复制。手/HUD 继续原版路径。这不是整条输入路径零复制。
 
@@ -143,7 +143,7 @@ CPU 源事务同步闭合，没有软时间预算或跨帧字节配额。Rust �
 
 独立的 `HostBenchmark` 通过相同 `Renderer::borrowed` / `record_host` 接口模拟宿主设备、主图像和 timeline，测量时不回读输出。它不包含 Minecraft 捕获、Java FFM、HUD 或窗口呈现，因此不能将其吞吐直接称为游戏 FPS。`Renderer::render` 是同步回读的图像诊断接口，不用于评价生产合成路径。
 
-构建、验证、原生 1080p 测量方法与指标定义见 [CONTRIBUTING](../CONTRIBUTING.md)。尚未实现的性能工作见 [HACK](../HACK.md)。
+构建、验证、原生 1080p 测量方法与指标定义见 [CONTRIBUTING](../CONTRIBUTING.md)。计划中的性能工作见 [TODO](../TODO.md)。
 
 ## 常驻诊断与时钟归属
 

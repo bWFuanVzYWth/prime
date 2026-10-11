@@ -70,6 +70,7 @@ fn typed_settings_distinct_fields_and_boolean_basis_detect_misrouting() {
         restir_rr_multiply_bound: 17.0,
         restir_rr_bias_reduction: 1,
         restir_rr_firefly: 0,
+        atmosphere_altitude_offset_meters: 5317,
     };
     // Expected semantics are specified separately from the decoder. Unequal values expose
     // swapped/dropped float and count fields; boolean basis cases distinguish equal bit values.
@@ -78,6 +79,7 @@ fn typed_settings_distinct_fields_and_boolean_basis_detect_misrouting() {
             latitude_degrees: -37,
             solar_longitude_degrees: 121,
         },
+        atmosphere_altitude_offset_meters: 5317,
         mode: RenderMode::Offline,
         integrator: Integrator::RestirPt,
         bounces: 7,
@@ -555,11 +557,26 @@ fn named_frame_and_settings_validate_semantics_without_a_wire_roundtrip() {
         restir_rr_multiply_bound: 15.0,
         restir_rr_bias_reduction: 1,
         restir_rr_firefly: 1,
+        atmosphere_altitude_offset_meters: 500,
     };
     assert_eq!(
         RenderSettings::from_abi(&settings).unwrap(),
         RenderSettings::default()
     );
+    for altitude in [0, 1, 300, 500, 5317, 10000] {
+        settings.atmosphere_altitude_offset_meters = altitude;
+        let parsed = RenderSettings::from_abi(&settings).unwrap();
+        assert_eq!(parsed.atmosphere_altitude_offset_meters, altitude);
+        assert_eq!(
+            parsed.transport_matches(RenderSettings::default()),
+            altitude == 500
+        );
+    }
+    for invalid in [10001, u32::MAX] {
+        settings.atmosphere_altitude_offset_meters = invalid;
+        assert!(RenderSettings::from_abi(&settings).is_err());
+    }
+    settings.atmosphere_altitude_offset_meters = 500;
     settings.auto_exposure_compensation = 0.6;
     assert_eq!(
         RenderSettings::from_abi(&settings)

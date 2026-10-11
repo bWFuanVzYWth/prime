@@ -8,7 +8,7 @@ import java.util.Arrays;
 
 /** Immutable client settings. Version adapters own widgets; native consumes the validated wire. */
 public final class RenderSettings {
-    public static final int VERSION = 14;
+    public static final int VERSION = 15;
     public static final int WIRE_BYTES = (int)PrimeSettings.SIZE;
     public enum Control {
         BOUNCES("render.bounces", 1, 64, 12),
@@ -16,6 +16,7 @@ public final class RenderSettings {
         TERRAIN_BATCHES_PER_FRAME("terrain.batches_per_frame", 1, 128, 1),
         LATITUDE("astronomy.latitude_degrees", -90, 90, 30),
         SOLAR_LONGITUDE("astronomy.solar_longitude_degrees", 0, 359, 0),
+        ATMOSPHERE_ALTITUDE_OFFSET("atmosphere.altitude_offset_meters", 0, 10000, 500),
         SUN_EV("lighting.sun_ev_quarters", -32, 32, 0),
         SKY_EV("lighting.sky_ev_quarters", -32, 32, 0),
         STARS("lighting.stars_percent", 0, 400, 100),
@@ -264,6 +265,8 @@ public final class RenderSettings {
         PrimeSettings.integrator(s, renderer().integrator);
         PrimeSettings.ignore_global_history_resets(s, ignoreGlobalHistoryResets ? 1 : 0);
         PrimeSettings.restir_spatial_only(s, restirSpatialOnly ? 1 : 0);
+        PrimeSettings.atmosphere_altitude_offset_meters(s,
+                                                        value(Control.ATMOSPHERE_ALTITUDE_OFFSET));
         target.position(WIRE_BYTES);
     }
 

@@ -30,6 +30,6 @@
 | [性能证据与实验清理](guides/performance-evidence.md) | 稳定结论提炼、实验保留、冻结依赖与可再生成产物清理 |
 | [光源采样测试](guides/light-sampling.md) | 无窗口选灯成本、线性噪声、独立参考与理论/经验收敛边界 |
 
-安装与使用见根 [README](../README.md)；构建、测试和测量方法见 [CONTRIBUTING](../CONTRIBUTING.md)；尚未实现的能力与技术债见 [HACK](../HACK.md)，后续工作见 [TODO](../TODO.md)。section 原型的临时默认值单独维护在 [PROTOTYPE_HACKS](../PROTOTYPE_HACKS.md)，不混入主清单。
+安装与使用见根 [README](../README.md)；构建、测试和测量方法见 [CONTRIBUTING](../CONTRIBUTING.md)；计划开发、测量优化与验收任务见 [TODO](../TODO.md)；已知缺陷、必需语义缺口和未明确接受的临时处理见 [FIXME](../FIXME.md)；明确接受的暂时处理及其撤销条件见 [HACK](../HACK.md)。原型事项按同一规则归类，不再单独维护一份缺口清单。
 
 调查、待讨论方案、单次性能测量和验收报告，以及日志、截图、CSV 等证据保存在 Git 忽略的 `artifacts/`，不进入 `docs/`。已经采用的架构与长期契约整理进对应文档，并明确区分接入状态与目标；架构文档不依赖某次本地报告才能读懂。

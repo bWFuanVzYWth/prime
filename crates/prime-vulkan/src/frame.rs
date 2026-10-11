@@ -345,7 +345,10 @@ impl Renderer {
             scene_resources: None,
             atmosphere: None,
             atmosphere_scene_revision: 0,
-            environment: Default::default(),
+            environment: prime_scene::environment::Environment {
+                altitude_offset_meters: settings.atmosphere_altitude_offset_meters,
+                ..Default::default()
+            },
             workers,
             output: None,
             restir: None,
@@ -769,6 +772,14 @@ impl Renderer {
                 rr.suspend_frame_generation()?;
             }
             self.hdr_calibration = None;
+        }
+        if settings.atmosphere_altitude_offset_meters
+            != self.settings.atmosphere_altitude_offset_meters
+        {
+            self.set_environment(prime_scene::environment::Environment {
+                altitude_offset_meters: settings.atmosphere_altitude_offset_meters,
+                ..self.environment
+            })?;
         }
         self.settings = settings;
         self.set_history_reset_policy(settings.ignore_global_history_resets);

@@ -234,6 +234,18 @@ fn gpu_restir_independent_pipeline_preserves_primary_and_history_boundaries() {
     renderer.set_environment(environment).unwrap();
     renderer.render(&changed, &camera, 17, 31, 20).unwrap();
     assert!(renderer.restir.as_ref().unwrap().temporal_this_frame);
+    renderer
+        .configure(RenderSettings {
+            atmosphere_altitude_offset_meters: 1300,
+            ..renderer.settings
+        })
+        .unwrap();
+    assert_eq!(renderer.environment.altitude_offset_meters, 1300);
+    renderer.render(&changed, &camera, 17, 31, 20).unwrap();
+    assert!(
+        renderer.restir.as_ref().unwrap().temporal_this_frame,
+        "configured atmosphere altitude must update lighting while preserving temporal reuse"
+    );
 
     let mut dynamic = scene(3, vec![]);
     dynamic.resources = changed.resources;

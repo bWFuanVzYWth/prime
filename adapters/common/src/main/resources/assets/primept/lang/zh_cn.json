@@ -71,6 +71,8 @@
   "primept.settings.astronomy.latitude_degrees.tooltip": "北纬为正、南纬为负。默认北纬 30°；游戏时间驱动太阳时角，冻结期间固定。",
   "primept.settings.astronomy.solar_longitude_degrees": "季节 · 太阳黄经",
   "primept.settings.astronomy.solar_longitude_degrees.tooltip": "0° 春分、90° 夏至、180° 秋分、270° 冬至（北半球）。与游戏天数独立，冻结期间固定。",
+  "primept.settings.atmosphere.altitude_offset_meters": "基准海拔",
+  "primept.settings.atmosphere.altitude_offset_meters.tooltip": "世界 Y=-64 对应的物理大气海拔，单位为米。每升高一格增加一米，影响大气密度与散射；冻结期间固定。",
   "primept.settings.performance_export": "录制性能 JSON",
   "primept.settings.performance_export.tooltip": "启用 CPU/GPU 诊断并持续记录每帧及线程。关闭或退出世界后停用诊断，后台导出 JSON 到游戏目录的 artifacts/performance。录制会增加测量与导出开销。",
   "primept.settings.restir_pt": "ReSTIR PT 设置",

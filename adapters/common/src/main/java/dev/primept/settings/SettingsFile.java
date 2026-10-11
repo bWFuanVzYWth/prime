@@ -9,7 +9,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Properties;
 
-/** Schema 14 separates enable/selection and gives temporal reuse positive persisted semantics. */
+/** Schema 15 restores the physical atmosphere altitude offset without changing saved controls. */
 public final class SettingsFile {
     public record Loaded(RenderSettings settings, String resetReason) {}
     private SettingsFile() {}
@@ -27,17 +27,19 @@ public final class SettingsFile {
         try {
             var properties = new Properties();
             properties.load(new StringReader(text));
-            String version = properties.getProperty("version");
-            boolean legacyCurve = !Integer.toString(RenderSettings.VERSION).equals(version);
-            boolean legacyRenderer = legacyCurve && !"13".equals(version);
-            boolean legacyRestir = "11".equals(version);
-            boolean beforeResetDiagnostic = "8".equals(version);
-            boolean legacyReconstruction = beforeResetDiagnostic || "9".equals(version);
-            boolean beforeSpatialDiagnostic = legacyReconstruction || "10".equals(version);
-            legacyRestir |= beforeSpatialDiagnostic;
-            if (!legacyRestir && !"12".equals(version) && legacyRenderer)
+            String savedVersion = properties.getProperty("version");
+            int version = Integer.parseInt(savedVersion);
+            if (!Integer.toString(version).equals(savedVersion) || version < 8 ||
+                version > RenderSettings.VERSION)
                 return new Loaded(RenderSettings.defaults(),
                                   "Settings version mismatch; defaults restored");
+            boolean legacyCurve = version <= 13;
+            boolean legacyRenderer = version <= 12;
+            boolean legacyRestir = version <= 11;
+            boolean beforeResetDiagnostic = version == 8;
+            boolean legacyReconstruction = version <= 9;
+            boolean beforeSpatialDiagnostic = version <= 10;
+            boolean legacyAltitude = version <= 14;
             var renderer = RenderSettings.Renderer.fromKey(
                     properties.getProperty(legacyRenderer ? "renderer" : "realtime_renderer"));
             if (!legacyRenderer && renderer == RenderSettings.Renderer.VANILLA)
@@ -92,6 +94,9 @@ public final class SettingsFile {
                                 control.key,
                                 legacyCurve && control == RenderSettings.Control.COMPRESSION_START
                                         ? "50"
+                                : legacyAltitude && control == RenderSettings.Control
+                                                                       .ATMOSPHERE_ALTITUDE_OFFSET
+                                        ? "500"
                                         : null)));
             return new Loaded(result, "");
         } catch (IOException | IllegalArgumentException | NullPointerException failure) {

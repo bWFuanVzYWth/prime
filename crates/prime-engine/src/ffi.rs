@@ -1177,6 +1177,7 @@ mod abi_tests {
             restir_rr_multiply_bound: 15.0,
             restir_rr_bias_reduction: 1,
             restir_rr_firefly: 1,
+            atmosphere_altitude_offset_meters: 300,
         };
         assert_eq!(unsafe { prime_configure(handle, &valid) }, 0);
         assert_eq!(unsafe { prime_configure(handle, std::ptr::null()) }, -1);
@@ -1191,6 +1192,9 @@ mod abi_tests {
         assert_eq!(unsafe { prime_configure(handle, &invalid) }, -1);
         invalid = valid;
         invalid.restir_spatial_only = 2;
+        assert_eq!(unsafe { prime_configure(handle, &invalid) }, -1);
+        invalid = valid;
+        invalid.atmosphere_altitude_offset_meters = 10001;
         assert_eq!(unsafe { prime_configure(handle, &invalid) }, -1);
         assert_eq!(
             std::thread::spawn(move || unsafe { prime_configure(handle, &valid) })
@@ -1215,6 +1219,7 @@ mod abi_tests {
                     auto_exposure_compensation: 0.6,
                     saturation: 0.08,
                     compression_start: 0.5,
+                    atmosphere_altitude_offset_meters: 300,
                     ..Default::default()
                 }
             );

@@ -357,6 +357,8 @@ impl Engine {
                 active.stars = transport.stars;
                 active.seed = transport.seed;
                 active.astronomy = transport.astronomy;
+                active.atmosphere_altitude_offset_meters =
+                    transport.atmosphere_altitude_offset_meters;
             }
             poison_on_failure(&mut self.failed, || renderer.configure(active))
                 .inspect_err(|_| diagnostic.fail())?;
@@ -442,6 +444,10 @@ impl Engine {
                         frame.world_position[1],
                         frame.solar_hour_angle,
                         self.astronomy,
+                        self.frozen_frame.map_or(
+                            self.settings.atmosphere_altitude_offset_meters,
+                            |(_, fixed)| fixed.atmosphere_altitude_offset_meters,
+                        ),
                     ),
                 )?;
                 let result = self.renderer.as_mut().unwrap().render_with_instances(
@@ -497,6 +503,10 @@ impl Engine {
                 frame.world_position[1],
                 frame.solar_hour_angle,
                 self.astronomy,
+                self.frozen_frame.map_or(
+                    self.settings.atmosphere_altitude_offset_meters,
+                    |(_, fixed)| fixed.atmosphere_altitude_offset_meters,
+                ),
             ))?;
             unsafe {
                 renderer.record_host_with_instances(
@@ -804,6 +814,7 @@ mod tests {
         engine
             .configure(RenderSettings {
                 exposure: 2.0,
+                atmosphere_altitude_offset_meters: 4200,
                 bounces: 20,
                 sky: 3.0,
                 astronomy: prime_scene::environment::Astronomy {
@@ -814,6 +825,7 @@ mod tests {
             })
             .unwrap();
         assert_eq!(engine.settings.exposure, 2.0);
+        assert_eq!(engine.settings.atmosphere_altitude_offset_meters, 4200);
         assert_eq!(engine.astronomy.direction(0.), frozen_sun);
         assert_eq!(engine.frozen_frame.unwrap().1, RenderSettings::default());
         for integrator in [
@@ -834,14 +846,16 @@ mod tests {
         }
         engine
             .configure(RenderSettings {
+                mode: RenderMode::Realtime,
                 astronomy: prime_scene::environment::Astronomy {
                     latitude_degrees: 80,
                     solar_longitude_degrees: 90,
                 },
-                ..Default::default()
+                ..engine.settings
             })
             .unwrap();
         assert!(engine.frozen_frame.is_none());
+        assert_eq!(engine.settings.atmosphere_altitude_offset_meters, 4200);
         assert_ne!(engine.astronomy.direction(0.), frozen_sun);
         assert_eq!(
             engine.effective_frame(&moved).world_position,

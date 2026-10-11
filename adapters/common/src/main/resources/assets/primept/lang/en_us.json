@@ -71,6 +71,8 @@
   "primept.settings.astronomy.latitude_degrees.tooltip": "Positive north, negative south. Default 30° N. Game time drives solar hour angle; fixed while frozen.",
   "primept.settings.astronomy.solar_longitude_degrees": "Solar Longitude",
   "primept.settings.astronomy.solar_longitude_degrees.tooltip": "0° March equinox, 90° June solstice, 180° September equinox, 270° December solstice. Independent of game day count; fixed while frozen.",
+  "primept.settings.atmosphere.altitude_offset_meters": "Altitude Offset",
+  "primept.settings.atmosphere.altitude_offset_meters.tooltip": "Physical atmospheric altitude at world Y=-64, in metres. Each block above adds one metre. Controls atmospheric density and scattering; fixed while frozen.",
   "primept.settings.performance_export": "Record performance JSON",
   "primept.settings.performance_export.tooltip": "Enable CPU/GPU diagnostics and record every frame and thread. Turn off or leave the world to disable diagnostics and export JSON in the background to artifacts/performance in the game directory. Recording adds measurement and export costs.",
   "primept.settings.restir_pt": "ReSTIR PT Settings",

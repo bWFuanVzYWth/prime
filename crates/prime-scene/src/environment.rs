@@ -68,6 +68,7 @@ impl SolarOrbit {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Environment {
     pub world_y: f64,
+    pub altitude_offset_meters: u32,
     pub sun_direction: [f32; 3],
 }
 impl Default for Environment {
@@ -75,6 +76,7 @@ impl Default for Environment {
         // Prime's tuned default: latitude 30 degrees, March equinox, solar noon.
         Self {
             world_y: 0.0,
+            altitude_offset_meters: 500,
             sun_direction: [0.0, 0.8660254, 0.5],
         }
     }
@@ -82,14 +84,19 @@ impl Default for Environment {
 impl Environment {
     pub fn validate(self) -> Result<Self, String> {
         let length: f32 = self.sun_direction.into_iter().map(|v| v * v).sum();
-        if !self.world_y.is_finite() || !length.is_finite() || (length - 1.0).abs() > 1e-4 {
-            return Err("Environment requires finite altitude and a unit sun direction".into());
+        if self.altitude_offset_meters > 10000
+            || !self.world_y.is_finite()
+            || !length.is_finite()
+            || (length - 1.0).abs() > 1e-4
+        {
+            return Err("Environment requires finite world altitude, offset 0..10000 m and a unit sun direction".into());
         }
         Ok(self)
     }
     pub fn eye_radius_km(self) -> f32 {
-        // Preserve the old Java double-to-float point and physical 300 m offset.
-        let altitude = ((self.world_y + 64.0) * f64::from(0.001f32) + 0.3) as f32;
+        // Preserve the old Java double-to-float point and metre-based atmosphere datum.
+        let altitude = ((self.world_y + 64.0) * f64::from(0.001f32)
+            + f64::from(self.altitude_offset_meters) * 0.001) as f32;
         (6360.0f32 + altitude).clamp(6360.0, 6480.0 - 0.001)
     }
 }
@@ -97,6 +104,67 @@ impl Environment {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn atmosphere_altitude_offset_preserves_legacy_datum_and_limits() {
+        let default = Environment::default();
+        assert_eq!(default.altitude_offset_meters, 500);
+        assert_eq!(
+            Environment {
+                world_y: -64.,
+                ..default
+            }
+            .eye_radius_km(),
+            6360.5
+        );
+        for (world_y, offset, radius) in [
+            (-64., 0, 6360.),
+            (-64., 300, 6360.3),
+            (-64., 500, 6360.5),
+            (-64., 10000, 6370.),
+            (936., 0, 6361.),
+            (-1000., 0, 6360.),
+            (200000., 10000, 6480. - 0.001),
+        ] {
+            let environment = Environment {
+                world_y,
+                altitude_offset_meters: offset,
+                ..default
+            };
+            environment.validate().unwrap();
+            assert_eq!(environment.eye_radius_km(), radius);
+            assert_eq!(environment.sun_direction, default.sun_direction);
+        }
+        for world_y in [-364., -64., 0., 64., 9636., 200000.] {
+            let legacy_altitude = ((world_y + 64.) * f64::from(0.001f32) + 0.3) as f32;
+            let environment = Environment {
+                world_y,
+                altitude_offset_meters: 300,
+                ..default
+            };
+            assert_eq!(
+                environment.eye_radius_km().to_bits(),
+                (6360.0f32 + legacy_altitude)
+                    .clamp(6360., 6480. - 0.001)
+                    .to_bits()
+            );
+        }
+        assert!(
+            Environment {
+                altitude_offset_meters: 10001,
+                ..default
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            Environment {
+                world_y: f64::NAN,
+                ..default
+            }
+            .validate()
+            .is_err()
+        );
+    }
     fn orbit(latitude: i32, longitude: u32) -> SolarOrbit {
         Astronomy {
             latitude_degrees: latitude,

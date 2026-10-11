@@ -5,9 +5,11 @@ pub fn environment(
     world_y: f64,
     solar_hour_angle: f32,
     orbit: prime_scene::environment::SolarOrbit,
+    altitude_offset_meters: u32,
 ) -> Environment {
     Environment {
         world_y,
+        altitude_offset_meters,
         sun_direction: orbit.direction(solar_hour_angle),
     }
 }
@@ -18,7 +20,7 @@ mod tests {
     #[test]
     fn tuned_sun_matches_noon_horizon_and_night() {
         for angle in [0., std::f32::consts::FRAC_PI_2, std::f32::consts::PI, -1.2] {
-            let e = environment(64., angle, Default::default())
+            let e = environment(64., angle, Default::default(), 300)
                 .validate()
                 .unwrap();
             assert!(
@@ -27,9 +29,11 @@ mod tests {
             );
         }
         assert_eq!(
-            environment(0., 0., Default::default()).sun_direction,
+            environment(0., 0., Default::default(), 300).sun_direction,
             Environment::default().sun_direction
         );
-        assert!(environment(0., std::f32::consts::PI, Default::default()).sun_direction[1] < 0.);
+        assert!(
+            environment(0., std::f32::consts::PI, Default::default(), 300).sun_direction[1] < 0.
+        );
     }
 }

@@ -103,7 +103,16 @@ fn gpu_atmosphere_matches_frozen_spectral_and_sky_reference() {
     let context = Context::new().unwrap();
     let mut atmosphere = Atmosphere::new(&context).unwrap();
     atmosphere
-        .prepare(Environment::default(), &camera(), 16. / 9., 0, None)
+        .prepare(
+            Environment {
+                altitude_offset_meters: 300,
+                ..Default::default()
+            },
+            &camera(),
+            16. / 9.,
+            0,
+            None,
+        )
         .unwrap();
     let reference = include_bytes!("../../tests/fixtures/atmosphere-transport.bin");
     let count = u32::from_le_bytes(reference[..4].try_into().unwrap());
@@ -153,6 +162,7 @@ fn gpu_atmosphere_matches_frozen_spectral_and_sky_reference() {
         let radians = elevation.to_radians();
         let environment = Environment {
             world_y: (f64::from(height) - 0.3) / f64::from(0.001f32) - 64.,
+            altitude_offset_meters: 300,
             sun_direction: [0., radians.sin(), radians.cos()],
         };
         atmosphere
@@ -221,7 +231,10 @@ fn gpu_solar_disk_and_update_dependencies() {
     let context = Context::new().unwrap();
     let mut atmosphere = Atmosphere::new(&context).unwrap();
     let camera = camera();
-    let mut environment = Environment::default();
+    let mut environment = Environment {
+        altitude_offset_meters: 300,
+        ..Default::default()
+    };
     atmosphere
         .prepare(environment, &camera, 16. / 9., 0, None)
         .unwrap();
@@ -286,6 +299,93 @@ fn gpu_solar_disk_and_update_dependencies() {
 }
 
 #[test]
+#[ignore = "windowless atmosphere altitude setting, LUT invalidation and reuse"]
+fn gpu_atmosphere_altitude_setting_updates_height_dependent_luts() {
+    use prime_scene::{
+        scene::Scene,
+        settings::{RenderMode, RenderSettings},
+    };
+    let mut settings = RenderSettings {
+        mode: RenderMode::Offline,
+        native_noisy_output: true,
+        ..Default::default()
+    };
+    assert_eq!(settings.atmosphere_altitude_offset_meters, 500);
+    let mut renderer = crate::Renderer::with_settings_and_workers(
+        settings,
+        std::sync::Arc::new(prime_scene::workers::CpuWorkers::new(1).unwrap()),
+    )
+    .unwrap();
+    assert_eq!(renderer.environment.altitude_offset_meters, 500);
+    renderer
+        .set_environment(Environment {
+            world_y: -64.,
+            altitude_offset_meters: 500,
+            ..Default::default()
+        })
+        .unwrap();
+    let scene = Scene {
+        epoch: 1,
+        revision: 1,
+        ..Default::default()
+    };
+    let camera = camera();
+    renderer.render(&scene, &camera, 32, 24, 0).unwrap();
+    assert_eq!(renderer.samples, 1);
+    let counts = |atmosphere: &Atmosphere| {
+        (
+            atmosphere.sky_updates,
+            atmosphere.transmittance_updates,
+            atmosphere.aerial_updates,
+            atmosphere.aerial_t_updates,
+        )
+    };
+    let input = [0.0f32, 0., -1., 0., 0., 0., 0., 0.].map(f32::to_le_bytes);
+    let mut previous = execute(
+        renderer.atmosphere.as_ref().unwrap(),
+        0,
+        1,
+        input.as_flattened(),
+    );
+    for offset in [10000, 0] {
+        let before = counts(renderer.atmosphere.as_ref().unwrap());
+        settings.atmosphere_altitude_offset_meters = offset;
+        renderer.configure(settings).unwrap();
+        assert_eq!(renderer.samples, 0);
+        assert_eq!(renderer.environment.world_y, -64.);
+        assert_eq!(
+            renderer.environment.eye_radius_km(),
+            6360. + offset as f32 * 0.001
+        );
+        renderer.render(&scene, &camera, 32, 24, 1).unwrap();
+        let after = counts(renderer.atmosphere.as_ref().unwrap());
+        assert_eq!(
+            after,
+            (before.0 + 1, before.1 + 1, before.2 + 1, before.3 + 1)
+        );
+        let sky = execute(
+            renderer.atmosphere.as_ref().unwrap(),
+            0,
+            1,
+            input.as_flattened(),
+        );
+        assert!(sky[..3].iter().all(|v| v.is_finite() && *v >= 0.));
+        assert!(
+            sky[..3]
+                .iter()
+                .zip(&previous)
+                .any(|(a, b)| (a - b).abs() > 1e-4)
+        );
+        previous = sky;
+        renderer.configure(settings).unwrap();
+        assert_eq!(renderer.samples, 1);
+        renderer.render(&scene, &camera, 32, 24, 2).unwrap();
+        assert_eq!(renderer.samples, 2);
+        assert_eq!(counts(renderer.atmosphere.as_ref().unwrap()), after);
+    }
+}
+
+#[test]
 #[ignore = "windowless sampled solar radiance, earth occlusion and partial solar limb"]
 fn gpu_solar_sampled_radiance_preserves_day_night_and_partial_limb() {
     let context = Context::new().unwrap();
@@ -312,6 +412,7 @@ fn gpu_solar_sampled_radiance_preserves_day_night_and_partial_limb() {
             .prepare(
                 Environment {
                     world_y: -364.,
+                    altitude_offset_meters: 300,
                     sun_direction,
                 },
                 &camera,

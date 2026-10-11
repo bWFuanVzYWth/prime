@@ -58,6 +58,7 @@ public final class PrimeVideoOptions {
                         case SUN_EV, SKY_EV, EXPOSURE_EV ->
                             String.format(Locale.ROOT, "%+.2f EV", value / 4.0);
                         case LATITUDE, SOLAR_LONGITUDE -> value + "°";
+                        case ATMOSPHERE_ALTITUDE_OFFSET -> value + " m";
                         case HUE, SATURATION, COMPRESSION_START, STARS, AUTO_EXPOSURE ->
                             value + "%";
                         case HDR_WHITE ->
@@ -149,6 +150,7 @@ public final class PrimeVideoOptions {
         list.addBig(controls.get(Control.STARS));
         list.addBig(controls.get(Control.LATITUDE));
         list.addBig(controls.get(Control.SOLAR_LONGITUDE));
+        list.addBig(controls.get(Control.ATMOSPHERE_ALTITUDE_OFFSET));
         list.addHeader(Component.translatable("primept.settings.display"));
         list.addBig(controls.get(Control.EXPOSURE_EV));
         list.addBig(controls.get(Control.AUTO_EXPOSURE));
@@ -243,8 +245,9 @@ public final class PrimeVideoOptions {
                 !PrimeClient.settings().nativeNoisyOutput();
         list.findOption(dlssQuality).active = PrimeClient.controlsAvailable() && !frozen &&
                                               !PrimeClient.settings().nativeNoisyOutput();
-        for (var control : List.of(Control.BOUNCES, Control.SUN_EV, Control.SKY_EV, Control.STARS,
-                                   Control.LATITUDE, Control.SOLAR_LONGITUDE))
+        for (var control :
+             List.of(Control.BOUNCES, Control.SUN_EV, Control.SKY_EV, Control.STARS,
+                     Control.LATITUDE, Control.SOLAR_LONGITUDE, Control.ATMOSPHERE_ALTITUDE_OFFSET))
             list.findOption(controls.get(control)).active = !frozen;
         list.findOption(view).active = !frozen;
         list.findOption(controls.get(Control.DEPTH_RANGE)).active = !frozen;

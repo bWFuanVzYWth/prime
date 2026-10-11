@@ -7,7 +7,7 @@ import static java.lang.foreign.ValueLayout.*;
 
 public final class PrimeAbi {
     private PrimeAbi() {}
-    public static final int PRIME_ABI_VERSION = 18;
+    public static final int PRIME_ABI_VERSION = 19;
     public static final int PRIME_MAX_BATCH_BYTES = 268435456;
     public static final int PRIME_DIAGNOSTICS_ENABLED = 1;
     public static final int PRIME_DIAGNOSTICS_CAPTURE = 2;
@@ -333,7 +333,7 @@ public final class PrimeAbi {
     }
     public static final class PrimeSettings {
         private PrimeSettings() {}
-        public static final long SIZE = 220, ALIGN = 4;
+        public static final long SIZE = 224, ALIGN = 4;
         public static final MemoryLayout LAYOUT =
                 MemoryLayout
                         .structLayout(
@@ -383,7 +383,8 @@ public final class PrimeAbi {
                                 JAVA_FLOAT.withName("restir_rr_firefly_strength"),
                                 JAVA_FLOAT.withName("restir_rr_multiply_bound"),
                                 JAVA_INT.withName("restir_rr_bias_reduction"),
-                                JAVA_INT.withName("restir_rr_firefly"))
+                                JAVA_INT.withName("restir_rr_firefly"),
+                                JAVA_INT.withName("atmosphere_altitude_offset_meters"))
                         .withName("PrimeSettings");
         static {
             if (LAYOUT.byteSize() != SIZE || LAYOUT.byteAlignment() != ALIGN)
@@ -548,6 +549,10 @@ public final class PrimeAbi {
             if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("restir_rr_firefly")) !=
                 216)
                 throw new ExceptionInInitializerError("PrimeSettings.restir_rr_firefly offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement(
+                        "atmosphere_altitude_offset_meters")) != 220)
+                throw new ExceptionInInitializerError(
+                        "PrimeSettings.atmosphere_altitude_offset_meters offset");
         }
         public static MemorySegment header(MemorySegment value) {
             return value.asSlice(0L, 8);
@@ -869,6 +874,12 @@ public final class PrimeAbi {
         }
         public static void restir_rr_firefly(MemorySegment value, int field) {
             value.set(JAVA_INT, 216L, field);
+        }
+        public static int atmosphere_altitude_offset_meters(MemorySegment value) {
+            return value.get(JAVA_INT, 220L);
+        }
+        public static void atmosphere_altitude_offset_meters(MemorySegment value, int field) {
+            value.set(JAVA_INT, 220L, field);
         }
     }
     public static final class PrimeVulkanHost {

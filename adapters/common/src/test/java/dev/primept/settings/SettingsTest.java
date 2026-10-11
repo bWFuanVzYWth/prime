@@ -16,6 +16,17 @@ final class SettingsTest {
     private static String legacyFile(RenderSettings settings, int version) {
         String result = SettingsFile.encode(settings).replace("version=" + RenderSettings.VERSION,
                                                               "version=" + version);
+        result = result.replace(
+                "atmosphere.altitude_offset_meters=" +
+                        settings.value(RenderSettings.Control.ATMOSPHERE_ALTITUDE_OFFSET) + "\n",
+                "");
+        if (version <= 13)
+            result = result.replace(
+                    "display.compression_start_percent=" +
+                            settings.value(RenderSettings.Control.COMPRESSION_START) + "\n",
+                    "");
+        if (version >= 13)
+            return result;
         result = result.replace("path_tracing=" + settings.pathTracing() +
                                         "\nrealtime_renderer=" + settings.realtimeRenderer().key,
                                 "renderer=" + settings.renderer().key);
@@ -90,10 +101,13 @@ final class SettingsTest {
                 RenderSettings.Control.BOUNCES, 12);
         String valid = SettingsFile.encode(changed);
         for (String broken : new String[] {
-                     valid.replace("version=14", "version=0"),
-                     valid.replace("version=14", "version=7"),
-                     valid.replace("version=14", "version=15"),
-                     valid.replace("version=14", ""),
+                     valid.replace("version=15", "version=0"),
+                     valid.replace("version=15", "version=7"),
+                     valid.replace("version=15", "version=16"),
+                     valid.replace("version=15", "version=+15"),
+                     valid.replace("version=15", "version=015"),
+                     valid.replace("version=15", "version=15.0"),
+                     valid.replace("version=15", ""),
                      valid.replace("render.bounces=12", ""),
                      valid.replace("render.bounces=12", "render.bounces=65"),
                      valid.replace("terrain.batches_per_frame=1", ""),
@@ -167,7 +181,8 @@ final class SettingsTest {
         assertEquals(1, PrimeSettings.light_sampling(view(bytes)));
         assertEquals(0, PrimeSettings.integrator(view(bytes)));
         assertEquals(0, PrimeSettings.ignore_global_history_resets(view(bytes)));
-        assertEquals(220, PrimeSettings.SIZE);
+        assertEquals(224, PrimeSettings.SIZE);
+        assertEquals(500, PrimeSettings.atmosphere_altitude_offset_meters(view(bytes)));
         assertEquals(0, PrimeSettings.restir_spatial_only(view(bytes)));
     }
     @Test
@@ -185,7 +200,7 @@ final class SettingsTest {
             assertEquals(value / 100f, PrimeSettings.compression_start(view(wire)));
         }
         var old = SettingsFile.encode(defaults.with(RenderSettings.Control.SATURATION, 8))
-                          .replace("version=14", "version=13")
+                          .replace("version=15", "version=13")
                           .replace("display.compression_start_percent=50\n", "");
         var migrated = SettingsFile.decode(old);
         assertEquals("", migrated.resetReason());
@@ -194,11 +209,81 @@ final class SettingsTest {
         assertThrows(IllegalArgumentException.class, () -> defaults.with(control, 100));
     }
     @Test
+    void atmosphereAltitudeHasExactBoundsPersistenceAndIndependentAbiField() {
+        var control = RenderSettings.Control.ATMOSPHERE_ALTITUDE_OFFSET;
+        var defaults = RenderSettings.defaults();
+        assertEquals(500, defaults.value(control));
+        var before = settingsBuffer();
+        var after = settingsBuffer();
+        defaults.write(before, false, RenderSettings.View.OUTPUT);
+        for (int value : new int[] {0, 1, 300, 500, 5317, 10000}) {
+            var changed = defaults.with(control, value);
+            var loaded = SettingsFile.decode(SettingsFile.encode(changed));
+            assertEquals("", loaded.resetReason());
+            assertEquals(changed, loaded.settings());
+            loaded.settings().write(after, false, RenderSettings.View.OUTPUT);
+            assertEquals(value, PrimeSettings.atmosphere_altitude_offset_meters(view(after)));
+            assertOnlyFieldChanged(before, after, 220);
+        }
+        for (int invalid : new int[] {-1, 10001})
+            assertThrows(IllegalArgumentException.class, () -> defaults.with(control, invalid));
+        String current = SettingsFile.encode(defaults);
+        for (String malformed :
+             new String[] {current.replace(control.key + "=500\n", ""),
+                           current.replace(control.key + "=500", control.key + "=-1"),
+                           current.replace(control.key + "=500", control.key + "=10001"),
+                           current.replace(control.key + "=500", control.key + "=NaN")}) {
+            var rejected = SettingsFile.decode(malformed);
+            assertEquals(defaults, rejected.settings());
+            assertFalse(rejected.resetReason().isEmpty());
+        }
+    }
+    @Test
+    void versionsEightThroughFourteenAddAltitudeAndPreserveExistingControls() {
+        var control = RenderSettings.Control.ATMOSPHERE_ALTITUDE_OFFSET;
+        for (int version = 8; version <= 14; ++version) {
+            var expected = RenderSettings.defaults()
+                                   .withRenderer(RenderSettings.Renderer.RESTIR_PT)
+                                   .withRestirTemporalReuse(version <= 10)
+                                   .withIgnoreGlobalHistoryResets(version != 8)
+                                   .withNativeNoisyOutput(true)
+                                   .with(RenderSettings.Control.SATURATION, 8)
+                                   .with(RenderSettings.Control.HUE, 21)
+                                   .with(RenderSettings.Control.BOUNCES, 7)
+                                   .with(RenderSettings.Control.COMPRESSION_START,
+                                         version == 14 ? 18 : 50);
+            if (version >= 12)
+                expected = expected.withRestir(
+                        expected.restir()
+                                .with(RestirSettings.Control.SPATIAL_NEIGHBORS, 5)
+                                .withSeed(0xffffffffL));
+            if (version >= 13)
+                expected = expected.withPathTracing(false);
+            String legacy = legacyFile(expected, version);
+            var migrated = SettingsFile.decode(legacy);
+            assertEquals("", migrated.resetReason(), "version=" + version);
+            assertEquals(expected, migrated.settings(), "version=" + version);
+            assertEquals(500, migrated.settings().value(control));
+            for (int value : new int[] {300, 5317}) {
+                var explicit = SettingsFile.decode(legacy + control.key + "=" + value + "\n");
+                assertEquals("", explicit.resetReason());
+                assertEquals(expected.with(control, value), explicit.settings());
+            }
+            if (version == 14) {
+                var missingCurve = SettingsFile.decode(
+                        legacy.replace("display.compression_start_percent=18\n", ""));
+                assertFalse(missingCurve.resetReason().isEmpty());
+            }
+            assertEquals(migrated.settings(),
+                         SettingsFile.decode(SettingsFile.encode(migrated.settings())).settings());
+        }
+    }
+    @Test
     void saturationDefaultsPreserveSavedValuesAndIndependentWire(@TempDir Path dir)
             throws Exception {
         var control = RenderSettings.Control.SATURATION;
         var defaults = RenderSettings.defaults();
-        assertEquals(14, RenderSettings.VERSION);
+        assertEquals(15, RenderSettings.VERSION);
         assertEquals(10, defaults.value(control));
         Path file = dir.resolve("primept.properties");
         assertEquals(10, SettingsFile.load(file).settings().value(control));
@@ -485,7 +570,7 @@ final class SettingsTest {
                 assertEquals("", migrated.resetReason());
                 assertEquals(expected, migrated.settings());
                 String canonical = SettingsFile.encode(migrated.settings());
-                assertTrue(canonical.contains("version=14\n"));
+                assertTrue(canonical.contains("version=15\n"));
                 assertTrue(canonical.contains(
                         "diagnostics.native_noisy_output=" + !oldReconstruction + "\n"));
                 assertFalse(canonical.contains("ray_reconstruction"));
@@ -557,7 +642,7 @@ final class SettingsTest {
                 assertEquals(1, PrimeSettings.light_sampling(view(wire)));
                 SettingsFile.save(file, loaded.settings());
                 String canonical = Files.readString(file);
-                assertTrue(canonical.contains("version=14\n"));
+                assertTrue(canonical.contains("version=15\n"));
                 assertTrue(canonical.contains("render.light_sampling=TREE\n"));
                 assertFalse(canonical.contains(retired));
                 assertEquals(expected, SettingsFile.load(file).settings());
@@ -680,7 +765,7 @@ final class SettingsTest {
             assertEquals(expected, loaded.settings());
             assertFalse(loaded.settings().restirSpatialOnly());
             String saved = SettingsFile.encode(loaded.settings());
-            assertTrue(saved.contains("version=14\n"));
+            assertTrue(saved.contains("version=15\n"));
             assertTrue(saved.contains("restir_pt.temporal_reuse=true\n"));
             assertEquals(expected, SettingsFile.decode(saved).settings());
         }

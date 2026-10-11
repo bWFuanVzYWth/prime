@@ -26,6 +26,8 @@ Streamline 是进程级状态，一次只允许一个 Prime RR owner。游戏在
 
 ## 图像和坐标合同
 
+尚未明确接受的表面、相机、预算和运动光学代理归入[PT-029](../FIXME.md#pt-029)；软件空间滤波退路归入[PT-021](../FIXME.md#pt-021)，不能由已有质量验收关闭推断这些替代已获接受。
+
 普通 PT 实时采用 K1主表面/delta/guides → K2主要输运 → post 三段。RR的K1写入主表面guides及首纯delta透明面的独立反射运动；K2只可能完成一个已移交的实际反射次段距离。`realtime_rr.slang` 合成FP32 prefix+tail、执行原相机空气段aerial与清洗，写入noisy color，并补全其余像素的反射运动。原始实时不分配RR图像，Offline不进入这两个实时PT kernel。阶段布局见[PT设计](pt-state-design.md)。[ReSTIR PT](restir-pt.md) 在自身生成阶段共享首交点并发布同合同的独立规范 guides，在 resolve 写入最终重采样 radiance 与 aerial；不执行普通 PT 的照明阶段。
 
 RR主射线在像素中心加CPU Halton帧采样偏移；Streamline接收投影位移，XY均为采样偏移的相反数，单位是输入像素。相机矩阵不含抖动；普通 PT 的 coverage 与照明随机域继续由 Z-Sobol 产生。ReSTIR 保留原 TinyUniform RNG 与路径 seed/位置哈希 coverage；首 guide 共享实际首交点及所选材质，独立 guide 后缀使用既有 Z-Sobol coverage 域。guide 从同一主射线开始，之后按确定的几何事件选择独立终点，不随照明的首透明0.5分支或roulette改变。RR/FG 图像、最终 swapchain 与 SDK 相机统一为 canonical 左上；像素中心、矩阵布局及 UI 呈现转换见[坐标契约](coordinates.md)。
@@ -123,4 +125,4 @@ FG 的输入仍可能被 SDK 的 Present 队列使用。更换尺寸/输出/质�
 
 诊断提供 `fg_requested`、`fg_capable`、`fg_last_prepare_succeeded` 和 `fg_prepare_serial`，分别表示设置请求、SDK能力、最近一次输入准备及对应 serial；这些状态本身不证明已经显示生成帧。FG质量与真实呈现已按用户确认验收关闭；帧数显示已接入实际SDK计数，窗口与外部呈现工具对照、未覆盖的HDR/显示器范围由用户检查。严格 RR Vulkan 检查仍必须零验证错误，有效有限输出或 SDK 返回成功不能覆盖内部同步失败。
 
-ReSTIR既有质量问题与FG呈现验收已按用户确认关闭；现存萤火虫及水下收敛振荡独立见[问题登记](../HACK.md)。当前5×5空间滤波是临时hack，不符合最终时域重建目标，不计作正式降噪后端完成。SDK严格同步和未支持来源边界仍独立维护。
+ReSTIR既有质量问题与FG呈现验收已按用户确认关闭；现存萤火虫及水下收敛振荡独立见[问题登记](../FIXME.md)。当前5×5空间滤波是未明确接受的临时替代（PT-021，归入FIXME），不符合最终时域重建目标，不计作正式降噪后端完成。SDK严格同步和未支持来源边界仍独立维护。

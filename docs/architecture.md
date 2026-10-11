@@ -25,7 +25,7 @@ prime_vulkan → Slang SPIR-V → MC 主图像 → hand / HUD → 宿主呈现
 
 邻接失效先检查封闭批次的消费者：所有活跃邻居都已确定重编译时，边界查询不可能新增工作，直接跳过。其余情况下，palette 与压缩布局相同时，对存储字作差异比较并应用该位宽的边界字段掩码，只查询实际变化的边界单元。掩码排除内部及填充位；布局或 palette 改变时检查整个表面。源状态的遮挡、同类面和流体依赖仍由版本层精确判断，角落失效包含对角邻居。
 
-长期边界保留第三方模型、模型选择、姿态与变换设置的能力，接管后截断相应的下游 Java 几何计算。当前 section 原型把 Minecraft 语义适配后移至 `prime_minecraft`，Java 仅绑定字段、转发事件和封装请求到的源数据。Rust 拥有半径、来源依赖、活跃集、编译调度、共享 session 同步池与资源管理。state-bound multipart 选择在一次源准备内求值并保留真实结果；实际 block/fluid tint 通过 Rust 选择的批次取得源字段/未知源回调结果。原版 tint 算式、群系选择、资源色表查找、特殊修色和整数混合由 Rust 完成；其他尚未接入的模型等仍用显式默认值，不宣称与原版等价；这些临时取舍独立登记在 [PROTOTYPE_HACKS](../PROTOTYPE_HACKS.md)。实体/方块实体/粒子暂保留已有路由。
+长期边界保留第三方模型、模型选择、姿态与变换设置的能力，接管后截断相应的下游 Java 几何计算。当前 section 原型把 Minecraft 语义适配后移至 `prime_minecraft`，Java 仅绑定字段、转发事件和封装请求到的源数据。Rust 拥有半径、来源依赖、活跃集、编译调度、共享 session 同步池与资源管理。state-bound multipart 选择在一次源准备内求值并保留真实结果；实际 block/fluid tint 通过 Rust 选择的批次取得源字段/未知源回调结果。原版 tint 算式、群系选择、资源色表查找、特殊修色和整数混合由 Rust 完成；其他尚未接入的模型等仍用显式默认值，不宣称与原版等价；这些临时取舍独立登记在 [原型源兼容待修复项](../FIXME.md)。实体/方块实体/粒子暂保留已有路由。
 
 独立的 [`ChunkManager`](../crates/prime-minecraft/src/chunks.rs) 管理活动范围、压缩 section 驻留、可用性、邻接/颜色/接触失效、群系缓存及待编译格选择；内部复用 `Scheduler` 和 `CompileQueue`。`TerrainContext` 保留版本源解码、资源字典、请求/颜色响应事务、工作池与编译发布协调；纯几何内核、`prime_scene::TerrainPlanner` 和 Vulkan 资源执行不进入管理器。管理器只在成功发布后确认选中的待办，不执行宿主回调或持有 GPU 资源。未来 LOD 调度在这一职责边界扩展，当前尚无 LOD；模块拆分本身不降低工作量，也不构成 CPU 性能保证。
 
@@ -164,6 +164,6 @@ Java 使用宿主 transient command buffer，将 native 录制结果交还 `enco
 
 路径追踪使用硬件内联 Ray Query、Full OpenPBR 支持子域的 opaque/dielectric 材质、线性 Rec.2020 工作空间、旧 Prime 的物理大气、有限太阳圆盘与空气透视（见[缓存契约](atmosphere.md)）、可调路径预算（默认 12 个照明/散射顶点，最多 11 次续接）和 primeDRT 显示映射。第二次有效散射开始使用 eta-aware 俄罗斯轮盘赌；预算、末顶点 NEE 与状态消费见 [PT 设计](pt-state-design.md)。Z-Sobol、起点误差与颜色契约见 [Slang 基础库](shaders.md)。地形使用 sprite-local UV、实际动画帧与源 mip；规范 LabPBR 图在 Rust 生成分布感知 mip 和辅助动画，atlas UV 材料消费通过静态 lookup 解析稳定 sprite 描述符。基色未知 UV 保留 atlas 回退。源 RGBA 与 tint 按 Minecraft 编码域语义组合，shader 再线性化。过滤近似、动画相位与发光采样边界见[表面编译](surface-compiler.md)和[材质契约](materials.md)。
 
-地形范围由 Rust 在宿主实际可用来源内选择，动态源仍依赖宿主准备过程。地形原型使用真实烘焙 quad；标准 multipart、流体形状和实际 tint 已接入；opaque 自定义模型、特殊偏移和其他未覆盖规则按 [独立清单](../PROTOTYPE_HACKS.md) 暂用默认值。动态仍接收常规模型、方块实体、物品、自定义几何的支持布局及 quad 粒子；moving/falling block、leash、文字、glint、outline 等特殊路径不作普通表面支持承诺。
+地形范围由 Rust 在宿主实际可用来源内选择，动态源仍依赖宿主准备过程。地形原型使用真实烘焙 quad；标准 multipart、流体形状和实际 tint 已接入；opaque 自定义模型、特殊偏移和其他未覆盖规则按 [独立清单](../FIXME.md) 暂用默认值。动态仍接收常规模型、方块实体、物品、自定义几何的支持布局及 quad 粒子；世界文字已接入受支持的 glyph 来源；moving/falling block、leash、glint、通用 outline 等特殊路径仍有源兼容缺口。
 
-cutout 使用固定 0.1 阈值；未解释的 alpha 材质仍按源 alpha 随机覆盖，接受后使用实际 opaque 闭包。非金属SSS只在CPU完整源证明的薄壁上使用Full有色双半球混合；厚/未知来源回退常规漫反射，Lite与厚近似已删除，物理介质标志独立；分支条件见[材质契约](materials.md)。标准水与具有拓扑证明的静态玻璃使用 Full dielectric 的粗糙反射/透射和 Beer 吸收；光学边界、正反侧与覆盖层由规范表面直接表示，命中、阴影和灯采样共享选择规则。支持子域不包含任意 coat/fuzz/thin-film 等组合；Full foliage生产未接入，旧 PBR presets 不移植。复杂开放玻璃、动态介质与折射焦散尚未覆盖。实时模式逐帧推进样本序号且没有历史累积；离线冻结场景后纯累积，退出冻结时重建捕获 epoch。实时 RR、刚性实例前态、星图/自动曝光/scRGB HDR 与 Streamline FG 已接入；未知形变、运动光学接口、动态介质/发光与完整源兼容仍有边界，实际游戏和窗口效果尚须验收。未完成事项见 [HACK.md](../HACK.md)。
+cutout 使用固定 0.1 阈值；未解释的 alpha 材质仍按源 alpha 随机覆盖，接受后使用实际 opaque 闭包。非金属SSS在CPU完整源证明的薄壁上使用Full有色双半球混合，明确植物来源另有经用户接受的缺图薄壁艺术近似；普通厚/未知来源回退常规漫反射，Lite与厚近似已删除，物理介质标志独立；分支条件见[材质契约](materials.md)。标准水与具有拓扑证明的静态玻璃使用 Full dielectric 的粗糙反射/透射和 Beer 吸收；光学边界、正反侧与覆盖层由规范表面直接表示，命中、阴影和灯采样共享选择规则。支持子域不包含任意 coat/fuzz/thin-film 等组合；Full foliage生产未接入，旧 PBR presets 不移植。复杂开放玻璃、动态介质与折射焦散尚未覆盖。实时模式逐帧推进样本序号且没有历史累积；离线冻结场景后纯累积，退出冻结时重建捕获 epoch。实时 RR、刚性实例前态、星图/自动曝光/scRGB HDR 与 Streamline FG 已接入；未知形变、运动光学接口、动态介质/发光与完整源兼容仍有边界，实际游戏和窗口效果尚须验收。计划开发见 [TODO](../TODO.md)，已知缺陷与源兼容缺口见 [FIXME](../FIXME.md)。

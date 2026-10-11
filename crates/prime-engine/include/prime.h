@@ -1,7 +1,7 @@
 #ifndef PRIME_PT_H
 #define PRIME_PT_H
 #include <stdint.h>
-#define PRIME_ABI_VERSION 18
+#define PRIME_ABI_VERSION 19
 #define PRIME_MAX_BATCH_BYTES 268435456
 #define PRIME_DIAGNOSTICS_ENABLED 1
 #define PRIME_DIAGNOSTICS_CAPTURE 2
@@ -138,6 +138,9 @@ typedef struct PrimeSettings {
     float restir_rr_multiply_bound;
     uint32_t restir_rr_bias_reduction;
     uint32_t restir_rr_firefly;
+    /* Physical atmosphere altitude at world Y=-64, in metres; default 500, range 0..10000.
+       Changes atmospheric density and scattering only, independent of water/fog semantics. */
+    uint32_t atmosphere_altitude_offset_meters;
 } PrimeSettings;
 
 typedef struct PrimeVulkanHost {

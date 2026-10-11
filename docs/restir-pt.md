@@ -34,7 +34,7 @@ Prime的功率距离Tree proposal依赖接收点，在世界与页内逐层评�
 
 BSDF 续接与直接光照具有不同支持域。非光学 authored 薄 SSS 可以通过实际 BSDF 采样透射；重连和后缀重放保留这一事件，并要求带法线贴图的几何/着色事件一致。其实际散射 PDF 继续用于 footprint 和路径度量，但直接光照的竞争 PDF 为零，发光命中/环境端点的 MIS 因而为一。局部灯和太阳 NEE 使用朝向当前 view 的几何前半球，光学接收面保留透射支持；新太阳提议在阴影查询前检查，已有终端 NEE 在当前消费处检查，不依赖全局重置撤销错误端点。
 
-求交起点复用 Prime 的重心/仿射误差界：静态命中和发光端点用 `reconstructStaticSurface`，动态命中用 `reconstructSurface`；初始路径与 prefix/suffix 重放的下一跳调用 `spawnRay`。有限 NEE 和 shift 可见性线段继续在两端使用同一偏移算法。BSDF 到达连接点的段以偏移后的 query 起点定义方向与几何项，shift 的第一 BSDF、连接点入射方向和 Jacobian 使用同一测度；只有终端 NEE 使用物理接收点测度，连接点之后的 NEE 不改变到达段的分类。物理连接与 query 连接必须保留源反射/透射事件及同一偏移侧。`RESTIR_DISTANCE_THRESHOLD` 是重连接分类阈值，不是求交 epsilon。现有生成器直接竞争物理光源角 PDF 与 query BSDF 角 PDF，以及两端可见性裁短的吸收距离，仍属于数值近似边界；不据此声明完整传输无偏。硬件误差常量仍基于 NVIDIA RTX，其他硬件与极端几何验证边界见 [PT-006](../HACK.md)，蠕动继续按 [PT-018](../HACK.md) 排查。
+求交起点复用 Prime 的重心/仿射误差界：静态命中和发光端点用 `reconstructStaticSurface`，动态命中用 `reconstructSurface`；初始路径与 prefix/suffix 重放的下一跳调用 `spawnRay`。有限 NEE 和 shift 可见性线段继续在两端使用同一偏移算法。BSDF 到达连接点的段以偏移后的 query 起点定义方向与几何项，shift 的第一 BSDF、连接点入射方向和 Jacobian 使用同一测度；只有终端 NEE 使用物理接收点测度，连接点之后的 NEE 不改变到达段的分类。物理连接与 query 连接必须保留源反射/透射事件及同一偏移侧。`RESTIR_DISTANCE_THRESHOLD` 是重连接分类阈值，不是求交 epsilon。现有生成器直接竞争物理光源角 PDF 与 query BSDF 角 PDF，以及两端可见性裁短的吸收距离，仍属于数值近似边界；不据此声明完整传输无偏。硬件误差常量仍基于 NVIDIA RTX，其他硬件与极端几何验证边界见 [PT-006 验证任务](../TODO.md)；既有 PT-018 蠕动验收已关闭，当前萤火虫和水下问题见 [待修复项](../FIXME.md)。
 
 实时可使用 DLSS RR 或原生分辨率原始输出，质量、线性颜色、PSR、完成状态、显示与 SDK 资源寿命遵循[重建合同](reconstruction.md)。RR 的 Halton 抖动同时用于 ReSTIR 生成、重放、shift 和主 guide；时间 donor 选择使用去抖动的运动，当前 pinhole 交点的前帧投影扣当前抖动；源重放继续使用已接受前帧的抖动，见[适配登记 RA-002](restir-adaptations.md)。普通粗糙首面共享生成时的真实交点；规范 guide 与照明随机分支独立，纯 delta 前缀才追加 guide 后缀遍历，不执行普通 PT 的照明管线。ReSTIR 的主交点与全部 guide 后缀都使用 LOD 0，保持与实际输运相同的材质语义。离线冻结每个样本执行初始生成与空间重采样，并在线累积最终线性 radiance；不把同一冻结历史反复计作独立样本。
 

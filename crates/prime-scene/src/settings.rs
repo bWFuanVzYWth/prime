@@ -50,6 +50,8 @@ pub enum LightSampling {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RenderSettings {
     pub astronomy: crate::environment::Astronomy,
+    /// Physical atmosphere altitude at world Y=-64, in metres.
+    pub atmosphere_altitude_offset_meters: u32,
     pub mode: RenderMode,
     pub integrator: Integrator,
     pub bounces: u32,
@@ -83,6 +85,7 @@ impl Default for RenderSettings {
     fn default() -> Self {
         Self {
             astronomy: Default::default(),
+            atmosphere_altitude_offset_meters: 500,
             mode: RenderMode::Realtime,
             integrator: Integrator::PathTrace,
             bounces: 12,
@@ -128,6 +131,7 @@ impl RenderSettings {
                 latitude_degrees: word(48) as i32,
                 solar_longitude_degrees: word(52),
             },
+            atmosphere_altitude_offset_meters: 500,
             mode: match word(4) {
                 0 => RenderMode::Realtime,
                 1 => RenderMode::Offline,
@@ -212,6 +216,7 @@ impl RenderSettings {
                 latitude_degrees: s.latitude_degrees,
                 solar_longitude_degrees: s.solar_longitude_degrees,
             },
+            atmosphere_altitude_offset_meters: s.atmosphere_altitude_offset_meters,
             mode: match s.mode {
                 0 => RenderMode::Realtime,
                 1 => RenderMode::Offline,
@@ -293,7 +298,8 @@ impl RenderSettings {
     pub fn validate(self) -> Result<(), String> {
         self.astronomy.validate()?;
         self.restir.validate()?;
-        if !(1..=64).contains(&self.bounces)
+        if self.atmosphere_altitude_offset_meters > 10000
+            || !(1..=64).contains(&self.bounces)
             || !(1..=64).contains(&self.offline_samples)
             || !(1..=128).contains(&self.terrain_batches_per_frame)
             || !(1.0 / 4096.0..=4096.0).contains(&self.exposure)
@@ -317,6 +323,7 @@ impl RenderSettings {
         self.integrator == other.integrator
             && self.bounces == other.bounces
             && self.astronomy == other.astronomy
+            && self.atmosphere_altitude_offset_meters == other.atmosphere_altitude_offset_meters
             && self.sun == other.sun
             && self.sky == other.sky
             && self.stars == other.stars
@@ -392,6 +399,11 @@ mod tests {
     fn java_wire_layout_and_exact_version() {
         let bytes = golden();
         let settings = RenderSettings::parse(&bytes).unwrap();
+        assert_eq!(
+            RenderSettings::default().atmosphere_altitude_offset_meters,
+            500
+        );
+        assert_eq!(settings.atmosphere_altitude_offset_meters, 500);
         assert_eq!(
             settings,
             RenderSettings {
@@ -571,6 +583,7 @@ mod tests {
             restir_rr_multiply_bound: 15.0,
             restir_rr_bias_reduction: 1,
             restir_rr_firefly: 1,
+            atmosphere_altitude_offset_meters: defaults.atmosphere_altitude_offset_meters,
         };
         for (word, method) in [
             (0, LightSampling::Tree),

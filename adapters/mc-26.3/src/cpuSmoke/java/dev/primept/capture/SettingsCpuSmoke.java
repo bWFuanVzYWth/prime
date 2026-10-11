@@ -428,6 +428,10 @@ public final class SettingsCpuSmoke {
                               "Full-width numeric/toggle option " + control);
                         assertOptionCaption(controls.get(control), widget,
                                             translations.get("primept.settings." + control.key));
+                        if (control == RenderSettings.Control.ATMOSPHERE_ALTITUDE_OFFSET)
+                            check(widget.getMessage().getString().endsWith(settings.value(control) +
+                                                                           " m"),
+                                  "Atmosphere altitude slider displays metres with one caption");
                     }
                     var qualityButton =
                             (CycleButton<RenderSettings.DlssQuality>)list.findOption(dlssQuality);
@@ -456,6 +460,11 @@ public final class SettingsCpuSmoke {
                           "Frozen terrain scheduling control stays available");
                     check(!list.findOption(controls.get(RenderSettings.Control.STARS)).active,
                           "Frozen star lighting control stays fixed");
+                    check(!list
+                                   .findOption(controls.get(
+                                           RenderSettings.Control.ATMOSPHERE_ALTITUDE_OFFSET))
+                                   .active,
+                          "Frozen atmosphere altitude stays fixed");
                     check(!list.findOption(controls.get(RenderSettings.Control.FRAME_GENERATION))
                                    .active,
                           "Frozen frame generation control is unavailable");
@@ -565,8 +574,10 @@ public final class SettingsCpuSmoke {
                         restirScreen.tick();
                         check(!temporalButton.active,
                               "Naive PT leaves temporal reuse controls inactive");
-                        for (var control : List.of(RenderSettings.Control.STARS,
-                                                   RenderSettings.Control.FRAME_GENERATION)) {
+                        for (var control :
+                             List.of(RenderSettings.Control.ATMOSPHERE_ALTITUDE_OFFSET,
+                                     RenderSettings.Control.STARS,
+                                     RenderSettings.Control.FRAME_GENERATION)) {
                             for (int value :
                                  new int[] {control.minimum, control.maximum, control.initial}) {
                                 controls.get(control).set(value);
