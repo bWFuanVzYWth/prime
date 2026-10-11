@@ -14,7 +14,7 @@ import "legacy_display.slang";
     float headroom = asfloat(inputs[4 * i + 3]).x;
     PrimeDRTParameters parameters = {a.x, a.y, a.z, a.w, b.x, b.y};
     outputs[2 * i] = asuint(float4(primeDRT(color.xyz, parameters), 0));
-    PrimeRgbReinhardParameters legacy = {headroom, a.y, a.w, b.x, b.y};
+    PrimeRgbReinhardParameters legacy = {headroom, a.y, a.w, b.x};
     // The old entry zeroes non-finite radiance before invoking its display transform.
     if (any(isnan(color.xyz)) || any(isinf(color.xyz)))
         color = float4(0);
