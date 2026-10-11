@@ -317,7 +317,7 @@ pub(crate) fn resolve(
 ) -> Option<(SurfaceFace, [i32; 2])> {
     if pair.inner || same(a, b, pair.corners) {
         let mut face = SurfaceFace::from_quad(closed(state, a, offset));
-        face.material_thin = catalog.material_thin(complete_sheet, a);
+        face.material_thin = catalog.material_thin(state, complete_sheet, a);
         face.emission = emission(catalog, state, a, pair.reverse);
         return Some((face, [a.tint, -1]));
     }
@@ -332,7 +332,7 @@ pub(crate) fn resolve(
         return None;
     };
     let mut face = SurfaceFace::from_quad(closed(state, base, offset));
-    face.material_thin = catalog.material_thin(complete_sheet, base);
+    face.material_thin = catalog.material_thin(state, complete_sheet, base);
     face.emission = emission(catalog, state, base, false);
     face.detail = Some(Arc::new(SurfaceDetail {
         mode,
@@ -341,7 +341,7 @@ pub(crate) fn resolve(
             uvs: corners.map(|i| top.uvs[i]),
             texture_id: crate::sprite::texture(top.sprite),
             flags: flags(state, top) as u32,
-            material_thin: catalog.material_thin(complete_sheet, top),
+            material_thin: catalog.material_thin(state, complete_sheet, top),
             repeat: None,
             emission: emission(catalog, state, top, false),
         },

@@ -58,6 +58,10 @@ public PrimePbrVertex primePbrVertex(float3 baseColor, float3 normal, float norm
     vertex.control = (hasNormal ? PRIME_PBR_VERTEX_HAS_NORMAL : 0u) |
                      (thinWalled ? PRIME_PBR_VERTEX_THIN_WALLED : 0u) |
                      (dielectric ? PRIME_PBR_VERTEX_DIELECTRIC : 0u);
+    // Missing specular on a CPU-declared plant preset uses a colored thin SSS fallback.
+    // Authored specular (including an explicit zero SSS channel) always takes precedence.
+    if (!hasSpecular && thinWalled && !dielectric)
+        vertex.control |= 95u << PRIME_OPTICAL_SUBSURFACE_SHIFT; // 50% of canonical 190.
     if (hasSpecular) {
         uint roughnessByte = uint(round(opticalSample.r * 255.0));
         vertex.roughness = clamp(1.0 - float(roughnessByte) / 255.0, 0.0, 1.0);

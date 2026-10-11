@@ -37,7 +37,9 @@ Rust 为每个辅助图生成与基色帧尺寸对应的规范 mip。法线 foot
 
 Full来自锁定旧Prime `bsdf/compact`，使用精确介电Fresnel、F82 conductor、GGX方向能量、作者transmission-GGX LUT的多次散射补偿、thin-wall几何级数和完整marginal PDF。支持opaque/conductor、证明为薄表面的SSS及solid/thin dielectric；不声明任意coat/fuzz/thin-film等完整OpenPBR参数API。旧预设及独立轻量PT不移植。
 
-**LabPBR厚SSS不支持。** 厚体和无法证明薄壁的来源忽略SSS强度，回到常规Full opaque漫反射/反射，保留基色、F0、粗糙度、法线与发光；不再白色漫透射，不做厚介质random walk。cutout、双面重复、树叶/草名称、体积证明失败均不能作为薄壁证据。
+植物预设使用明确的艺术薄壁近似：宿主 `LeavesBlock` 身份及 Rust 版本适配中的常见叶片、花、作物、藤蔓、树苗等明确植物名称可将各表面当作叶片，完整模型可以是闭合的树叶方块。缺少 specular 图时使用50%有色薄壁SSS；只有normal图仍使用此回退。有specular图时完全采用其SSS（包括零值）及conductor语义，不生成伪材质图，不改变介质身份。不根据十字模型识别植物，钟乳石、蜘蛛网和未知模组名称不进入预设；普通来源继续要求完整薄片证明。该近似不声明植物体积的物理正确性。
+
+**LabPBR厚SSS不支持。** 厚体和无法证明薄壁的来源忽略SSS强度，回到常规Full opaque漫反射/反射，保留基色、F0、粗糙度、法线与发光；不再白色漫透射，不做厚介质random walk。cutout、双面重复、树叶/草名称、体积证明失败均不能作为几何薄壁证据；植物预设是上述显式近似。
 
 CPU在资源准备时检查完整确定性model source：全部quad须有限、精确affine且非退化，完整来源仅处于一个平面或两个相交平面才接受。当前可证明轴平面和两坐标的±和，使用精确和而非epsilon；两平行壳、闭体、未知/非确定性/更广曲面来源回退。该证明在可见性剔除前完成，资源/模型失效后重新准备；SSS能力覆盖全部源动画帧，并复用已有发光扫描。
 

@@ -726,3 +726,126 @@ fn deterministic_multipart_prepares_cross_child_relations_but_weighted_keeps_sel
     assert_eq!(plain.len(), 2);
     assert!(rich.is_empty());
 }
+
+#[test]
+fn plant_thin_sss_fallback_preserves_authored_zero_and_shared_sprite_semantics() {
+    let mut cube = Vec::new();
+    for axis in 0..3 {
+        for side in 0..2 {
+            let mut q = face();
+            q.positions = q.positions.map(|p| {
+                let mut out = [0.; 3];
+                out[axis] = side as f32;
+                out[(axis + 1) % 3] = p[0];
+                out[(axis + 2) % 3] = p[1];
+                out
+            });
+            cube.push(q);
+        }
+    }
+    for (quads, name, flags) in [
+        (cube.clone(), "minecraft:oak_leaves", 1024),
+        (
+            vec![cross_sheet(false), cross_sheet(true)],
+            "minecraft:short_grass",
+            0,
+        ),
+        (cube, "test:ordinary", 0),
+    ] {
+        for kind in 0..4 {
+            let mut c = sss_catalog(quads.clone());
+            let sprite = c.sprites.get_mut(&1).unwrap();
+            sprite.material = match kind {
+                0 => None,
+                1 => Some(crate::labpbr::Material::from_images(
+                    sprite,
+                    Some(crate::sprite::Image {
+                        width: 1,
+                        height: 1,
+                        pixels: Arc::from([128, 128, 255, 255]),
+                    }),
+                    None,
+                )),
+                2 => Some(crate::labpbr::Material::from_images(
+                    sprite,
+                    None,
+                    Some(crate::sprite::Image {
+                        width: 1,
+                        height: 1,
+                        pixels: Arc::from([0, 4, 0, 255]),
+                    }),
+                )),
+                _ => sprite.material.take(),
+            };
+            c.prepare();
+            let state = State {
+                id: 7,
+                name: name.into(),
+                model: 1,
+                flags,
+                ..Default::default()
+            };
+            let mut layers = Default::default();
+            let mut surfaces = Default::default();
+            c.emit(
+                &state,
+                [0; 3],
+                127,
+                &mut layers,
+                &mut Default::default(),
+                &mut Default::default(),
+                &mut surfaces,
+            );
+            let faces: Vec<_> = surfaces.into_iter().flatten().collect();
+            let plant = name != "test:ordinary";
+            if plant && kind != 2 {
+                assert!(!faces.is_empty(), "{name} material kind {kind}");
+                assert!(
+                    faces
+                        .iter()
+                        .all(|f| f.material_thin && f.optics.is_none() && f.media == [0; 2])
+                );
+            } else {
+                assert!(faces.iter().all(|f| !f.material_thin));
+                assert!(layers.iter().any(|layer| !layer.is_empty()));
+            }
+            // The same sprite never gains a global default material or authored SSS.
+            assert_eq!(c.sprites[&1].has_subsurface(), kind == 3);
+        }
+    }
+}
+
+#[test]
+fn plant_presets_are_source_semantics_not_cross_model_topology() {
+    let mut c = sss_catalog(vec![cross_sheet(false), cross_sheet(true)]);
+    c.sprites.get_mut(&1).unwrap().material = None;
+    c.prepare();
+    for name in [
+        "minecraft:poppy",
+        "minecraft:rose_bush",
+        "minecraft:wheat",
+        "minecraft:carrots",
+        "minecraft:torchflower_crop",
+        "minecraft:vine",
+        "minecraft:oak_sapling",
+        "minecraft:short_grass",
+    ] {
+        let (plain, rich, _) = emit(&c, name, 127);
+        assert!(plain.is_empty(), "{name}");
+        assert!(!rich.is_empty(), "{name}");
+        assert!(rich.iter().all(|f| f.material_thin), "{name}");
+    }
+    for name in [
+        "minecraft:pointed_dripstone",
+        "minecraft:cobweb",
+        "minecraft:rail",
+        "minecraft:fire",
+        "test:cross",
+        "test:poppy",
+        "minecraft:stone",
+    ] {
+        let (plain, rich, _) = emit(&c, name, 127);
+        assert!(!plain.is_empty() || !rich.is_empty(), "{name}");
+        assert!(rich.iter().all(|f| !f.material_thin), "{name}");
+    }
+}

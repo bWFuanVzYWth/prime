@@ -648,12 +648,95 @@ impl Catalog {
     pub fn has_contacts(&self) -> bool {
         self.contact_capable
     }
-    pub(crate) fn material_thin(&self, complete_sheet: bool, quad: &Quad) -> bool {
-        complete_sheet
-            && self
-                .sprites
-                .get(&quad.sprite)
-                .is_some_and(crate::sprite::Sprite::has_subsurface)
+    pub(crate) fn material_thin(&self, state: &State, complete_sheet: bool, quad: &Quad) -> bool {
+        let Some(sprite) = self.sprites.get(&quad.sprite) else {
+            return false;
+        };
+        // Host-bound LeavesBlock identity and version-local plant presets are artistic
+        // thin-surface approximations, not proofs that the complete model is a sheet.
+        let plant = state.flags & 1024 != 0
+            || matches!(
+                state.name.as_str(),
+                "minecraft:short_grass"
+                    | "minecraft:tall_grass"
+                    | "minecraft:fern"
+                    | "minecraft:large_fern"
+                    | "minecraft:seagrass"
+                    | "minecraft:tall_seagrass"
+                    | "minecraft:short_dry_grass"
+                    | "minecraft:tall_dry_grass"
+                    | "minecraft:dandelion"
+                    | "minecraft:poppy"
+                    | "minecraft:blue_orchid"
+                    | "minecraft:allium"
+                    | "minecraft:azure_bluet"
+                    | "minecraft:red_tulip"
+                    | "minecraft:orange_tulip"
+                    | "minecraft:white_tulip"
+                    | "minecraft:pink_tulip"
+                    | "minecraft:oxeye_daisy"
+                    | "minecraft:cornflower"
+                    | "minecraft:lily_of_the_valley"
+                    | "minecraft:wither_rose"
+                    | "minecraft:sunflower"
+                    | "minecraft:lilac"
+                    | "minecraft:rose_bush"
+                    | "minecraft:peony"
+                    | "minecraft:torchflower"
+                    | "minecraft:pitcher_plant"
+                    | "minecraft:wildflowers"
+                    | "minecraft:pink_petals"
+                    | "minecraft:spore_blossom"
+                    | "minecraft:flowering_azalea"
+                    | "minecraft:azalea"
+                    | "minecraft:wheat"
+                    | "minecraft:carrots"
+                    | "minecraft:potatoes"
+                    | "minecraft:beetroots"
+                    | "minecraft:nether_wart"
+                    | "minecraft:torchflower_crop"
+                    | "minecraft:pitcher_crop"
+                    | "minecraft:melon_stem"
+                    | "minecraft:attached_melon_stem"
+                    | "minecraft:pumpkin_stem"
+                    | "minecraft:attached_pumpkin_stem"
+                    | "minecraft:sweet_berry_bush"
+                    | "minecraft:sugar_cane"
+                    | "minecraft:cocoa"
+                    | "minecraft:kelp"
+                    | "minecraft:kelp_plant"
+                    | "minecraft:vine"
+                    | "minecraft:cave_vines"
+                    | "minecraft:cave_vines_plant"
+                    | "minecraft:weeping_vines"
+                    | "minecraft:weeping_vines_plant"
+                    | "minecraft:twisting_vines"
+                    | "minecraft:twisting_vines_plant"
+                    | "minecraft:big_dripleaf"
+                    | "minecraft:big_dripleaf_stem"
+                    | "minecraft:small_dripleaf"
+                    | "minecraft:lily_pad"
+                    | "minecraft:hanging_roots"
+                    | "minecraft:mangrove_propagule"
+                    | "minecraft:pale_hanging_moss"
+                    | "minecraft:bush"
+                    | "minecraft:firefly_bush"
+                    | "minecraft:dead_bush"
+                    | "minecraft:leaf_litter"
+                    | "minecraft:oak_sapling"
+                    | "minecraft:spruce_sapling"
+                    | "minecraft:birch_sapling"
+                    | "minecraft:jungle_sapling"
+                    | "minecraft:acacia_sapling"
+                    | "minecraft:dark_oak_sapling"
+                    | "minecraft:cherry_sapling"
+                    | "minecraft:pale_oak_sapling"
+            );
+        let authored = sprite
+            .material
+            .as_ref()
+            .is_some_and(crate::labpbr::Material::has_specular);
+        (complete_sheet || plant) && sprite.has_subsurface() || plant && !authored
     }
     #[cfg(test)]
     pub fn refresh_contact_capability(&mut self) {
@@ -899,7 +982,7 @@ fn emit_source(
 ) {
     let layer = crate::surfaces::flags(state, q);
     let emission = crate::surfaces::emission(catalog, state, q, two_sided);
-    let material_thin = catalog.material_thin(complete_sheet, q);
+    let material_thin = catalog.material_thin(state, complete_sheet, q);
     if material_thin || emission != prime_scene::surface::Emission::default() {
         let mut face =
             prime_scene::surface::SurfaceFace::from_quad(crate::surfaces::closed(state, q, offset));

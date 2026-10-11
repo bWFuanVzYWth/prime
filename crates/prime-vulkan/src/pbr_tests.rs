@@ -154,8 +154,12 @@ fn gpu_labpbr_translation_preserves_codes_endpoints_and_defaults() {
         );
         close(
             f32::from_bits(words[11]),
-            if has_specular && !metal && case[2] & 4 != 0 {
-                f32::from(subsurface) / 190.0
+            if !metal && case[2] & 4 != 0 {
+                if has_specular {
+                    f32::from(subsurface) / 190.0
+                } else {
+                    0.5
+                }
             } else {
                 0.0
             },
@@ -386,8 +390,12 @@ fn gpu_full_sss_requires_cpu_thin_proof_and_preserves_path_medium() {
         let specular = case[1].to_le_bytes();
         let thin = proven_thin;
         let conductor = authored && (231..=239).contains(&specular[1]);
-        let subsurface = if authored && !conductor && thin {
-            f32::from(specular[2]) / 190.0
+        let subsurface = if !conductor && thin {
+            if authored {
+                f32::from(specular[2]) / 190.0
+            } else {
+                0.5
+            }
         } else {
             0.0
         };

@@ -178,6 +178,9 @@ impl Material {
     pub fn emission_maximum(&self) -> Option<f32> {
         self.emission
     }
+    pub fn has_specular(&self) -> bool {
+        self.specular.is_some()
+    }
     pub fn has_subsurface(&self) -> bool {
         self.subsurface
     }
