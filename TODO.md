@@ -25,7 +25,7 @@
 | --- | --- | --- | --- |
 | 实时重建与帧生成：部分接入 | `RealtimeRenderer` / reconstruction 的 DLSS RR、NRD + FSR、Streamline FG/PCL/Reflex；直接 NGX Responsivity 输入 | Streamline DLSS RR preset F、刚性前态、PSR guides、interposer 与 FG 输入/Present；安全失败使用软件空间降噪，预算候选保留显式代理 | NRD/FSR 和 Responsivity 尚未接入；FG呈现验收已关闭，SDK同步仍开放；空间滤波按PT-021临时hack管理 |
 | 独立轻量 PT：不移植 | 旧 `LambertRayTracingPipeline` 已实际实现 | 本项目保持朴素 PT / ReSTIR PT | 用户明确不移植，移出后续候选；不恢复旧轻量透明规则 |
-| 材质与闭包：部分接入 | 旧生产compact Full支持子域及LabPBR翻译 | 当前仅Full，Lite/厚SSS近似已删除；CPU证明薄片SSS，厚/未知回退普通漫反射 | 厚SSS明确拒绝支持；旧compact foliage未移植，来源/数学扩展单独建立合同 |
+| 材质与闭包：部分接入 | 旧生产compact Full支持子域及LabPBR翻译 | 当前仅Full，Lite/厚SSS近似已删除；CPU证明薄片SSS及显式植物薄壁近似，其他厚/未知回退普通漫反射 | 厚SSS明确拒绝支持；旧compact foliage未移植，来源/数学扩展单独建立合同 |
 | 颜色与法线：部分接入 | 真实源颜色后统一 EOTF；作者顶点法线重心插值/逆转置；动态纹理消费实际 sampler | 已有未照明颜色、标准 sprite mip/动画与颜色管理；一般几何 DTO 不含作者法线，一般动态纹理 sampler 语义未完整转录 | 优先补真实 authored normal 来源及 BSDF/RR 消费；按来源补 filter/address/mip，不能把 sprite 验证外推全部动态纹理 |
 | 天空与显示：主体已接入 | 星图、曝光 histogram/适应、材质分类/albedo confidence、HDR 与物理大气；手动 aerosol/altitude offset | NASA BC6H 星图、曝光主算法、scRGB/HUD 与固定大气已移植；meter 固定 confidence=0，大气没有旧手动密度/高度参数 | albedo 校正与手动大气控制未移植；实际显示器/游戏验收另做，见[显示合同](docs/display.md) |
 | 场景与寿命：已重设计 | Java cluster/异步编译、退休、BLAS 压缩、上传池；GPU 几何展开与索引 BLAS | Rust 增量源/实例、同步 cell 预算、直接 quad、上传/AS 池；压缩与空 AS 页归还已接入，GPU 展开未接入 | 保持真实提交接受/timeline 合同；GPU 展开及其他池策略按完整成本决定，不复刻旧 encoder 接收时点和 Java 调度 |
@@ -35,6 +35,8 @@
 | 动态光与新效果 | 动态发光采样、月亮、云、通用体积与 LOD 在旧项目也仍属后续工作 | 尚未完整接入 | 单独立项并声明数学/寿命合同，不标为旧能力恢复 |
 
 ### 优先推进：源兼容与实时重建
+
+- [ ] 冰面、信标光柱等部分半透明表面的降噪问题：按用户报告单独跟踪，区分光柱材质/阴影语义与重建问题；固定场景检查 RR 与软件降噪、主/反射 guides 和时间稳定性。本轮不处理降噪。
 
 - [x] 关闭既有 ReSTIR 质量验收：闪烁、滚动、暗处沸腾及 RR-off 蠕动/结构化伪影按用户确认关闭 PT-013/PT-014/PT-016/PT-018；不保留旧根因假说为当前缺陷。
 - [ ] 新报告萤火虫（PT-019）与水下收敛明显振荡（PT-020）：分别保留实际序列、场景和预算，不将二者写成已确认同一根因。
@@ -57,7 +59,7 @@
 
 - [x] 删除LitePBR与厚SSS近似及同源冗余对拍；CPU翻译/清洗LabPBR强度，完整source证明薄片，主/第二层独立许可。同sprite厚薄来源共用纹理；厚/未知回退普通Full漫反射，真正薄壁保留Full数学。
 - [x] 生产 opaque/conductor、薄材质 SSS 与 solid/thin dielectric 切换至旧 Full 支持子域，锁定独立作者 transmission-GGX 能量表与数学来源；不保留Lite库或厚SSS扩展。加入 eta-aware RR 与默认 12 顶点预算，末预算保留发光和 NEE，详情见 [PT 设计](docs/pt-state-design.md)。这不表示完整 OpenPBR 参数 API 或全部真实资源包已验收。
-- [ ] 为Full foliage建立真实源拓扑与数学合同，不用树叶/草类型或LabPBR字节猜薄壁；当前厚SSS明确不支持并回退漫反射。AO/height用途另定，不默认恢复voxel displacement。
+- [ ] 为Full foliage建立真实源拓扑与数学合同；当前按用户要求恢复的植物50%缺图薄壁SSS属于显式艺术近似，不声明完整植物体积物理正确；其他厚SSS继续回退漫反射。AO/height用途另定，不默认恢复voxel displacement。
 - [ ] 扩展Full支持子域科学验证与资源包覆盖：sample/evaluate/PDF、能量、颜色、粗糙/掠射/薄壁、IOR、法线与发光分开对照独立参考；厚SSS不是待接入近似。实际两版资源重载、atlas与冻结及原生1080p整帧成本保持独立，不由底层测试推断性能。
 - [x] 移植旧星图资产、夜空方向与椭圆过滤，直接 RR 相机天空在重建后按真实前景 coverage 合成，间接环境仍读取星图；许可、压缩/解压产物及实际 GPU 前景/地面行为已验证。无需重复实现旧算法。
 - [ ] 补齐维度/天气环境真实源字段与失效，手动验收星图方向/反射、不同资源包与冻结；月亮、云和通用体积仍是独立新增能力。

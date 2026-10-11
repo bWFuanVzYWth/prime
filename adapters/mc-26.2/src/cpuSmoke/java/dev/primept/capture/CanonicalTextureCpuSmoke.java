@@ -41,6 +41,7 @@ final class CanonicalTextureCpuSmoke {
         DynamicTextures.releaseSources();
         check(!dev.primept.PrimeClient.captureResourcesEnabled(),
               "Actual production capture gate disabled in vanilla");
+        fonts();
         try (var manager = new TextureManager(null)) {
             var missing =
                     (DynamicTexture)manager.getTexture(MissingTextureAtlasSprite.getLocation());
@@ -205,13 +206,108 @@ final class CanonicalTextureCpuSmoke {
                   "Diagnostic names actual label and source kind: " + expected);
         }
     }
+    private static void fonts() throws Exception {
+        for (String name :
+             new String[] {"com.mojang.blaze3d.font.TrueTypeGlyphProvider$Glyph$1",
+                           "net.minecraft.client.gui.font.providers.BitmapProvider$Glyph$1",
+                           "net.minecraft.client.gui.font.providers.BitmapProvider$ImageDataHolder",
+                           "net.minecraft.client.gui.font.providers.UnihexProvider$Glyph$2"})
+            Class.forName(name); // Apply each real upload Mixin without initializing a GPU.
+        var types = net.minecraft.client.gui.font.GlyphRenderTypes.createForColorTexture(
+                Identifier.fromNamespaceAndPath("primept", "font-test"));
+        try (var atlas = new net.minecraft.client.gui.font.FontTexture(
+                     () -> "font test", types, true)) {
+            var stitcher = new net.minecraft.client.gui.font.GlyphStitcher(
+                    null, Identifier.fromNamespaceAndPath("primept", "font-test")) {
+                @Override
+                public net.minecraft.client.gui.font.glyphs.BakedSheetGlyph stitch(
+                        com.mojang.blaze3d.font.GlyphInfo info,
+                        com.mojang.blaze3d.font.GlyphBitmap bitmap) {
+                    return atlas.add(info, bitmap);
+                }
+            };
+            var white = net.minecraft.client.gui.font.glyphs.SpecialGlyphs.WHITE;
+            int before = uploads;
+            white.bake(stitcher);
+            check(uploads == before + 1, "Actual glyph callback/upload executes once");
+            int id = DynamicTextures.use(atlas.getTexture());
+            fontSnapshot(atlas.getTexture());
+            net.minecraft.client.gui.font.glyphs.SpecialGlyphs.MISSING.bake(stitcher);
+            check(DynamicTextures.use(atlas.getTexture()) == id,
+                  "Glyph append retains texture identity");
+            fontSnapshot(atlas.getTexture());
+            Class<?> lineType = Class.forName(
+                    "net.minecraft.client.gui.font.providers.UnihexProvider$LineData");
+            Class<?> contentsType = Class.forName(
+                    "net.minecraft.client.gui.font.providers.UnihexProvider$IntContents");
+            var contentsConstructor = contentsType.getDeclaredConstructor(int[].class, int.class);
+            contentsConstructor.setAccessible(true);
+            int[] lines = new int[16];
+            Arrays.fill(lines, 0xf0f00000);
+            Object contents = contentsConstructor.newInstance(lines, 32);
+            var glyphConstructor =
+                    Class.forName("net.minecraft.client.gui.font.providers.UnihexProvider$Glyph")
+                            .getDeclaredConstructor(lineType, int.class, int.class);
+            glyphConstructor.setAccessible(true);
+            var glyph = (com.mojang.blaze3d.font.UnbakedGlyph)glyphConstructor.newInstance(contents,
+                                                                                           0, 7);
+            before = uploads;
+            glyph.bake(new com.mojang.blaze3d.font.UnbakedGlyph.Stitcher() {
+                public net.minecraft.client.gui.font.glyphs.BakedGlyph stitch(
+                        com.mojang.blaze3d.font.GlyphInfo info,
+                        com.mojang.blaze3d.font.GlyphBitmap bitmap) {
+                    return atlas.add(info, bitmap);
+                }
+                public net.minecraft.client.gui.font.glyphs.BakedGlyph getMissing() {
+                    return null;
+                }
+            });
+            check(uploads == before + 1, "Actual Unihex upload is captured exactly once");
+            check(DynamicTextures.use(atlas.getTexture()) == id,
+                  "Unihex keeps atlas texture identity");
+            fontSnapshot(atlas.getTexture());
+            var needed = (java.util.Set<?>)field(DynamicTextures.class, "NEEDED").get(null);
+            check(needed.size() == 1, "Same-frame font revisions publish one latest identity");
+            DynamicTextures.releaseSources();
+            DynamicTextures.use(atlas.getTexture());
+            fontSnapshot(atlas.getTexture());
+        }
+        var gray = new FakeTexture(7, "gray font", GpuFormat.R8_UNORM, 4, 4, 1, 1);
+        try (var image = new NativeImage(NativeImage.Format.LUMINANCE, 2, 2, true)) {
+            image.getPixelBytes()
+                    .put(0, (byte)0)
+                    .put(1, (byte)64)
+                    .put(2, (byte)128)
+                    .put(3, (byte)255);
+            FontGlyphSources.image(gray, image, 0, 0, 1, 1);
+            DynamicTextures.use(gray);
+            var map = (java.util.Map<?, ?>)field(DynamicTextures.class, "SOURCES").get(null);
+            Object snapshot = map.get(gray);
+            byte[] rgba = (byte[])field(snapshot.getClass(), "rgba").get(snapshot);
+            check(rgba[(1 * 4 + 1) * 4] == (byte)255 && rgba[(1 * 4 + 2) * 4 + 3] == 64 &&
+                          rgba[(2 * 4 + 1) * 4 + 3] == (byte)128,
+                  "R8 source is white glyph color and exact coverage alpha");
+        }
+        DynamicTextures.release(gray);
+    }
+    private static void fontSnapshot(GpuTexture texture) throws Exception {
+        var map = (java.util.Map<?, ?>)field(DynamicTextures.class, "SOURCES").get(null);
+        Object snapshot = map.get(texture);
+        check(Arrays.equals((byte[])field(snapshot.getClass(), "rgba").get(snapshot),
+                            UPLOADED.get(texture)),
+              "CPU glyph atlas matches actual uploaded patches");
+    }
     private static void uploaded(Object[] args) {
         GpuTexture texture = (GpuTexture)args[0];
-        ByteBuffer pixels =
-                args[1] instanceof NativeImage image ? image.getPixelBytes() : (ByteBuffer)args[1];
-        byte[] copy = new byte[texture.getWidth(0) * texture.getHeight(0) * 4];
-        pixels.get(0, copy);
-        UPLOADED.put(texture, copy);
+        NativeImage image = args[1] instanceof NativeImage value ? value : null;
+        ByteBuffer pixels = image == null ? (ByteBuffer)args[1] : image.getPixelBytes();
+        int width = image == null ? (int)args[6] : image.getWidth();
+        int height = image == null ? (int)args[7] : image.getHeight();
+        int x = args.length >= 6 ? (int)args[4] : 0, y = args.length >= 6 ? (int)args[5] : 0;
+        byte[] copy = UPLOADED.computeIfAbsent(texture,
+                                               t -> new byte[t.getWidth(0) * t.getHeight(0) * 4]);
+        for (int row = 0; row < height; ++row)
+            pixels.get(row * width * 4, copy, ((y + row) * texture.getWidth(0) + x) * 4, width * 4);
         ++uploads;
     }
     private static Object fakeDevice() {
@@ -247,7 +343,12 @@ final class CanonicalTextureCpuSmoke {
         }
         @Override
         public com.mojang.blaze3d.textures.GpuTextureView createTextureView(GpuTexture texture) {
-            return null;
+            return new com.mojang.blaze3d.textures.GpuTextureView(texture, 0, 1) {
+                public void close() {}
+                public boolean isClosed() {
+                    return false;
+                }
+            };
         }
         @Override
         public com.mojang.blaze3d.textures.GpuSampler

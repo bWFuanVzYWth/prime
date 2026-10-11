@@ -24,6 +24,8 @@ bool traceOcclusionRange(TraceScene resources, float3 origin, float3 direction, 
             SurfaceRecord tri =
                     loadSurface(resources, query.CandidateInstanceID(),
                                 query.CandidateGeometryIndex(), query.CandidatePrimitiveIndex());
+            if ((tri.triangle.flags & 8u) != 0u)
+                continue;
             tri = selectMaterial(resources, tri, query.CandidateTriangleFrontFace(),
                                  query.CandidateTriangleBarycentrics(),
                                  origin + direction * query.CandidateTriangleRayT(), coverageSeed);
@@ -77,6 +79,8 @@ public float3 traceTransmittance(TraceScene resources, float3 origin, float3 dir
         SurfaceRecord record =
                 loadSurface(resources, query.CandidateInstanceID(), query.CandidateGeometryIndex(),
                             query.CandidatePrimitiveIndex());
+        if ((record.triangle.flags & 8u) != 0u)
+            continue;
         float distance = query.CandidateTriangleRayT();
         bool front = query.CandidateTriangleFrontFace();
         float2 bary = query.CandidateTriangleBarycentrics();
@@ -129,6 +133,8 @@ public float traceBlockerDistance(TraceScene resources, float3 origin, float3 di
             SurfaceRecord tri =
                     loadSurface(resources, query.CandidateInstanceID(),
                                 query.CandidateGeometryIndex(), query.CandidatePrimitiveIndex());
+            if ((tri.triangle.flags & 8u) != 0u)
+                continue;
             tri = selectMaterial(resources, tri, query.CandidateTriangleFrontFace(),
                                  query.CandidateTriangleBarycentrics(),
                                  origin + direction * query.CandidateTriangleRayT(), 0);

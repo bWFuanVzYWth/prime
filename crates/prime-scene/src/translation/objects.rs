@@ -455,7 +455,8 @@ fn update_raw_buckets(
         if center
             .iter()
             .any(|v| !v.is_finite() || v.abs() > 33_000_000.0)
-            || triangle.flags > 2
+            || triangle.flags & !15 != 0
+            || triangle.flags & 3 == 3
         {
             return Err("Invalid raw dynamic geometry".into());
         }

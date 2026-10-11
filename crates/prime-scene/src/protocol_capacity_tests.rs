@@ -163,3 +163,15 @@ fn completed_source_watermarks_bound_history_without_permanent_identity_limits()
     }
     assert!(source.section_completed.0 > 262_144);
 }
+
+#[test]
+fn source_material_bits_keep_coverage_and_reject_unknown_bits() {
+    for coverage in 0..3 {
+        for semantic in [0, 4, 8, 12] {
+            assert!(validate_flags(coverage | semantic).is_ok());
+        }
+    }
+    for flags in [3, 7, 11, 15, 16, u32::MAX] {
+        assert!(validate_flags(flags).is_err());
+    }
+}

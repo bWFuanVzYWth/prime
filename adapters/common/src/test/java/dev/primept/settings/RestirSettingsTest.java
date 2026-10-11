@@ -120,12 +120,13 @@ final class RestirSettingsTest {
                                        .withIgnoreGlobalHistoryResets(version != 8)
                                        .with(RenderSettings.Control.BOUNCES, 32)
                                        .with(RenderSettings.Control.EXPOSURE_EV, -8);
-                String legacy = SettingsFile.encode(expected)
-                                        .replace("version=13", "version=" + version)
-                                        .replace("path_tracing=true\nrealtime_renderer=restir_pt",
-                                                 "renderer=restir_pt")
-                                        .replaceAll("(?m)^restir_pt\\.[^\\n]*\\n", "") +
-                                "diagnostics.restir_spatial_only=" + spatialOnly + "\n";
+                String legacy =
+                        SettingsFile.encode(expected)
+                                .replace("version=" + RenderSettings.VERSION, "version=" + version)
+                                .replace("path_tracing=true\nrealtime_renderer=restir_pt",
+                                         "renderer=restir_pt")
+                                .replaceAll("(?m)^restir_pt\\.[^\\n]*\\n", "") +
+                        "diagnostics.restir_spatial_only=" + spatialOnly + "\n";
                 if (version <= 9)
                     legacy = legacy.replace("diagnostics.native_noisy_output=true",
                                             "render.ray_reconstruction=false");

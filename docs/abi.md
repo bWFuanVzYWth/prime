@@ -122,7 +122,7 @@ Rust执行zoom、颜色规则、halo去重、整数前缀和及原版整数除�
 
 ## 公共顶点与材质语义
 
-各源 span 显式给出顶点数量、stride 和字段 offset；数据为恰好 `vertex_count*stride` 字节。topology=3 表示三角形、4 表示四边形；material=0 opaque、1 alpha cutout、2 stochastic alpha coverage，其他值拒绝。
+各源 span 显式给出顶点数量、stride 和字段 offset；数据为恰好 `vertex_count*stride` 字节。topology=3 表示三角形、4 表示四边形；material低2位=0 opaque、1 alpha cutout、2 stochastic alpha coverage，3拒绝；bit2声明源颜色发光，bit3声明不阻挡阴影射线。其余位拒绝。当前信标光柱使用bit2/bit3，覆盖模式仍取实际宿主pipeline。声明不扩大原版地形layer范围。
 
 Position 为 f32×3，UV 为 f32×2。局部原型和显式原始网格可输出 **stride24、position0、color12、uv16**；当前地形/流体生产通路使用上文 MC 源批次。RGBA8 按 R/G/B/A 字节顺序保存作者颜色与源 tint 的编码域组合，排除原版 AO/方向明暗和 UV2 光照。source layer 使用公共协议常量 opaque=0、cutout=1、translucent=2，不传 MC enum ordinal。显式 stride/offset 解码器也支持 BLOCK28 等合法源布局，并有行为回归测试；这不表示兼容旧 ABI。quads 在 Rust 展开为 `(0,1,2), (2,3,0)`。
 

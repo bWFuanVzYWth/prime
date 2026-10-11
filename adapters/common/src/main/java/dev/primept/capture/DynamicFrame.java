@@ -180,7 +180,8 @@ public final class DynamicFrame implements AutoCloseable {
                           int colorOffset, int uvOffset) {
         if (spanStart >= 0)
             throw new IllegalStateException("Dynamic span is already open");
-        if (flags < 0 || flags > 2 || (topology != 1 && topology != 3 && topology != 4) ||
+        if ((flags & ~15) != 0 || (flags & 3) == 3 ||
+            (topology != 1 && topology != 3 && topology != 4) ||
             (topology == 1 &&
              (stride != 52 || positionOffset != 0 || colorOffset != 48 || uvOffset != 32)) ||
             stride < 24 || stride > 256 || positionOffset < 0 || positionOffset > stride - 12 ||

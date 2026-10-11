@@ -117,12 +117,16 @@ public final class DynamicTextures {
         if (!blockAtlas && previous == null && nextId >= 0x40000000)
             throw new IllegalStateException("Dynamic texture identity space exhausted");
         int id = blockAtlas ? 1 : previous == null ? nextId++ : previous.id;
-        SOURCES.put(texture, new Texture(id, width, height, rgba));
+        Texture next = new Texture(id, width, height, rgba);
+        SOURCES.put(texture, next);
+        if (previous != null && NEEDED.remove(previous))
+            NEEDED.add(next);
         retainedBytes = newTotal;
     }
 
     public static void release(GpuTexture texture) {
         CanonicalTextureSources.release(texture);
+        FontGlyphSources.release(texture);
         Texture previous = SOURCES.remove(texture);
         if (previous != null) {
             retainedBytes -= previous.rgba.length;
@@ -141,6 +145,7 @@ public final class DynamicTextures {
         NEEDED.clear();
     }
     public static void releaseSources() {
+        FontGlyphSources.invalidate();
         SOURCES.clear();
         NEEDED.clear();
         retainedBytes = 0;
@@ -160,7 +165,11 @@ public final class DynamicTextures {
         NEEDED.clear();
         retainedBytes = 0;
     }
+    public static void font(GpuTexture texture, int width, int height, byte[] rgba) {
+        put(texture, width, height, rgba, false);
+    }
     public static int use(GpuTexture texture) {
+        FontGlyphSources.publish(texture);
         Texture source = SOURCES.get(texture);
         if (source == null) {
             NativeImage canonical = CanonicalTextureSources.pixels(texture);

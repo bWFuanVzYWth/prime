@@ -215,6 +215,8 @@ typedef struct PrimeTextureRetire {
 
 /* Source primitive layout, never expanded by Java. Vertex bytes are the actual
  * caller-authored layout including declared stride; no C padding is compared. */
+/* flags: low two bits coverage (0 opaque, 1 cutout, 2 alpha); bit2 source-colored
+ * emission; bit3 no shadow-ray obstruction. Other bits and coverage=3 are invalid. */
 typedef struct PrimeMeshSpan {
     uint32_t texture_id;
     uint32_t flags;

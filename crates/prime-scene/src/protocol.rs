@@ -140,8 +140,10 @@ fn validate_affine(transform: [f32; 12]) -> Result<(), String> {
 }
 
 fn validate_flags(flags: u32) -> Result<(), String> {
-    if flags > 2 {
-        return Err("material flags must be opaque (0), cutout (1), or alpha blend (2)".into());
+    if flags & !15 != 0 || flags & 3 == 3 {
+        return Err(
+            "material flags require coverage 0..2 and supported emission/no-shadow bits".into(),
+        );
     }
     Ok(())
 }

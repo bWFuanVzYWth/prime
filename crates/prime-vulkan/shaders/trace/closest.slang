@@ -280,6 +280,8 @@ float3 mappedNormal(SurfaceRecord record, SourceSample source, float3 geometric,
 }
 float3 sourceEmissionResolved(SurfaceRecord record, SourceSample source, bool front,
                               uint materialFlags, float emissionSample) {
+    if ((record.triangle.flags & 4u) != 0u)
+        return decodeSrgb(saturate(source.color.rgb));
     if (!front && (record.identity.w & 2) == 0)
         return float3(0);
     if ((materialFlags & 4) != 0) {
@@ -292,7 +294,7 @@ float3 sourceEmissionResolved(SurfaceRecord record, SourceSample source, bool fr
 public float3 sourceEmission(TraceScene resources, SurfaceRecord record, SourceSample source,
                              bool front) {
     // Generic emitter callers do not have the surface's filtered material sample.
-    if (!front && (record.identity.w & 2) == 0)
+    if (!front && (record.identity.w & 2) == 0 && (record.triangle.flags & 4u) == 0u)
         return float3(0);
     MaterialSample material = materialSource(resources, record.triangle.texture, source.uv);
     float emissionSample =
@@ -381,10 +383,10 @@ public bool acceptsCoverage(TraceScene resources, SurfaceRecord record, float2 b
     if ((record.identity.w & 128) != 0)
         return true;
     Triangle tri = record.triangle;
-    if (tri.flags == 0)
+    if ((tri.flags & 3u) == 0)
         return true;
     float alpha = saturate(sourceColor(resources, record, bary).a);
-    if (tri.flags == 1)
+    if ((tri.flags & 3u) == 1)
         return alpha >= 0.1;
     // Alpha blend is stochastic coverage, not refraction/absorption. Quantized
     // coincident hits share one event, including emitted front/back fluid faces.

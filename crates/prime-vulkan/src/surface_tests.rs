@@ -2337,3 +2337,98 @@ fn compound_emitters_sample_the_visible_layer_without_leaking_hidden_emission() 
         }
     }
 }
+
+#[cfg(feature = "shader-tests")]
+#[test]
+#[ignore = "windowless source-colored beam emission and shadow-ray exclusion"]
+fn gpu_beam_emission_preserves_camera_coverage_and_does_not_block_shadow_rays() {
+    fn quad(z: f32, color: [f32; 4], flags: u32) -> Vec<prime_scene::Triangle> {
+        let positions = [[0., 0., z], [1., 0., z], [1., 1., z], [0., 1., z]];
+        [[0, 1, 2], [2, 3, 0]]
+            .map(|indices| prime_scene::Triangle {
+                positions: indices.map(|i| positions[i]),
+                colors: [color; 3],
+                uvs: [[0.; 2]; 3],
+                texture_id: 0,
+                flags,
+            })
+            .to_vec()
+    }
+    let context = Context::new().unwrap();
+    for blocker in [false, true] {
+        for (flags, alpha, visible) in [
+            (12, 1., true),
+            (14, 1., true),
+            (12, 0., true),
+            (14, 0., false),
+        ] {
+            let mut scene = Scene {
+                revision: 1,
+                ..Default::default()
+            };
+            let mut triangles = quad(1., [0.5, 0.25, 0.75, alpha], flags);
+            if blocker {
+                triangles.extend(quad(2., [1.; 4], 0));
+            }
+            scene.dynamic.revision = 1;
+            scene.dynamic.triangles = Arc::new(triangles);
+            let mut geometry = Geometry::new(
+                &context,
+                (&scene).into(),
+                Arc::new(prime_scene::workers::CpuWorkers::new(1).unwrap()),
+            )
+            .unwrap();
+            geometry
+                .prepare_dynamic(
+                    &context,
+                    &scene,
+                    &InstanceScene::default(),
+                    0,
+                    &mut cpu_profile::FrameCpu::default(),
+                )
+                .unwrap();
+            let inputs = [0.25, 0.25, 0., 4., 0., 0., 1., 1., 0., 0., 0., 0.].map(f32::to_bits);
+            let output = crate::shader_tests::run(
+                &context,
+                prime_shader_tests::optics(),
+                &inputs,
+                12,
+                [5, 1],
+                Some(&geometry),
+            );
+            let values: Vec<_> = output.into_iter().map(f32::from_bits).collect();
+            assert_eq!(
+                values[3],
+                if visible || blocker { 1. } else { 0. },
+                "camera coverage preserved"
+            );
+            for (value, encoded) in values[..3].iter().zip([0.5_f32, 0.25, 0.75]) {
+                let encoded = if visible {
+                    (encoded * 255.).round() / 255.
+                } else {
+                    0.
+                };
+                let expected = if encoded <= 0.04045 {
+                    encoded / 12.92
+                } else {
+                    ((encoded + 0.055) / 1.055).powf(2.4)
+                };
+                assert!(
+                    (value - expected).abs() < 2e-6,
+                    "source-colored emission: actual={value}, expected={expected}"
+                );
+            }
+            assert_eq!(&values[4..7], &[if blocker { 0. } else { 1. }; 3]);
+            assert_eq!(
+                values[7],
+                if blocker { 1. } else { 0. },
+                "beam skipped; real wall preserved"
+            );
+            assert_eq!(
+                values[8],
+                if blocker { 2. } else { 4. },
+                "atmosphere shadow skips beam"
+            );
+        }
+    }
+}

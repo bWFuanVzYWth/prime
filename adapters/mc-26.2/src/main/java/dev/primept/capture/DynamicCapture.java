@@ -93,8 +93,7 @@ public final class DynamicCapture {
         String pipeline = type.pipeline().getLocation().getPath();
         // Screen-space overlays, line geometry and special shader effects are not surface materials.
         if (pipeline.contains("glint") || pipeline.contains("shadow") ||
-            pipeline.contains("text") || pipeline.contains("outline") ||
-            pipeline.contains("water_mask"))
+            pipeline.contains("outline") || pipeline.contains("water_mask"))
             return;
         boolean timed = Diagnostics.enabled() && PROFILE;
         long captureStart = timed ? System.nanoTime() : 0;
@@ -111,6 +110,10 @@ public final class DynamicCapture {
                         : type.pipeline().getShaderDefines().values().containsKey("ALPHA_CUTOUT")
                                 ? 1
                                 : 0;
+            if (pipeline.startsWith("pipeline/beacon_beam_"))
+                flags |= 4 | 8; // alpha coverage, source-colored emission, no shadow.
+            if (pipeline.startsWith("pipeline/text"))
+                flags = 1; // glyph alpha cutout; world text retains source color and pose.
             DRAWS.put(draw, new Material(texture, flags, false,
                                          type.primitiveTopology().name().equals("QUADS")));
         } catch (RuntimeException exception) {

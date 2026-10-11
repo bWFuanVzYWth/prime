@@ -92,3 +92,9 @@ owner 使用弱身份且引用值不反向持有源；新旧帧使用集合及 R
 双版本 Fabric CPU 夹具在游戏 main 前退出，实际读取 MC palette 和 baked quad，经 FFM 发布64段完整单元；验证空闲零请求、重复 dirty 合并、相同状态零编译、solid→air，以及未知模型不执行回调。Rust 读取两版夹具检查位置、UV、材质、颜色和完整格可用性，另测窗口变化、负坐标、halo、坏包与生命周期。新的差分入口实际调用两版 SectionCompiler（含 Fabric/Indigo），关闭 AO、统一光栅明暗。未改变的语义严格对比三角形多重集合；流体等已声明修复用独立表面查询比较位置、UV/颜色和占据，不能要求原版光栅背面数量不变。增量、原版源字段、两侧关系、光学和 GPU 消费分别验证，具体容限与范围见[测试契约](guides/section-tests.md)和[表面编译](surface-compiler.md)。当前夹具未加载完整原版资源包，不代表任意自定义模型/回调兼容。
 
 真实游戏画面、编辑响应和帧率由用户手动验收。性能基线为原生1920×1080，固定场景和预算；CPU测试不能证明FPS或完整模组兼容。命令见 [CONTRIBUTING](../CONTRIBUTING.md)。
+
+## 世界文字与信标光柱
+
+世界text pipeline保留实际字形mesh的颜色、UV、姿态和排序来源，使用字形alpha cutout。Bitmap、Unihex、TrueType与SpecialGlyphs上传在真实调用处转录像素，不重复调用glyph callback。CPU持有自有字体图集镜像，R8字形转为白RGB/覆盖alpha；只在图集revision变化时发布同一纹理身份的新快照，释放/资源撤销后重新发布。自定义glyph上传通路及特殊shader文字效果不声明已支持。
+
+标准信标opaque/translucent pipeline沿用真实alpha覆盖，声明双面源颜色发光、不阻挡任何NEE阴影射线；相机和续接射线仍消费覆盖。光柱辐射亮度取未照明纹理×顶点色在线性BT.709的单位发光，不推断绝对物理光强，不新增直接光采样器。冰面、信标光柱等半透明重建问题独立列入TODO，不由这一材质修正声称解决。

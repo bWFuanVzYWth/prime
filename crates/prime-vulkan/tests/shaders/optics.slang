@@ -19,6 +19,18 @@ import "pbr/vertex.slang";
     TraceScene resources = {acceleration, textures, texels, instanceMaterials, staticTrianglePages};
     float4 origin = inputs[i * 3], direction = inputs[i * 3 + 1];
     float4 medium = float4(direction.w, inputs[i * 3 + 2].xyz);
+    if (config.x == 5) {
+        SurfaceHit hit = traceClosest(resources, origin.xyz, direction.xyz, 19);
+        float4 terminal;
+        float3 visibility = traceTransmittance(resources, origin.xyz, direction.xyz, 19, origin.w,
+                                               medium, terminal);
+        outputs[i * 3] = float4(hit.found ? hit.emission : float3(0), hit.found ? 1.0 : 0.0);
+        outputs[i * 3 + 1] = float4(
+                visibility, traceOcclusion(resources, origin.xyz, direction.xyz, 19) ? 1.0 : 0.0);
+        outputs[i * 3 + 2] = float4(
+                traceBlockerDistance(resources, origin.xyz, direction.xyz, origin.w), terminal.xyz);
+        return;
+    }
     if (config.x == 4) {
         // Query the resident packed records, including word43 and the selected coating.
         // Only material adaptation is probed here; Full BSDF tests own the actual energy LUTs.

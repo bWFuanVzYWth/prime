@@ -248,8 +248,8 @@ final class SettingsTest {
                 RenderSettings.Control.STARS, RenderSettings.Control.AUTO_EXPOSURE,
                 RenderSettings.Control.HDR, RenderSettings.Control.HDR_WHITE,
                 RenderSettings.Control.FRAME_GENERATION};
-        int[] offsets = {76, 80, 84, 88, 92};
-        int[] expectedDefaults = {100, 75, 0, 0, 0};
+        int[] offsets = {80, 84, 88, 92, 96};
+        int[] expectedDefaults = {100, 65, 0, 0, 0};
         var before = settingsBuffer();
         var after = settingsBuffer();
         for (int i = 0; i < controls.length; i++) {
