@@ -1,6 +1,6 @@
-# FFM ABI v17
+# FFM ABI v18
 
-Java 适配器与 Rust 核心作为同一构建产物配套使用。公共 ABI 为17，Minecraft 源 schema 为7，设置文件 schema 为13；版本用于边界拒绝，不承诺不同发布之间的二进制兼容。两版适配器共享同次构建的核心，JAR 和引擎不能混用。
+Java 适配器与 Rust 核心作为同一构建产物配套使用。公共 ABI 为18，Minecraft 源 schema 为7，设置文件 schema 为14；版本用于边界拒绝，不承诺不同发布之间的二进制兼容。两版适配器共享同次构建的核心，JAR 和引擎不能混用。
 
 ## 唯一结构契约与生成
 
@@ -36,7 +36,7 @@ Java 适配器与 Rust 核心作为同一构建产物配套使用。公共 ABI �
 | --- | --- | --- |
 | `PrimeReset` | 16 B | `prime_reset`；world epoch严格增加，清理世界几何/动态状态，保留当前常驻资源代和同一CPU池 |
 | `PrimeFrame` | 96 B | record/render；epoch、f64世界位置、forward/right/up、FOV、输出尺寸、sample index、实际太阳时角 |
-| `PrimeSettings` | 216 B | configure；具名渲染、调度、星图、显示、积分器及 ReSTIR PT 控制 |
+| `PrimeSettings` | 220 B | configure；具名渲染、调度、星图、显示、积分器及 ReSTIR PT 控制 |
 | `PrimeVulkanHost` | 56 B | attach；instance/physical device/device/queue/timeline/family/实际启用capabilities |
 | `PrimeRecordTarget` | 40 B | record；活动command、目标image/view、实际提交serial |
 | `PrimePrepareResources` | 24 B | prepare_resources；活动command与真实提交serial，仅准备设备/全局资源 |
@@ -174,11 +174,11 @@ flags 的 bit0 表示已在这台逻辑设备启用 `VK_EXT_opacity_micromap` �
 
 ## 设置结构与文件 schema
 
-`prime_configure(handle,&settings)` 借用216 B `PrimeSettings`，header使用公共ABI v17，JAR与DLL须配套重建。原有字段位置保持：`native_noisy_output` 位于64字节偏移，1为禁用降噪并使用原生分辨率含噪输出，0为默认允许RR；此字段与旧公共ABI v13的RR布尔语义相反。`light_sampling` 位于96字节偏移，1为功率距离Tree，旧0/2均规范化到Tree，其他值拒绝；生产仅保留Tree，字段迁移不重建管线或重置历史。`integrator` 位于100字节偏移，0为PathTrace、1为RestirPt，其他值拒绝。`ignore_global_history_resets`位于104字节偏移，0为默认关闭、1为忽略显式全局历史重置的诊断，其他值拒绝。`restir_spatial_only`位于108字节偏移，0为默认启用时间复用、1为跳过ReSTIR全部时间重采样阶段，其他值拒绝；不改变空间控制、DLSS RR历史或离线累积。
+`prime_configure(handle,&settings)` 借用220 B `PrimeSettings`，header使用公共ABI v18，JAR与DLL须配套重建。v18新增32字节偏移的`compression_start`，后续字段顺延4字节：`native_noisy_output` 位于68字节偏移，1为禁用降噪并使用原生分辨率含噪输出，0为默认允许RR；此字段与旧公共ABI v13的RR布尔语义相反。`light_sampling` 位于100字节偏移，1为功率距离Tree，旧0/2均规范化到Tree，其他值拒绝；生产仅保留Tree，字段迁移不重建管线或重置历史。`integrator` 位于104字节偏移，0为PathTrace、1为RestirPt，其他值拒绝。`ignore_global_history_resets`位于108字节偏移，0为默认关闭、1为忽略显式全局历史重置的诊断，其他值拒绝。`restir_spatial_only`位于112字节偏移，0为默认启用时间复用、1为跳过ReSTIR全部时间重采样阶段，其他值拒绝；不改变空间控制、DLSS RR历史或离线累积。
 
-其后追加26个4字节ReSTIR控制字段，占用`[112,216)`，最后字段起始偏移为212。完整字段顺序及偏移以头文件、生成的Rust编译断言和Java具名访问器为准，不维护另一份偏移表。Rust边界核验布尔0/1、枚举、整数范围及有限浮点后保存为`RenderSettings.restir`；Java的独立`RestirSettings`在写入同一C结构前执行相同范围校验。历史M上限控制置信计数而非样本年龄；初始路径数、空间开关/邻居数/轮数和配对距离控制实际生成、复用工作及配对资产；随机重投影、重复度降权和解耦着色分别由对应GPU阶段消费。Footprint/roughness阈值与标准差参与路径分类及Hybrid移位，距离阈值保留界面单位、GPU使用值除以100；法线/深度门槛控制空间邻居支持。样本诊断选择输出、重复度或寿命；`restir_rr_*`仅在有实际DLSS RR消费者时控制最终含噪输出去相关，不改变复用reservoir，权重限制不保证严格无偏。默认值、具体范围及资源条件见[ReSTIR PT](restir-pt.md)。这些新控制不参与全局transport重置比较；seed继续遵守原有transport规则。
+其后追加26个4字节ReSTIR控制字段，占用`[116,220)`，最后字段起始偏移为216。完整字段顺序及偏移以头文件、生成的Rust编译断言和Java具名访问器为准，不维护另一份偏移表。Rust边界核验布尔0/1、枚举、整数范围及有限浮点后保存为`RenderSettings.restir`；Java的独立`RestirSettings`在写入同一C结构前执行相同范围校验。历史M上限控制置信计数而非样本年龄；初始路径数、空间开关/邻居数/轮数和配对距离控制实际生成、复用工作及配对资产；随机重投影、重复度降权和解耦着色分别由对应GPU阶段消费。Footprint/roughness阈值与标准差参与路径分类及Hybrid移位，距离阈值保留界面单位、GPU使用值除以100；法线/深度门槛控制空间邻居支持。样本诊断选择输出、重复度或寿命；`restir_rr_*`仅在有实际DLSS RR消费者时控制最终含噪输出去相关，不改变复用reservoir，权重限制不保证严格无偏。默认值、具体范围及资源条件见[ReSTIR PT](restir-pt.md)。这些新控制不参与全局transport重置比较；seed继续遵守原有transport规则。
 
-磁盘`primept.properties`为schema v13，独立保存`path_tracing`启用状态和`realtime_renderer`（仅`path_trace`/`restir_pt`），ReSTIR控制使用`restir_pt.*`，时间复用保存为正向`restir_pt.temporal_reuse`。关闭路径追踪仍保留实时渲染器选择，启用/原版切换由宿主路由；公共C结构的`integrator`在PT启用时使用所选积分器，原版时沿用历史值0。v8–v12的旧`renderer`拆成启用状态和选择；旧`vanilla`迁移为关闭、选择`path_trace`。v11旧`diagnostics.restir_spatial_only`和v12的`restir_pt.spatial_only`取反迁移，v8–v10缺失该诊断时使用时间复用默认true；公共ABI的`restir_spatial_only`继续写入正向时间复用的反值。v8–v11缺少的ReSTIR字段使用默认值；v8/v9的`render.ray_reconstruction`取反写入`diagnostics.native_noisy_output`，v8缺少的忽略重置字段补false。采样值为`TREE`，旧`GRID`/`TREE_SPHERE`规范化到Tree，其余合法旧字段保留。更旧、未来或必需字段不完整/非法的配置整份回退默认。内部离线配置包仍为v12/212 B，不作为公共C ABI的替代。
+磁盘`primept.properties`为schema v14，独立保存`path_tracing`启用状态和`realtime_renderer`（仅`path_trace`/`restir_pt`），ReSTIR控制使用`restir_pt.*`，时间复用保存为正向`restir_pt.temporal_reuse`。关闭路径追踪仍保留实时渲染器选择，启用/原版切换由宿主路由；公共C结构的`integrator`在PT启用时使用所选积分器，原版时沿用历史值0。v8–v12的旧`renderer`拆成启用状态和选择；旧`vanilla`迁移为关闭、选择`path_trace`。v11旧`diagnostics.restir_spatial_only`和v12的`restir_pt.spatial_only`取反迁移，v8–v10缺失该诊断时使用时间复用默认true；公共ABI的`restir_spatial_only`继续写入正向时间复用的反值。v8–v11缺少的ReSTIR字段使用默认值；v8/v9的`render.ray_reconstruction`取反写入`diagnostics.native_noisy_output`，v8缺少的忽略重置字段补false。采样值为`TREE`，旧`GRID`/`TREE_SPHERE`规范化到Tree，其余合法旧字段保留。更旧、未来或必需字段不完整/非法的配置整份回退默认。v8–v13迁移补入曲线起始压缩50%；合法保存的饱和度不覆盖，新默认为10%。内部离线配置包仍为v12/212 B，不作为公共C ABI的替代。
 
 | 字段 | 范围/语义 |
 | --- | --- |
@@ -194,7 +194,7 @@ flags 的 bit0 表示已在这台逻辑设备启用 `VK_EXT_opacity_micromap` �
 | reconstruction_quality | 0 DLAA、1 Quality、2 Balanced、3 Performance默认、4 UltraPerformance |
 | terrain_batches_per_frame | 1–128默认1，每批4×4×4 section |
 | stars | `[0,4]`，默认1；独立于sky强度 |
-| auto_exposure_compensation | `[0,1]`，默认0.75；0关闭，其余为旧算法的补偿强度，并非EV |
+| auto_exposure_compensation | `[0,1]`，默认0.65；0关闭，其余为旧算法的补偿强度，并非EV |
 | hdr / hdr_reference_white | 0/1请求；0自动参考白，否则1–10000 nit；实际启用需surface及标定支持 |
 | frame_generation | 0/1请求，默认0；实时RR、早期interposer及实际SDK支持全部成立才准备 |
 | light_sampling | 1功率距离Tree；旧0/2规范化为Tree，未知值拒绝；无运行时采样器切换 |

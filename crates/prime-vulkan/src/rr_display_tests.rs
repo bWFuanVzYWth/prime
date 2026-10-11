@@ -222,7 +222,12 @@ fn run_extent(
         input,
         output,
         false,
-        PrimeDrtSettings::default().prepare(1.0).unwrap(),
+        PrimeDrtSettings {
+            compression_start: 0.18,
+            ..Default::default()
+        }
+        .prepare(1.0)
+        .unwrap(),
     )
 }
 

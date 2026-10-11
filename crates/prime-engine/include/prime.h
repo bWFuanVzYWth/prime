@@ -1,7 +1,7 @@
 #ifndef PRIME_PT_H
 #define PRIME_PT_H
 #include <stdint.h>
-#define PRIME_ABI_VERSION 17
+#define PRIME_ABI_VERSION 18
 #define PRIME_MAX_BATCH_BYTES 268435456
 #define PRIME_DIAGNOSTICS_ENABLED 1
 #define PRIME_DIAGNOSTICS_CAPTURE 2
@@ -77,6 +77,7 @@ typedef struct PrimeSettings {
     float exposure;
     float hue;
     float saturation;
+    float compression_start;
     uint32_t view;
     float sun;
     float sky;

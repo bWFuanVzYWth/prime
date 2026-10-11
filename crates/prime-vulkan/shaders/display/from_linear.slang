@@ -30,8 +30,12 @@ struct LinearDisplayParameters {
         value = linear709ToWorking(value);
     float autoExposure =
             (parameters.control.z & 16u) != 0 ? exp2(parameters.exposure[0].exposureEv) : 1.0;
-    PrimeDRTParameters sdr = {parameters.sdr.x * autoExposure, parameters.sdr.y, parameters.sdr.z,
-                              parameters.sdr.w, parameters.sdrExtra.x};
+    PrimeDRTParameters sdr = {parameters.sdr.x * autoExposure,
+                              parameters.sdr.y,
+                              parameters.sdr.z,
+                              parameters.sdr.w,
+                              parameters.sdrExtra.x,
+                              parameters.sdrExtra.y};
     float3 encoded = primeDRT(value, sdr);
     encoded = float3(uint3(saturate(encoded) * 255.0 + 0.5)) / 255.0;
     bool hdrActive = (parameters.control.z & 4u) != 0;
@@ -43,8 +47,12 @@ struct LinearDisplayParameters {
         sdrBaseline[id.xy] = float4(encoded, 0.0);
     if (hdrActive) {
         // Both snapshots remain canonical top-left and untouched by later hand/HUD drawing.
-        PrimeDRTParameters hdr = {parameters.hdr.x * autoExposure, parameters.hdr.y,
-                                  parameters.hdr.z, parameters.hdr.w, parameters.hdrExtra.x};
+        PrimeDRTParameters hdr = {parameters.hdr.x * autoExposure,
+                                  parameters.hdr.y,
+                                  parameters.hdr.z,
+                                  parameters.hdr.w,
+                                  parameters.hdrExtra.x,
+                                  parameters.hdrExtra.y};
         hdrOutput[id.xy] = float4(primeDRT(value, hdr), 1.0);
     }
 }

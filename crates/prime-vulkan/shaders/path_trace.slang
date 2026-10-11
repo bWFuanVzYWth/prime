@@ -43,8 +43,13 @@ import "display/prime_drt.slang";
     // Bit 31 skips the fused SDR transform when the GPU exposure/HDR display consumes history.
     if ((asuint(frame.displayExtra.w) & 0x80000000u) != 0)
         return;
-    PrimeDRTParameters display = {frame.display.x, frame.display.y, frame.display.z,
-                                  frame.display.w, frame.displayExtra.x};
+    PrimeDRTParameters display = {
+            frame.display.x,
+            frame.display.y,
+            frame.display.z,
+            frame.display.w,
+            frame.displayExtra.x,
+            float((asuint(frame.displayExtra.w) >> 4) & 0xffffffu) / 16777215.0};
     uint3 encoded = uint3(saturate(primeDRT(mean, display)) * 255.0 + 0.5);
     uint2 targetPixel = uint2(id.x, frame.target.x != 0 ? frame.dimensions.y - 1 - id.y : id.y);
     outputImage[targetPixel] = float4(float3(encoded) / 255.0, 1);

@@ -9,6 +9,7 @@ pub struct PrimeDrtSettings {
     pub exposure_multiplier: f32,
     pub hue_compensation: f32,
     pub saturation_compensation: f32,
+    pub compression_start: f32,
 }
 
 impl Default for PrimeDrtSettings {
@@ -16,7 +17,8 @@ impl Default for PrimeDrtSettings {
         Self {
             exposure_multiplier: 1.0,
             hue_compensation: 0.75,
-            saturation_compensation: 0.20,
+            saturation_compensation: 0.10,
+            compression_start: 0.5,
         }
     }
 }
@@ -32,6 +34,8 @@ impl PrimeDrtSettings {
             || !(0.0..=1.0).contains(&self.hue_compensation)
             || !self.saturation_compensation.is_finite()
             || !(0.0..=0.5).contains(&self.saturation_compensation)
+            || !self.compression_start.is_finite()
+            || !(0.0..=0.99).contains(&self.compression_start)
             || !headroom.is_finite()
             || !(1.0..=10000.0).contains(&headroom)
         {
@@ -39,11 +43,13 @@ impl PrimeDrtSettings {
                 "Invalid primeDRT exposure, hue/saturation compensation or output headroom".into(),
             );
         }
-        // Legacy RgbReinhardOutput: unit tangent at 0.18, reaching headroom at +8 EV.
+        // Unit tangent at the adjustable start; headroom at +8 EV relative to 18% gray.
         let headroom64 = f64::from(headroom);
-        let tangent_distance = 0.18 * 256.0 * headroom64 - 0.18;
-        let output_distance = headroom64 - 0.18;
-        let curve_peak = (0.18
+
+        let start = f64::from(self.compression_start);
+        let tangent_distance = 0.18 * 256.0 * headroom64 - start;
+        let output_distance = headroom64 - start;
+        let curve_peak = (start
             + output_distance * tangent_distance / (tangent_distance - output_distance))
             as f32;
         let encoded_peak = if headroom == 1.0 {
@@ -58,7 +64,7 @@ impl PrimeDrtSettings {
                 encoded_peak,
                 self.hue_compensation,
                 self.saturation_compensation,
-                0.0,
+                self.compression_start,
                 0.0,
                 0.0,
             ],
@@ -77,10 +83,10 @@ mod tests {
 
     #[test]
     fn curve_reaches_the_calibrated_peak_at_eight_ev_and_preserves_join() {
-        assert_eq!(PrimeDrtSettings::default().saturation_compensation, 0.20);
+        assert_eq!(PrimeDrtSettings::default().saturation_compensation, 0.10);
         assert_eq!(
             PrimeDrtSettings::default().prepare(1.0).unwrap().values[4],
-            0.20
+            0.10
         );
         assert_eq!(
             PrimeDrtSettings {
@@ -92,19 +98,38 @@ mod tests {
             .values[4],
             0.08
         );
-        for peak in [1.0, 2.0, 16.0, 10000.0] {
-            let parameters = PrimeDrtSettings::default().prepare(peak).unwrap();
-            let extent = f64::from(parameters.values[1]) - 0.18;
-            let input = 0.18 * 256.0 * f64::from(peak);
-            let curve = |x: f64| {
-                if x <= 0.18 {
-                    x
-                } else {
-                    0.18 + extent / (1.0 + extent / (x - 0.18))
+        for start in [0.0, 0.18, 0.5, 0.99] {
+            for peak in [1.0, 2.0, 16.0, 10000.0] {
+                let parameters = PrimeDrtSettings {
+                    compression_start: start,
+                    ..Default::default()
                 }
-            };
-            assert!((curve(input) - f64::from(peak)).abs() <= 1e-6 * f64::from(peak));
-            assert!((curve(0.18 + 1e-6) - curve(0.18 - 1e-6) - 2e-6).abs() < 1e-10);
+                .prepare(peak)
+                .unwrap();
+                let start = f64::from(start);
+                assert_eq!(f64::from(parameters.values[5]), start);
+                let extent = f64::from(parameters.values[1]) - start;
+                let input = 0.18 * 256.0 * f64::from(peak);
+                let curve = |x: f64| {
+                    if x <= start {
+                        x
+                    } else {
+                        start + extent / (1.0 + extent / (x - start))
+                    }
+                };
+                assert!((curve(input) - f64::from(peak)).abs() <= 1e-6 * f64::from(peak));
+                assert!((curve(start + 1e-6) - curve(start - 1e-6) - 2e-6).abs() < 1e-10);
+            }
+        }
+        for invalid in [-0.01, 1.0, f32::NAN, f32::INFINITY] {
+            assert!(
+                PrimeDrtSettings {
+                    compression_start: invalid,
+                    ..Default::default()
+                }
+                .prepare(1.0)
+                .is_err()
+            );
         }
         for headroom in [0.0, 10001.0, f32::NAN, f32::INFINITY] {
             assert!(PrimeDrtSettings::default().prepare(headroom).is_err());

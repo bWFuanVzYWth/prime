@@ -124,9 +124,13 @@ import "reconstruct/rr_status.slang";
     else if (view == 1u)
         encoded = encodeSrgb(workingToLinear709(radiance) * parameters.frame.display.x);
     else {
-        PrimeDRTParameters display = {parameters.frame.display.x, parameters.frame.display.y,
-                                      parameters.frame.display.z, parameters.frame.display.w,
-                                      parameters.frame.displayExtra.x};
+        PrimeDRTParameters display = {
+                parameters.frame.display.x,
+                parameters.frame.display.y,
+                parameters.frame.display.z,
+                parameters.frame.display.w,
+                parameters.frame.displayExtra.x,
+                float((asuint(parameters.frame.displayExtra.w) >> 4) & 0xffffffu) / 16777215.0};
         encoded = primeDRT(radiance, display);
     }
     uint2 target = uint2(id.x, parameters.frame.target.x != 0u ? extent.y - 1u - id.y : id.y);

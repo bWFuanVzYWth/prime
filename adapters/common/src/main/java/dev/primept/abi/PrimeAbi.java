@@ -7,7 +7,7 @@ import static java.lang.foreign.ValueLayout.*;
 
 public final class PrimeAbi {
     private PrimeAbi() {}
-    public static final int PRIME_ABI_VERSION = 17;
+    public static final int PRIME_ABI_VERSION = 18;
     public static final int PRIME_MAX_BATCH_BYTES = 268435456;
     public static final int PRIME_DIAGNOSTICS_ENABLED = 1;
     public static final int PRIME_DIAGNOSTICS_CAPTURE = 2;
@@ -333,14 +333,15 @@ public final class PrimeAbi {
     }
     public static final class PrimeSettings {
         private PrimeSettings() {}
-        public static final long SIZE = 216, ALIGN = 4;
+        public static final long SIZE = 220, ALIGN = 4;
         public static final MemoryLayout LAYOUT =
                 MemoryLayout
                         .structLayout(
                                 PrimeHeader.LAYOUT.withName("header"), JAVA_INT.withName("mode"),
                                 JAVA_INT.withName("bounces"), JAVA_INT.withName("offline_samples"),
                                 JAVA_FLOAT.withName("exposure"), JAVA_FLOAT.withName("hue"),
-                                JAVA_FLOAT.withName("saturation"), JAVA_INT.withName("view"),
+                                JAVA_FLOAT.withName("saturation"),
+                                JAVA_FLOAT.withName("compression_start"), JAVA_INT.withName("view"),
                                 JAVA_FLOAT.withName("sun"), JAVA_FLOAT.withName("sky"),
                                 JAVA_FLOAT.withName("depth_range"), JAVA_INT.withName("seed"),
                                 JAVA_INT.withName("latitude_degrees"),
@@ -401,149 +402,151 @@ public final class PrimeAbi {
                 throw new ExceptionInInitializerError("PrimeSettings.hue offset");
             if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("saturation")) != 28)
                 throw new ExceptionInInitializerError("PrimeSettings.saturation offset");
-            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("view")) != 32)
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("compression_start")) != 32)
+                throw new ExceptionInInitializerError("PrimeSettings.compression_start offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("view")) != 36)
                 throw new ExceptionInInitializerError("PrimeSettings.view offset");
-            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("sun")) != 36)
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("sun")) != 40)
                 throw new ExceptionInInitializerError("PrimeSettings.sun offset");
-            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("sky")) != 40)
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("sky")) != 44)
                 throw new ExceptionInInitializerError("PrimeSettings.sky offset");
-            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("depth_range")) != 44)
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("depth_range")) != 48)
                 throw new ExceptionInInitializerError("PrimeSettings.depth_range offset");
-            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("seed")) != 48)
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("seed")) != 52)
                 throw new ExceptionInInitializerError("PrimeSettings.seed offset");
-            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("latitude_degrees")) != 52)
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("latitude_degrees")) != 56)
                 throw new ExceptionInInitializerError("PrimeSettings.latitude_degrees offset");
             if (LAYOUT.byteOffset(
-                        MemoryLayout.PathElement.groupElement("solar_longitude_degrees")) != 56)
+                        MemoryLayout.PathElement.groupElement("solar_longitude_degrees")) != 60)
                 throw new ExceptionInInitializerError(
                         "PrimeSettings.solar_longitude_degrees offset");
-            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("opacity_micromap")) != 60)
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("opacity_micromap")) != 64)
                 throw new ExceptionInInitializerError("PrimeSettings.opacity_micromap offset");
             if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("native_noisy_output")) !=
-                64)
+                68)
                 throw new ExceptionInInitializerError("PrimeSettings.native_noisy_output offset");
             if (LAYOUT.byteOffset(
-                        MemoryLayout.PathElement.groupElement("reconstruction_quality")) != 68)
+                        MemoryLayout.PathElement.groupElement("reconstruction_quality")) != 72)
                 throw new ExceptionInInitializerError(
                         "PrimeSettings.reconstruction_quality offset");
             if (LAYOUT.byteOffset(
-                        MemoryLayout.PathElement.groupElement("terrain_batches_per_frame")) != 72)
+                        MemoryLayout.PathElement.groupElement("terrain_batches_per_frame")) != 76)
                 throw new ExceptionInInitializerError(
                         "PrimeSettings.terrain_batches_per_frame offset");
-            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("stars")) != 76)
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("stars")) != 80)
                 throw new ExceptionInInitializerError("PrimeSettings.stars offset");
             if (LAYOUT.byteOffset(
-                        MemoryLayout.PathElement.groupElement("auto_exposure_compensation")) != 80)
+                        MemoryLayout.PathElement.groupElement("auto_exposure_compensation")) != 84)
                 throw new ExceptionInInitializerError(
                         "PrimeSettings.auto_exposure_compensation offset");
-            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("hdr")) != 84)
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("hdr")) != 88)
                 throw new ExceptionInInitializerError("PrimeSettings.hdr offset");
             if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("hdr_reference_white")) !=
-                88)
+                92)
                 throw new ExceptionInInitializerError("PrimeSettings.hdr_reference_white offset");
-            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("frame_generation")) != 92)
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("frame_generation")) != 96)
                 throw new ExceptionInInitializerError("PrimeSettings.frame_generation offset");
-            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("light_sampling")) != 96)
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("light_sampling")) != 100)
                 throw new ExceptionInInitializerError("PrimeSettings.light_sampling offset");
-            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("integrator")) != 100)
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("integrator")) != 104)
                 throw new ExceptionInInitializerError("PrimeSettings.integrator offset");
             if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement(
-                        "ignore_global_history_resets")) != 104)
+                        "ignore_global_history_resets")) != 108)
                 throw new ExceptionInInitializerError(
                         "PrimeSettings.ignore_global_history_resets offset");
             if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("restir_spatial_only")) !=
-                108)
+                112)
                 throw new ExceptionInInitializerError("PrimeSettings.restir_spatial_only offset");
             if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("restir_history_length")) !=
-                112)
+                116)
                 throw new ExceptionInInitializerError("PrimeSettings.restir_history_length offset");
             if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("restir_spatial_reuse")) !=
-                116)
+                120)
                 throw new ExceptionInInitializerError("PrimeSettings.restir_spatial_reuse offset");
             if (LAYOUT.byteOffset(
-                        MemoryLayout.PathElement.groupElement("restir_spatial_iterations")) != 120)
+                        MemoryLayout.PathElement.groupElement("restir_spatial_iterations")) != 124)
                 throw new ExceptionInInitializerError(
                         "PrimeSettings.restir_spatial_iterations offset");
             if (LAYOUT.byteOffset(
-                        MemoryLayout.PathElement.groupElement("restir_spatial_neighbors")) != 124)
+                        MemoryLayout.PathElement.groupElement("restir_spatial_neighbors")) != 128)
                 throw new ExceptionInInitializerError(
                         "PrimeSettings.restir_spatial_neighbors offset");
             if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("restir_pairing_radius")) !=
-                128)
+                132)
                 throw new ExceptionInInitializerError("PrimeSettings.restir_pairing_radius offset");
             if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement(
-                        "restir_stochastic_reprojection")) != 132)
+                        "restir_stochastic_reprojection")) != 136)
                 throw new ExceptionInInitializerError(
                         "PrimeSettings.restir_stochastic_reprojection offset");
             if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("restir_duplicate_map")) !=
-                136)
+                140)
                 throw new ExceptionInInitializerError("PrimeSettings.restir_duplicate_map offset");
             if (LAYOUT.byteOffset(
-                        MemoryLayout.PathElement.groupElement("restir_duplication_power")) != 140)
+                        MemoryLayout.PathElement.groupElement("restir_duplication_power")) != 144)
                 throw new ExceptionInInitializerError(
                         "PrimeSettings.restir_duplication_power offset");
             if (LAYOUT.byteOffset(
-                        MemoryLayout.PathElement.groupElement("restir_decoupled_shading")) != 144)
+                        MemoryLayout.PathElement.groupElement("restir_decoupled_shading")) != 148)
                 throw new ExceptionInInitializerError(
                         "PrimeSettings.restir_decoupled_shading offset");
             if (LAYOUT.byteOffset(
-                        MemoryLayout.PathElement.groupElement("restir_initial_samples")) != 148)
+                        MemoryLayout.PathElement.groupElement("restir_initial_samples")) != 152)
                 throw new ExceptionInInitializerError(
                         "PrimeSettings.restir_initial_samples offset");
             if (LAYOUT.byteOffset(
-                        MemoryLayout.PathElement.groupElement("restir_distance_threshold")) != 152)
+                        MemoryLayout.PathElement.groupElement("restir_distance_threshold")) != 156)
                 throw new ExceptionInInitializerError(
                         "PrimeSettings.restir_distance_threshold offset");
             if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("restir_distance_sigma")) !=
-                156)
+                160)
                 throw new ExceptionInInitializerError("PrimeSettings.restir_distance_sigma offset");
             if (LAYOUT.byteOffset(
-                        MemoryLayout.PathElement.groupElement("restir_roughness_threshold")) != 160)
+                        MemoryLayout.PathElement.groupElement("restir_roughness_threshold")) != 164)
                 throw new ExceptionInInitializerError(
                         "PrimeSettings.restir_roughness_threshold offset");
             if (LAYOUT.byteOffset(
-                        MemoryLayout.PathElement.groupElement("restir_roughness_sigma")) != 164)
+                        MemoryLayout.PathElement.groupElement("restir_roughness_sigma")) != 168)
                 throw new ExceptionInInitializerError(
                         "PrimeSettings.restir_roughness_sigma offset");
             if (LAYOUT.byteOffset(
-                        MemoryLayout.PathElement.groupElement("restir_normal_threshold")) != 168)
+                        MemoryLayout.PathElement.groupElement("restir_normal_threshold")) != 172)
                 throw new ExceptionInInitializerError(
                         "PrimeSettings.restir_normal_threshold offset");
             if (LAYOUT.byteOffset(
-                        MemoryLayout.PathElement.groupElement("restir_depth_threshold")) != 172)
+                        MemoryLayout.PathElement.groupElement("restir_depth_threshold")) != 176)
                 throw new ExceptionInInitializerError(
                         "PrimeSettings.restir_depth_threshold offset");
             if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("restir_debug_view")) !=
-                176)
+                180)
                 throw new ExceptionInInitializerError("PrimeSettings.restir_debug_view offset");
             if (LAYOUT.byteOffset(
-                        MemoryLayout.PathElement.groupElement("restir_rr_decorrelation")) != 180)
+                        MemoryLayout.PathElement.groupElement("restir_rr_decorrelation")) != 184)
                 throw new ExceptionInInitializerError(
                         "PrimeSettings.restir_rr_decorrelation offset");
-            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("restir_rr_mode")) != 184)
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("restir_rr_mode")) != 188)
                 throw new ExceptionInInitializerError("PrimeSettings.restir_rr_mode offset");
-            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("restir_rr_factor")) != 188)
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("restir_rr_factor")) != 192)
                 throw new ExceptionInInitializerError("PrimeSettings.restir_rr_factor offset");
             if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement(
-                        "restir_rr_stagnancy_exponent")) != 192)
+                        "restir_rr_stagnancy_exponent")) != 196)
                 throw new ExceptionInInitializerError(
                         "PrimeSettings.restir_rr_stagnancy_exponent offset");
-            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("restir_rr_ema")) != 196)
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("restir_rr_ema")) != 200)
                 throw new ExceptionInInitializerError("PrimeSettings.restir_rr_ema offset");
             if (LAYOUT.byteOffset(
-                        MemoryLayout.PathElement.groupElement("restir_rr_firefly_strength")) != 200)
+                        MemoryLayout.PathElement.groupElement("restir_rr_firefly_strength")) != 204)
                 throw new ExceptionInInitializerError(
                         "PrimeSettings.restir_rr_firefly_strength offset");
             if (LAYOUT.byteOffset(
-                        MemoryLayout.PathElement.groupElement("restir_rr_multiply_bound")) != 204)
+                        MemoryLayout.PathElement.groupElement("restir_rr_multiply_bound")) != 208)
                 throw new ExceptionInInitializerError(
                         "PrimeSettings.restir_rr_multiply_bound offset");
             if (LAYOUT.byteOffset(
-                        MemoryLayout.PathElement.groupElement("restir_rr_bias_reduction")) != 208)
+                        MemoryLayout.PathElement.groupElement("restir_rr_bias_reduction")) != 212)
                 throw new ExceptionInInitializerError(
                         "PrimeSettings.restir_rr_bias_reduction offset");
             if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("restir_rr_firefly")) !=
-                212)
+                216)
                 throw new ExceptionInInitializerError("PrimeSettings.restir_rr_firefly offset");
         }
         public static MemorySegment header(MemorySegment value) {
@@ -585,281 +588,287 @@ public final class PrimeAbi {
         public static void saturation(MemorySegment value, float field) {
             value.set(JAVA_FLOAT, 28L, field);
         }
+        public static float compression_start(MemorySegment value) {
+            return value.get(JAVA_FLOAT, 32L);
+        }
+        public static void compression_start(MemorySegment value, float field) {
+            value.set(JAVA_FLOAT, 32L, field);
+        }
         public static int view(MemorySegment value) {
-            return value.get(JAVA_INT, 32L);
+            return value.get(JAVA_INT, 36L);
         }
         public static void view(MemorySegment value, int field) {
-            value.set(JAVA_INT, 32L, field);
+            value.set(JAVA_INT, 36L, field);
         }
         public static float sun(MemorySegment value) {
-            return value.get(JAVA_FLOAT, 36L);
-        }
-        public static void sun(MemorySegment value, float field) {
-            value.set(JAVA_FLOAT, 36L, field);
-        }
-        public static float sky(MemorySegment value) {
             return value.get(JAVA_FLOAT, 40L);
         }
-        public static void sky(MemorySegment value, float field) {
+        public static void sun(MemorySegment value, float field) {
             value.set(JAVA_FLOAT, 40L, field);
         }
-        public static float depth_range(MemorySegment value) {
+        public static float sky(MemorySegment value) {
             return value.get(JAVA_FLOAT, 44L);
         }
-        public static void depth_range(MemorySegment value, float field) {
+        public static void sky(MemorySegment value, float field) {
             value.set(JAVA_FLOAT, 44L, field);
         }
+        public static float depth_range(MemorySegment value) {
+            return value.get(JAVA_FLOAT, 48L);
+        }
+        public static void depth_range(MemorySegment value, float field) {
+            value.set(JAVA_FLOAT, 48L, field);
+        }
         public static int seed(MemorySegment value) {
-            return value.get(JAVA_INT, 48L);
-        }
-        public static void seed(MemorySegment value, int field) {
-            value.set(JAVA_INT, 48L, field);
-        }
-        public static int latitude_degrees(MemorySegment value) {
             return value.get(JAVA_INT, 52L);
         }
-        public static void latitude_degrees(MemorySegment value, int field) {
+        public static void seed(MemorySegment value, int field) {
             value.set(JAVA_INT, 52L, field);
         }
-        public static int solar_longitude_degrees(MemorySegment value) {
+        public static int latitude_degrees(MemorySegment value) {
             return value.get(JAVA_INT, 56L);
         }
-        public static void solar_longitude_degrees(MemorySegment value, int field) {
+        public static void latitude_degrees(MemorySegment value, int field) {
             value.set(JAVA_INT, 56L, field);
         }
-        public static int opacity_micromap(MemorySegment value) {
+        public static int solar_longitude_degrees(MemorySegment value) {
             return value.get(JAVA_INT, 60L);
         }
-        public static void opacity_micromap(MemorySegment value, int field) {
+        public static void solar_longitude_degrees(MemorySegment value, int field) {
             value.set(JAVA_INT, 60L, field);
         }
-        public static int native_noisy_output(MemorySegment value) {
+        public static int opacity_micromap(MemorySegment value) {
             return value.get(JAVA_INT, 64L);
         }
-        public static void native_noisy_output(MemorySegment value, int field) {
+        public static void opacity_micromap(MemorySegment value, int field) {
             value.set(JAVA_INT, 64L, field);
         }
-        public static int reconstruction_quality(MemorySegment value) {
+        public static int native_noisy_output(MemorySegment value) {
             return value.get(JAVA_INT, 68L);
         }
-        public static void reconstruction_quality(MemorySegment value, int field) {
+        public static void native_noisy_output(MemorySegment value, int field) {
             value.set(JAVA_INT, 68L, field);
         }
-        public static int terrain_batches_per_frame(MemorySegment value) {
+        public static int reconstruction_quality(MemorySegment value) {
             return value.get(JAVA_INT, 72L);
         }
-        public static void terrain_batches_per_frame(MemorySegment value, int field) {
+        public static void reconstruction_quality(MemorySegment value, int field) {
             value.set(JAVA_INT, 72L, field);
         }
+        public static int terrain_batches_per_frame(MemorySegment value) {
+            return value.get(JAVA_INT, 76L);
+        }
+        public static void terrain_batches_per_frame(MemorySegment value, int field) {
+            value.set(JAVA_INT, 76L, field);
+        }
         public static float stars(MemorySegment value) {
-            return value.get(JAVA_FLOAT, 76L);
-        }
-        public static void stars(MemorySegment value, float field) {
-            value.set(JAVA_FLOAT, 76L, field);
-        }
-        public static float auto_exposure_compensation(MemorySegment value) {
             return value.get(JAVA_FLOAT, 80L);
         }
-        public static void auto_exposure_compensation(MemorySegment value, float field) {
+        public static void stars(MemorySegment value, float field) {
             value.set(JAVA_FLOAT, 80L, field);
         }
+        public static float auto_exposure_compensation(MemorySegment value) {
+            return value.get(JAVA_FLOAT, 84L);
+        }
+        public static void auto_exposure_compensation(MemorySegment value, float field) {
+            value.set(JAVA_FLOAT, 84L, field);
+        }
         public static int hdr(MemorySegment value) {
-            return value.get(JAVA_INT, 84L);
-        }
-        public static void hdr(MemorySegment value, int field) {
-            value.set(JAVA_INT, 84L, field);
-        }
-        public static int hdr_reference_white(MemorySegment value) {
             return value.get(JAVA_INT, 88L);
         }
-        public static void hdr_reference_white(MemorySegment value, int field) {
+        public static void hdr(MemorySegment value, int field) {
             value.set(JAVA_INT, 88L, field);
         }
-        public static int frame_generation(MemorySegment value) {
+        public static int hdr_reference_white(MemorySegment value) {
             return value.get(JAVA_INT, 92L);
         }
-        public static void frame_generation(MemorySegment value, int field) {
+        public static void hdr_reference_white(MemorySegment value, int field) {
             value.set(JAVA_INT, 92L, field);
         }
-        public static int light_sampling(MemorySegment value) {
+        public static int frame_generation(MemorySegment value) {
             return value.get(JAVA_INT, 96L);
         }
-        public static void light_sampling(MemorySegment value, int field) {
+        public static void frame_generation(MemorySegment value, int field) {
             value.set(JAVA_INT, 96L, field);
         }
-        public static int integrator(MemorySegment value) {
+        public static int light_sampling(MemorySegment value) {
             return value.get(JAVA_INT, 100L);
         }
-        public static void integrator(MemorySegment value, int field) {
+        public static void light_sampling(MemorySegment value, int field) {
             value.set(JAVA_INT, 100L, field);
         }
-        public static int ignore_global_history_resets(MemorySegment value) {
+        public static int integrator(MemorySegment value) {
             return value.get(JAVA_INT, 104L);
         }
-        public static void ignore_global_history_resets(MemorySegment value, int field) {
+        public static void integrator(MemorySegment value, int field) {
             value.set(JAVA_INT, 104L, field);
         }
-        public static int restir_spatial_only(MemorySegment value) {
+        public static int ignore_global_history_resets(MemorySegment value) {
             return value.get(JAVA_INT, 108L);
         }
-        public static void restir_spatial_only(MemorySegment value, int field) {
+        public static void ignore_global_history_resets(MemorySegment value, int field) {
             value.set(JAVA_INT, 108L, field);
         }
-        public static int restir_history_length(MemorySegment value) {
+        public static int restir_spatial_only(MemorySegment value) {
             return value.get(JAVA_INT, 112L);
         }
-        public static void restir_history_length(MemorySegment value, int field) {
+        public static void restir_spatial_only(MemorySegment value, int field) {
             value.set(JAVA_INT, 112L, field);
         }
-        public static int restir_spatial_reuse(MemorySegment value) {
+        public static int restir_history_length(MemorySegment value) {
             return value.get(JAVA_INT, 116L);
         }
-        public static void restir_spatial_reuse(MemorySegment value, int field) {
+        public static void restir_history_length(MemorySegment value, int field) {
             value.set(JAVA_INT, 116L, field);
         }
-        public static int restir_spatial_iterations(MemorySegment value) {
+        public static int restir_spatial_reuse(MemorySegment value) {
             return value.get(JAVA_INT, 120L);
         }
-        public static void restir_spatial_iterations(MemorySegment value, int field) {
+        public static void restir_spatial_reuse(MemorySegment value, int field) {
             value.set(JAVA_INT, 120L, field);
         }
-        public static int restir_spatial_neighbors(MemorySegment value) {
+        public static int restir_spatial_iterations(MemorySegment value) {
             return value.get(JAVA_INT, 124L);
         }
-        public static void restir_spatial_neighbors(MemorySegment value, int field) {
+        public static void restir_spatial_iterations(MemorySegment value, int field) {
             value.set(JAVA_INT, 124L, field);
         }
-        public static int restir_pairing_radius(MemorySegment value) {
+        public static int restir_spatial_neighbors(MemorySegment value) {
             return value.get(JAVA_INT, 128L);
         }
-        public static void restir_pairing_radius(MemorySegment value, int field) {
+        public static void restir_spatial_neighbors(MemorySegment value, int field) {
             value.set(JAVA_INT, 128L, field);
         }
-        public static int restir_stochastic_reprojection(MemorySegment value) {
+        public static int restir_pairing_radius(MemorySegment value) {
             return value.get(JAVA_INT, 132L);
         }
-        public static void restir_stochastic_reprojection(MemorySegment value, int field) {
+        public static void restir_pairing_radius(MemorySegment value, int field) {
             value.set(JAVA_INT, 132L, field);
         }
-        public static int restir_duplicate_map(MemorySegment value) {
+        public static int restir_stochastic_reprojection(MemorySegment value) {
             return value.get(JAVA_INT, 136L);
         }
-        public static void restir_duplicate_map(MemorySegment value, int field) {
+        public static void restir_stochastic_reprojection(MemorySegment value, int field) {
             value.set(JAVA_INT, 136L, field);
         }
+        public static int restir_duplicate_map(MemorySegment value) {
+            return value.get(JAVA_INT, 140L);
+        }
+        public static void restir_duplicate_map(MemorySegment value, int field) {
+            value.set(JAVA_INT, 140L, field);
+        }
         public static float restir_duplication_power(MemorySegment value) {
-            return value.get(JAVA_FLOAT, 140L);
+            return value.get(JAVA_FLOAT, 144L);
         }
         public static void restir_duplication_power(MemorySegment value, float field) {
-            value.set(JAVA_FLOAT, 140L, field);
+            value.set(JAVA_FLOAT, 144L, field);
         }
         public static int restir_decoupled_shading(MemorySegment value) {
-            return value.get(JAVA_INT, 144L);
-        }
-        public static void restir_decoupled_shading(MemorySegment value, int field) {
-            value.set(JAVA_INT, 144L, field);
-        }
-        public static int restir_initial_samples(MemorySegment value) {
             return value.get(JAVA_INT, 148L);
         }
-        public static void restir_initial_samples(MemorySegment value, int field) {
+        public static void restir_decoupled_shading(MemorySegment value, int field) {
             value.set(JAVA_INT, 148L, field);
         }
+        public static int restir_initial_samples(MemorySegment value) {
+            return value.get(JAVA_INT, 152L);
+        }
+        public static void restir_initial_samples(MemorySegment value, int field) {
+            value.set(JAVA_INT, 152L, field);
+        }
         public static float restir_distance_threshold(MemorySegment value) {
-            return value.get(JAVA_FLOAT, 152L);
-        }
-        public static void restir_distance_threshold(MemorySegment value, float field) {
-            value.set(JAVA_FLOAT, 152L, field);
-        }
-        public static float restir_distance_sigma(MemorySegment value) {
             return value.get(JAVA_FLOAT, 156L);
         }
-        public static void restir_distance_sigma(MemorySegment value, float field) {
+        public static void restir_distance_threshold(MemorySegment value, float field) {
             value.set(JAVA_FLOAT, 156L, field);
         }
-        public static float restir_roughness_threshold(MemorySegment value) {
+        public static float restir_distance_sigma(MemorySegment value) {
             return value.get(JAVA_FLOAT, 160L);
         }
-        public static void restir_roughness_threshold(MemorySegment value, float field) {
+        public static void restir_distance_sigma(MemorySegment value, float field) {
             value.set(JAVA_FLOAT, 160L, field);
         }
-        public static float restir_roughness_sigma(MemorySegment value) {
+        public static float restir_roughness_threshold(MemorySegment value) {
             return value.get(JAVA_FLOAT, 164L);
         }
-        public static void restir_roughness_sigma(MemorySegment value, float field) {
+        public static void restir_roughness_threshold(MemorySegment value, float field) {
             value.set(JAVA_FLOAT, 164L, field);
         }
-        public static float restir_normal_threshold(MemorySegment value) {
+        public static float restir_roughness_sigma(MemorySegment value) {
             return value.get(JAVA_FLOAT, 168L);
         }
-        public static void restir_normal_threshold(MemorySegment value, float field) {
+        public static void restir_roughness_sigma(MemorySegment value, float field) {
             value.set(JAVA_FLOAT, 168L, field);
         }
-        public static float restir_depth_threshold(MemorySegment value) {
+        public static float restir_normal_threshold(MemorySegment value) {
             return value.get(JAVA_FLOAT, 172L);
         }
-        public static void restir_depth_threshold(MemorySegment value, float field) {
+        public static void restir_normal_threshold(MemorySegment value, float field) {
             value.set(JAVA_FLOAT, 172L, field);
         }
+        public static float restir_depth_threshold(MemorySegment value) {
+            return value.get(JAVA_FLOAT, 176L);
+        }
+        public static void restir_depth_threshold(MemorySegment value, float field) {
+            value.set(JAVA_FLOAT, 176L, field);
+        }
         public static int restir_debug_view(MemorySegment value) {
-            return value.get(JAVA_INT, 176L);
-        }
-        public static void restir_debug_view(MemorySegment value, int field) {
-            value.set(JAVA_INT, 176L, field);
-        }
-        public static int restir_rr_decorrelation(MemorySegment value) {
             return value.get(JAVA_INT, 180L);
         }
-        public static void restir_rr_decorrelation(MemorySegment value, int field) {
+        public static void restir_debug_view(MemorySegment value, int field) {
             value.set(JAVA_INT, 180L, field);
         }
-        public static int restir_rr_mode(MemorySegment value) {
+        public static int restir_rr_decorrelation(MemorySegment value) {
             return value.get(JAVA_INT, 184L);
         }
-        public static void restir_rr_mode(MemorySegment value, int field) {
+        public static void restir_rr_decorrelation(MemorySegment value, int field) {
             value.set(JAVA_INT, 184L, field);
         }
+        public static int restir_rr_mode(MemorySegment value) {
+            return value.get(JAVA_INT, 188L);
+        }
+        public static void restir_rr_mode(MemorySegment value, int field) {
+            value.set(JAVA_INT, 188L, field);
+        }
         public static float restir_rr_factor(MemorySegment value) {
-            return value.get(JAVA_FLOAT, 188L);
-        }
-        public static void restir_rr_factor(MemorySegment value, float field) {
-            value.set(JAVA_FLOAT, 188L, field);
-        }
-        public static float restir_rr_stagnancy_exponent(MemorySegment value) {
             return value.get(JAVA_FLOAT, 192L);
         }
-        public static void restir_rr_stagnancy_exponent(MemorySegment value, float field) {
+        public static void restir_rr_factor(MemorySegment value, float field) {
             value.set(JAVA_FLOAT, 192L, field);
         }
-        public static float restir_rr_ema(MemorySegment value) {
+        public static float restir_rr_stagnancy_exponent(MemorySegment value) {
             return value.get(JAVA_FLOAT, 196L);
         }
-        public static void restir_rr_ema(MemorySegment value, float field) {
+        public static void restir_rr_stagnancy_exponent(MemorySegment value, float field) {
             value.set(JAVA_FLOAT, 196L, field);
         }
-        public static float restir_rr_firefly_strength(MemorySegment value) {
+        public static float restir_rr_ema(MemorySegment value) {
             return value.get(JAVA_FLOAT, 200L);
         }
-        public static void restir_rr_firefly_strength(MemorySegment value, float field) {
+        public static void restir_rr_ema(MemorySegment value, float field) {
             value.set(JAVA_FLOAT, 200L, field);
         }
-        public static float restir_rr_multiply_bound(MemorySegment value) {
+        public static float restir_rr_firefly_strength(MemorySegment value) {
             return value.get(JAVA_FLOAT, 204L);
         }
-        public static void restir_rr_multiply_bound(MemorySegment value, float field) {
+        public static void restir_rr_firefly_strength(MemorySegment value, float field) {
             value.set(JAVA_FLOAT, 204L, field);
         }
+        public static float restir_rr_multiply_bound(MemorySegment value) {
+            return value.get(JAVA_FLOAT, 208L);
+        }
+        public static void restir_rr_multiply_bound(MemorySegment value, float field) {
+            value.set(JAVA_FLOAT, 208L, field);
+        }
         public static int restir_rr_bias_reduction(MemorySegment value) {
-            return value.get(JAVA_INT, 208L);
-        }
-        public static void restir_rr_bias_reduction(MemorySegment value, int field) {
-            value.set(JAVA_INT, 208L, field);
-        }
-        public static int restir_rr_firefly(MemorySegment value) {
             return value.get(JAVA_INT, 212L);
         }
-        public static void restir_rr_firefly(MemorySegment value, int field) {
+        public static void restir_rr_bias_reduction(MemorySegment value, int field) {
             value.set(JAVA_INT, 212L, field);
+        }
+        public static int restir_rr_firefly(MemorySegment value) {
+            return value.get(JAVA_INT, 216L);
+        }
+        public static void restir_rr_firefly(MemorySegment value, int field) {
+            value.set(JAVA_INT, 216L, field);
         }
     }
     public static final class PrimeVulkanHost {

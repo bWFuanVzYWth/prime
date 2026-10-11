@@ -356,6 +356,7 @@ impl Renderer {
                 exposure_multiplier: settings.exposure,
                 hue_compensation: settings.hue,
                 saturation_compensation: settings.saturation,
+                compression_start: settings.compression_start,
             }
             .prepare(1.0)?,
             linear_display: None,
@@ -668,6 +669,7 @@ impl Renderer {
             exposure_multiplier: settings.exposure,
             hue_compensation: settings.hue,
             saturation_compensation: settings.saturation,
+            compression_start: settings.compression_start,
         }
         .prepare(1.0)?;
         if settings.view != self.settings.view {
@@ -1486,8 +1488,9 @@ impl Renderer {
         }
         push[116..120].copy_from_slice(&self.settings.depth_range.to_le_bytes());
         push[120..124].copy_from_slice(&self.settings.bounces.to_le_bytes());
-        let view_flags =
-            self.effective_view() as u32 | (u32::from(self.needs_linear_display()) << 31);
+        let view_flags = self.effective_view() as u32
+            | (((self.display.values[5] * 16777215.0).round() as u32) << 4)
+            | (u32::from(self.needs_linear_display()) << 31);
         push[124..128].copy_from_slice(&view_flags.to_le_bytes());
         push
     }
@@ -1975,6 +1978,7 @@ impl Renderer {
             exposure_multiplier: self.display.values[0],
             hue_compensation: self.display.values[3],
             saturation_compensation: self.display.values[4],
+            compression_start: self.display.values[5],
         }
         .prepare(
             self.hdr_calibration

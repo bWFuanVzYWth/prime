@@ -701,8 +701,8 @@ public final class SettingsCpuSmoke {
                   "Prime reset commits pending vanilla slider changes before rebuilding");
             check(PrimeClient.settings().equals(RenderSettings.defaults()),
                   "Reset action restores defaults");
-            check(PrimeClient.settings().value(RenderSettings.Control.SATURATION) == 20,
-                  "Reset restores 20% saturation");
+            check(PrimeClient.settings().value(RenderSettings.Control.SATURATION) == 10,
+                  "Reset restores 10% saturation");
             assertVideoGroups(screen);
         }
     }

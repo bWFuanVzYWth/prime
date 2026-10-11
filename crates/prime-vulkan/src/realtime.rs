@@ -226,7 +226,7 @@ impl PushInputs {
                 self.display.values[4],
                 self.settings.depth_range,
                 self.settings.sun,
-                0.0,
+                self.display.values[5],
             ],
         );
         u32s(&mut push[32..48], &self.sampling());
@@ -312,6 +312,8 @@ mod tests {
         let primary = input.primary();
         let transport = input.transport(true);
         let post = input.post();
+        assert_eq!(f32::from_bits(word(&post, 20)), input.settings.depth_range);
+        assert_eq!(f32::from_bits(word(&post, 28)), input.display.values[5]);
         assert_eq!((primary.len(), transport.len(), post.len()), (128, 80, 112));
         for (push, start) in [(&primary[..], 64), (&transport[..], 0), (&post[..], 32)] {
             assert_eq!(

@@ -8,7 +8,7 @@ import java.util.Arrays;
 
 /** Immutable client settings. Version adapters own widgets; native consumes the validated wire. */
 public final class RenderSettings {
-    public static final int VERSION = 13;
+    public static final int VERSION = 14;
     public static final int WIRE_BYTES = (int)PrimeSettings.SIZE;
     public enum Control {
         BOUNCES("render.bounces", 1, 64, 12),
@@ -19,13 +19,14 @@ public final class RenderSettings {
         SUN_EV("lighting.sun_ev_quarters", -32, 32, 0),
         SKY_EV("lighting.sky_ev_quarters", -32, 32, 0),
         STARS("lighting.stars_percent", 0, 400, 100),
-        AUTO_EXPOSURE("display.auto_exposure_percent", 0, 100, 75),
+        AUTO_EXPOSURE("display.auto_exposure_percent", 0, 100, 65),
         HDR("display.hdr", 0, 1, 0),
         HDR_WHITE("display.hdr_reference_white_nits", 0, 10000, 0),
         FRAME_GENERATION("render.frame_generation", 0, 1, 0),
         EXPOSURE_EV("display.exposure_ev_quarters", -48, 48, 0),
         HUE("display.hue_percent", 0, 100, 75),
-        SATURATION("display.saturation_percent", 0, 50, 20),
+        SATURATION("display.saturation_percent", 0, 50, 10),
+        COMPRESSION_START("display.compression_start_percent", 0, 99, 50),
         DEPTH_RANGE("diagnostics.depth_range", 1, 4096, 128);
 
         public final String key;
@@ -242,6 +243,7 @@ public final class RenderSettings {
         PrimeSettings.exposure(s, multiplier(Control.EXPOSURE_EV));
         PrimeSettings.hue(s, value(Control.HUE) / 100.0f);
         PrimeSettings.saturation(s, value(Control.SATURATION) / 100.0f);
+        PrimeSettings.compression_start(s, value(Control.COMPRESSION_START) / 100.0f);
         PrimeSettings.view(s, view.ordinal());
         PrimeSettings.sun(s, multiplier(Control.SUN_EV));
         PrimeSettings.sky(s, multiplier(Control.SKY_EV));

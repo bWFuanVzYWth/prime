@@ -1130,6 +1130,7 @@ mod abi_tests {
             exposure: 1.0,
             hue: 0.75,
             saturation: 0.08,
+            compression_start: 0.5,
             view: 0,
             sun: 1.0,
             sky: 1.0,
@@ -1213,6 +1214,7 @@ mod abi_tests {
                     terrain_batches_per_frame: 8,
                     auto_exposure_compensation: 0.6,
                     saturation: 0.08,
+                    compression_start: 0.5,
                     ..Default::default()
                 }
             );

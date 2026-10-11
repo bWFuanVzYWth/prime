@@ -549,6 +549,7 @@ impl Reconstruction {
             *dst = v.to_le_bytes();
         }
         push[52..56].copy_from_slice(&depth_range.to_le_bytes());
+        push[56..60].copy_from_slice(&display.values[5].to_le_bytes());
         unsafe {
             self.context.device.cmd_bind_pipeline(
                 command,

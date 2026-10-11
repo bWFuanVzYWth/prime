@@ -90,10 +90,10 @@ final class SettingsTest {
                 RenderSettings.Control.BOUNCES, 12);
         String valid = SettingsFile.encode(changed);
         for (String broken : new String[] {
-                     valid.replace("version=13", "version=0"),
-                     valid.replace("version=13", "version=7"),
-                     valid.replace("version=13", "version=14"),
-                     valid.replace("version=13", ""),
+                     valid.replace("version=14", "version=0"),
+                     valid.replace("version=14", "version=7"),
+                     valid.replace("version=14", "version=15"),
+                     valid.replace("version=14", ""),
                      valid.replace("render.bounces=12", ""),
                      valid.replace("render.bounces=12", "render.bounces=65"),
                      valid.replace("terrain.batches_per_frame=1", ""),
@@ -147,7 +147,7 @@ final class SettingsTest {
         assertEquals(1, PrimeSettings.offline_samples(view(bytes)));
         assertEquals(4.0f, PrimeSettings.exposure(view(bytes)));
         assertEquals(.75f, PrimeSettings.hue(view(bytes)));
-        assertEquals(.20f, PrimeSettings.saturation(view(bytes)));
+        assertEquals(.10f, PrimeSettings.saturation(view(bytes)));
         assertEquals(3, PrimeSettings.view(view(bytes)));
         assertEquals(.5f, PrimeSettings.sun(view(bytes)));
         assertEquals(1f, PrimeSettings.sky(view(bytes)));
@@ -160,25 +160,48 @@ final class SettingsTest {
         assertEquals(3, PrimeSettings.reconstruction_quality(view(bytes)));
         assertEquals(1, PrimeSettings.terrain_batches_per_frame(view(bytes)));
         assertEquals(1f, PrimeSettings.stars(view(bytes)));
-        assertEquals(.75f, PrimeSettings.auto_exposure_compensation(view(bytes)));
+        assertEquals(.65f, PrimeSettings.auto_exposure_compensation(view(bytes)));
         assertEquals(0, PrimeSettings.hdr(view(bytes)));
         assertEquals(0, PrimeSettings.hdr_reference_white(view(bytes)));
         assertEquals(0, PrimeSettings.frame_generation(view(bytes)));
         assertEquals(1, PrimeSettings.light_sampling(view(bytes)));
         assertEquals(0, PrimeSettings.integrator(view(bytes)));
         assertEquals(0, PrimeSettings.ignore_global_history_resets(view(bytes)));
-        assertEquals(216, PrimeSettings.SIZE);
+        assertEquals(220, PrimeSettings.SIZE);
         assertEquals(0, PrimeSettings.restir_spatial_only(view(bytes)));
+    }
+    @Test
+    void compressionStartPersistsAndMigrates() {
+        var control = RenderSettings.Control.COMPRESSION_START;
+        var defaults = RenderSettings.defaults();
+        assertEquals(50, defaults.value(control));
+        for (int value : new int[] {0, 18, 50, 99}) {
+            var settings = defaults.with(control, value);
+            var loaded = SettingsFile.decode(SettingsFile.encode(settings));
+            assertEquals("", loaded.resetReason());
+            assertEquals(settings, loaded.settings());
+            var wire = settingsBuffer();
+            loaded.settings().write(wire, false, RenderSettings.View.OUTPUT);
+            assertEquals(value / 100f, PrimeSettings.compression_start(view(wire)));
+        }
+        var old = SettingsFile.encode(defaults.with(RenderSettings.Control.SATURATION, 8))
+                          .replace("version=14", "version=13")
+                          .replace("display.compression_start_percent=50\n", "");
+        var migrated = SettingsFile.decode(old);
+        assertEquals("", migrated.resetReason());
+        assertEquals(50, migrated.settings().value(control));
+        assertEquals(8, migrated.settings().value(RenderSettings.Control.SATURATION));
+        assertThrows(IllegalArgumentException.class, () -> defaults.with(control, 100));
     }
     @Test
     void saturationDefaultsPreserveSavedValuesAndIndependentWire(@TempDir Path dir)
             throws Exception {
         var control = RenderSettings.Control.SATURATION;
         var defaults = RenderSettings.defaults();
-        assertEquals(13, RenderSettings.VERSION);
-        assertEquals(20, defaults.value(control));
+        assertEquals(14, RenderSettings.VERSION);
+        assertEquals(10, defaults.value(control));
         Path file = dir.resolve("primept.properties");
-        assertEquals(20, SettingsFile.load(file).settings().value(control));
+        assertEquals(10, SettingsFile.load(file).settings().value(control));
         var before = settingsBuffer();
         var after = settingsBuffer();
         defaults.write(before, false, RenderSettings.View.OUTPUT);
@@ -210,7 +233,7 @@ final class SettingsTest {
                 changed.write(after, offline, RenderSettings.View.OUTPUT);
                 assertEquals(PrimeSettings.SIZE, after.position());
                 assertEquals(budget, PrimeSettings.terrain_batches_per_frame(view(after)));
-                assertOnlyFieldChanged(before, after, 72);
+                assertOnlyFieldChanged(before, after, 76);
             }
         }
         assertNotEquals(defaults, defaults.with(control, 8));
@@ -313,7 +336,7 @@ final class SettingsTest {
                 chosen.write(after, offline, RenderSettings.View.OUTPUT);
                 assertEquals(renderer == RenderSettings.Renderer.RESTIR_PT ? 1 : 0,
                              PrimeSettings.integrator(view(after)));
-                assertOnlyFieldChanged(before, after, 100);
+                assertOnlyFieldChanged(before, after, 104);
             }
         }
         var restir = defaults.withRenderer(RenderSettings.Renderer.RESTIR_PT);
@@ -462,7 +485,7 @@ final class SettingsTest {
                 assertEquals("", migrated.resetReason());
                 assertEquals(expected, migrated.settings());
                 String canonical = SettingsFile.encode(migrated.settings());
-                assertTrue(canonical.contains("version=13\n"));
+                assertTrue(canonical.contains("version=14\n"));
                 assertTrue(canonical.contains(
                         "diagnostics.native_noisy_output=" + !oldReconstruction + "\n"));
                 assertFalse(canonical.contains("ray_reconstruction"));
@@ -476,7 +499,7 @@ final class SettingsTest {
                     assertEquals(!oldReconstruction ? 1 : 0,
                                  PrimeSettings.native_noisy_output(view(before)));
                     assertEquals(diagnosticView.ordinal(), PrimeSettings.view(view(before)));
-                    assertOnlyFieldChanged(before, after, 64);
+                    assertOnlyFieldChanged(before, after, 68);
                 }
                 for (String malformed : new String[] {
                              legacy.replace("render.ray_reconstruction=" + oldReconstruction + "\n",
@@ -534,7 +557,7 @@ final class SettingsTest {
                 assertEquals(1, PrimeSettings.light_sampling(view(wire)));
                 SettingsFile.save(file, loaded.settings());
                 String canonical = Files.readString(file);
-                assertTrue(canonical.contains("version=13\n"));
+                assertTrue(canonical.contains("version=14\n"));
                 assertTrue(canonical.contains("render.light_sampling=TREE\n"));
                 assertFalse(canonical.contains(retired));
                 assertEquals(expected, SettingsFile.load(file).settings());
@@ -566,7 +589,7 @@ final class SettingsTest {
             defaults.write(before, offline, RenderSettings.View.OUTPUT);
             enabled.write(after, offline, RenderSettings.View.OUTPUT);
             assertEquals(1, PrimeSettings.ignore_global_history_resets(view(after)));
-            assertOnlyFieldChanged(before, after, 104);
+            assertOnlyFieldChanged(before, after, 108);
         }
         var copied = enabled.withRenderer(RenderSettings.Renderer.RESTIR_PT)
                              .withOpacityMicromap(false)
@@ -610,7 +633,7 @@ final class SettingsTest {
                 original.withRestirTemporalReuse(false).write(after, offline,
                                                               RenderSettings.View.OUTPUT);
                 assertEquals(1, PrimeSettings.restir_spatial_only(view(after)));
-                assertOnlyFieldChanged(before, after, 108);
+                assertOnlyFieldChanged(before, after, 112);
                 assertEquals(0, PrimeSettings.native_noisy_output(view(after)));
             }
         }
@@ -657,7 +680,7 @@ final class SettingsTest {
             assertEquals(expected, loaded.settings());
             assertFalse(loaded.settings().restirSpatialOnly());
             String saved = SettingsFile.encode(loaded.settings());
-            assertTrue(saved.contains("version=13\n"));
+            assertTrue(saved.contains("version=14\n"));
             assertTrue(saved.contains("restir_pt.temporal_reuse=true\n"));
             assertEquals(expected, SettingsFile.decode(saved).settings());
         }

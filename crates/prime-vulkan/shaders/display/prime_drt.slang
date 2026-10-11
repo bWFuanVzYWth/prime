@@ -14,11 +14,11 @@ public struct PrimeDRTParameters {
     public float encodedOutputPeak;
     public float hueCompensation;
     public float saturationCompensation;
+    public float compressionStart;
 };
 static const float3 NEUTRAL_WEIGHTS =
         float3(0.2120053547549465, 0.3921825078090138, 0.3958121374360396);
 static const float GAMUT_COMPRESSION = 0.04;
-static const float COMPRESSION_START = 0.18;
 float3 toVirtualRgb(float3 color) {
     float neutral = dot(color, NEUTRAL_WEIGHTS);
     return lerp(color, neutral.xxx, GAMUT_COMPRESSION);
@@ -31,13 +31,13 @@ float3 fromVirtualRgb(float3 color) {
 }
 
 float curveComponent(float value, PrimeDRTParameters parameters) {
-    if (value <= COMPRESSION_START)
+    if (value <= parameters.compressionStart)
         return value;
-    float distance = value - COMPRESSION_START;
-    float extent = parameters.curvePeak - COMPRESSION_START;
+    float distance = value - parameters.compressionStart;
+    float extent = parameters.curvePeak - parameters.compressionStart;
     // Equivalent reciprocal form avoids distance/extent overflow and a large final
     // denominator whose GPU reciprocal can flush to zero. Extent is bounded by headroom.
-    return COMPRESSION_START + extent / (1.0 + extent / distance);
+    return parameters.compressionStart + extent / (1.0 + extent / distance);
 }
 
 float3 curve(float3 value, PrimeDRTParameters parameters) {

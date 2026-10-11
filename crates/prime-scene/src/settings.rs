@@ -58,6 +58,7 @@ pub struct RenderSettings {
     pub exposure: f32,
     pub hue: f32,
     pub saturation: f32,
+    pub compression_start: f32,
     pub view: DiagnosticView,
     pub sun: f32,
     pub sky: f32,
@@ -89,7 +90,8 @@ impl Default for RenderSettings {
             terrain_batches_per_frame: 1,
             exposure: 1.0,
             hue: 0.75,
-            saturation: 0.20,
+            saturation: 0.10,
+            compression_start: 0.5,
             view: DiagnosticView::Output,
             sun: 1.0,
             sky: 1.0,
@@ -99,7 +101,7 @@ impl Default for RenderSettings {
             native_noisy_output: false,
             reconstruction_quality: ReconstructionQuality::Performance,
             stars: 1.0,
-            auto_exposure_compensation: 0.75,
+            auto_exposure_compensation: 0.65,
             hdr: false,
             hdr_reference_white: 0,
             frame_generation: false,
@@ -137,6 +139,7 @@ impl RenderSettings {
             exposure: f32::from_bits(word(16)),
             hue: f32::from_bits(word(20)),
             saturation: f32::from_bits(word(24)),
+            compression_start: 0.5,
             view: match word(28) {
                 0 => DiagnosticView::Output,
                 1 => DiagnosticView::NoisyColor,
@@ -220,6 +223,7 @@ impl RenderSettings {
             exposure: s.exposure,
             hue: s.hue,
             saturation: s.saturation,
+            compression_start: s.compression_start,
             view: match s.view {
                 0 => DiagnosticView::Output,
                 1 => DiagnosticView::NoisyColor,
@@ -295,6 +299,8 @@ impl RenderSettings {
             || !(1.0 / 4096.0..=4096.0).contains(&self.exposure)
             || !(0.0..=1.0).contains(&self.hue)
             || !(0.0..=0.5).contains(&self.saturation)
+            || !self.compression_start.is_finite()
+            || !(0.0..=0.99).contains(&self.compression_start)
             || !(1.0 / 256.0..=256.0).contains(&self.sun)
             || !(1.0 / 256.0..=256.0).contains(&self.sky)
             || !(1.0..=4096.0).contains(&self.depth_range)
@@ -330,7 +336,7 @@ mod tests {
             1,
             4_f32.to_bits(),
             0.75_f32.to_bits(),
-            0.20_f32.to_bits(),
+            0.10_f32.to_bits(),
             3,
             0.5_f32.to_bits(),
             1_f32.to_bits(),
@@ -343,7 +349,7 @@ mod tests {
             3,
             1,
             1_f32.to_bits(),
-            0.75_f32.to_bits(),
+            0.65_f32.to_bits(),
             0,
             0,
             0,
@@ -518,6 +524,7 @@ mod tests {
             exposure: defaults.exposure,
             hue: defaults.hue,
             saturation: defaults.saturation,
+            compression_start: defaults.compression_start,
             view: defaults.view as u32,
             sun: defaults.sun,
             sky: defaults.sky,
@@ -732,7 +739,7 @@ mod tests {
     #[test]
     fn saturation_defaults_and_explicit_legacy_wire_values() {
         let defaults = RenderSettings::default();
-        assert_eq!(defaults.saturation, 0.20);
+        assert_eq!(defaults.saturation, 0.10);
         for value in [0.0_f32, 0.08, 0.20, 0.5] {
             let mut bytes = golden();
             bytes[24..28].copy_from_slice(&value.to_bits().to_le_bytes());
@@ -740,6 +747,7 @@ mod tests {
             assert_eq!(accepted.saturation, value);
             assert!(accepted.transport_matches(RenderSettings {
                 saturation: defaults.saturation,
+                compression_start: defaults.compression_start,
                 ..accepted
             }));
         }

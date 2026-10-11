@@ -724,6 +724,7 @@ fn gpu_prime_drt_matches_legacy_across_controls_and_headroom() {
                         exposure_multiplier,
                         hue_compensation,
                         saturation_compensation,
+                        compression_start: 0.18,
                     }
                     .prepare(headroom)
                     .unwrap();

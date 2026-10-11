@@ -9,7 +9,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Properties;
 
-/** Schema 13 separates enable/selection and gives temporal reuse positive persisted semantics. */
+/** Schema 14 separates enable/selection and gives temporal reuse positive persisted semantics. */
 public final class SettingsFile {
     public record Loaded(RenderSettings settings, String resetReason) {}
     private SettingsFile() {}
@@ -28,7 +28,8 @@ public final class SettingsFile {
             var properties = new Properties();
             properties.load(new StringReader(text));
             String version = properties.getProperty("version");
-            boolean legacyRenderer = !Integer.toString(RenderSettings.VERSION).equals(version);
+            boolean legacyCurve = !Integer.toString(RenderSettings.VERSION).equals(version);
+            boolean legacyRenderer = legacyCurve && !"13".equals(version);
             boolean legacyRestir = "11".equals(version);
             boolean beforeResetDiagnostic = "8".equals(version);
             boolean legacyReconstruction = beforeResetDiagnostic || "9".equals(version);
@@ -85,8 +86,13 @@ public final class SettingsFile {
                             .withLightSampling(RenderSettings.LightSampling.fromKey(
                                     properties.getProperty("render.light_sampling", "")));
             for (var control : RenderSettings.Control.values())
-                result =
-                        result.with(control, Integer.parseInt(properties.getProperty(control.key)));
+                result = result.with(
+                        control,
+                        Integer.parseInt(properties.getProperty(
+                                control.key,
+                                legacyCurve && control == RenderSettings.Control.COMPRESSION_START
+                                        ? "50"
+                                        : null)));
             return new Loaded(result, "");
         } catch (IOException | IllegalArgumentException | NullPointerException failure) {
             return new Loaded(RenderSettings.defaults(),

@@ -138,7 +138,7 @@ bool resolvedFootprint(float2 position) {
                                 ? reconstructedColor[id.xy].rgb
                                 : spatialDenoise(source).rgb;
         PrimeDRTParameters parameters = {display.display.x, display.display.y, display.display.z,
-                                         display.display.w, display.extra.x};
+                                         display.display.w, display.extra.x,   display.extra.z};
         value = primeDRT(linear709ToWorking(primeRrFiniteHalfColor(linear)), parameters);
         break;
     }

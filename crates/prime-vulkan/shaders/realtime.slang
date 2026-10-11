@@ -21,7 +21,7 @@ import "math/color.slang";
     outputImage[id.xy] = float4(radiance, 1);
 #else
     PrimeDRTParameters display = {parameters.display.x, parameters.display.y, parameters.display.z,
-                                  parameters.display.w, parameters.extra.x};
+                                  parameters.display.w, parameters.extra.x,   parameters.extra.w};
     float3 value;
     switch (parameters.output.w) {
     case 1:

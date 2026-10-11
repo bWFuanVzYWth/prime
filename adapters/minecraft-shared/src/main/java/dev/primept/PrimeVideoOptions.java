@@ -58,7 +58,8 @@ public final class PrimeVideoOptions {
                         case SUN_EV, SKY_EV, EXPOSURE_EV ->
                             String.format(Locale.ROOT, "%+.2f EV", value / 4.0);
                         case LATITUDE, SOLAR_LONGITUDE -> value + "°";
-                        case HUE, SATURATION, STARS, AUTO_EXPOSURE -> value + "%";
+                        case HUE, SATURATION, COMPRESSION_START, STARS, AUTO_EXPOSURE ->
+                            value + "%";
                         case HDR_WHITE ->
                             value == 0 ? Component.translatable("primept.settings.automatic")
                                                  .getString()
@@ -155,6 +156,7 @@ public final class PrimeVideoOptions {
         list.addBig(controls.get(Control.HDR_WHITE));
         list.addBig(controls.get(Control.HUE));
         list.addBig(controls.get(Control.SATURATION));
+        list.addBig(controls.get(Control.COMPRESSION_START));
         list.addHeader(Component.translatable("primept.settings.diagnostics"));
         performanceCapture = OptionInstance.createBoolean(
                 "primept.settings.performance_export",

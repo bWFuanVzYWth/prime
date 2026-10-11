@@ -60,8 +60,13 @@ tasks.register('stageStreamlineRuntime', Copy) {
     into 'target/release'
     doFirst {
         rootProject.streamlineRuntimeFiles.each { name ->
-            if (!rootProject.file("third_party/streamline/bin/x64/${name}").isFile())
+            def runtime = rootProject.file("third_party/streamline/bin/x64/${name}")
+            if (!runtime.isFile())
                 throw new GradleException("Missing Streamline runtime ${name}; restore the pinned SDK runtime")
+            runtime.withInputStream { input ->
+                if (input.read() != 0x4d || input.read() != 0x5a)
+                    throw new GradleException("Invalid Streamline runtime ${name}; run git lfs pull before building (DLL must have an MZ header)")
+            }
         }
     }
 }
