@@ -11,6 +11,7 @@ mod contact;
 pub mod environment;
 mod fluid;
 mod labpbr;
+mod material;
 mod model;
 mod optics;
 mod placement;
@@ -21,6 +22,7 @@ mod timing;
 mod tint;
 mod typed;
 mod typed_resources;
+mod vanilla_pbr;
 mod volume;
 #[cfg(test)]
 use compile::compile_slab;

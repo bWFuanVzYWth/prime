@@ -10,6 +10,16 @@ import "bsdf/full/contract/flags.slang";
 public PrimeFullCompactOpaqueEvaluation
 primeFullCompactOpaqueEvaluate(float3 wi, float3 wo, PrimeFullCompactOpaqueState state) {
     PrimeFullCompactOpaqueEvaluation result;
+    if (state.metalness > 0.0 && state.metalness < 1.0) {
+        result.throughput = primeFullCompactMixEval(
+                primeFullCompactOpaqueLayerEval(wi, wo, state, PRIME_FULL_OPENPBR_FLAG_ALL),
+                primeFullCompactConductorEval(wi, wo, state, PRIME_FULL_OPENPBR_FLAG_ALL),
+                state.metalness);
+        result.pdf = lerp(primeFullCompactOpaqueLayerPdf(wi, wo, state),
+                          primeFullCompactConductorPdf(wi, wo, state, PRIME_FULL_OPENPBR_FLAG_ALL),
+                          state.metalness);
+        return result;
+    }
     result.throughput =
             state.kind == PRIME_FULL_COMPACT_OPAQUE_CONDUCTOR
                     ? primeFullCompactConductorEval(wi, wo, state, PRIME_FULL_OPENPBR_FLAG_ALL)
@@ -25,6 +35,21 @@ primeFullCompactOpaqueEvaluateComponents(float3 wi, float3 wo, PrimeFullCompactO
     PrimeFullCompactOpaqueComponents result;
     result.diffuse = float3(0.0);
     result.specular = float3(0.0);
+    if (state.metalness > 0.0 && state.metalness < 1.0) {
+        result.diffuse =
+                (1.0 - state.metalness) *
+                primeFullCompactOpaqueLayerEval(wi, wo, state, PRIME_FULL_OPENPBR_FLAG_DIFFUSE)
+                        .value;
+        result.specular = lerp(
+                primeFullCompactOpaqueLayerEval(wi, wo, state,
+                                                PRIME_FULL_OPENPBR_FLAG_SPECULAR |
+                                                        PRIME_FULL_OPENPBR_FLAG_DELTA)
+                        .value,
+                primeFullCompactConductorEval(wi, wo, state, PRIME_FULL_OPENPBR_FLAG_ALL).value,
+                state.metalness);
+        result.pdf = primeFullCompactOpaqueEvaluate(wi, wo, state).pdf;
+        return result;
+    }
     if (state.kind == PRIME_FULL_COMPACT_OPAQUE_CONDUCTOR) {
         result.specular = primeFullCompactConductorEval(wi, wo, state,
                                                         PRIME_FULL_OPENPBR_FLAG_SPECULAR |

@@ -18,7 +18,9 @@ public final class PrimeAbi {
     public static final int PRIME_STREAMLINE_RENDER_END = 2;
     public static final int PRIME_STREAMLINE_SUSPEND = 3;
     public static final int PRIME_STREAMLINE_HOST_SHUTDOWN = 4;
-    public static final int PRIME_MC_SOURCE_VERSION = 7;
+    public static final int PRIME_MC_SOURCE_VERSION = 9;
+    public static final int PRIME_MC_SPRITE_VANILLA_COLOR = 1;
+    public static final int PRIME_MC_SPRITE_PRIVATE_COLOR = 2;
     public static final int PRIME_MC_RESOURCE_REPLACE = 1;
     public static final class PrimeHeader {
         private PrimeHeader() {}
@@ -2560,7 +2562,7 @@ public final class PrimeAbi {
     }
     public static final class PrimeMcSprite {
         private PrimeMcSprite() {}
-        public static final long SIZE = 88, ALIGN = 8;
+        public static final long SIZE = 96, ALIGN = 8;
         public static final MemoryLayout LAYOUT =
                 MemoryLayout
                         .structLayout(JAVA_INT.withName("id"), JAVA_INT.withName("interpolate"),
@@ -2570,7 +2572,8 @@ public final class PrimeAbi {
                                       PrimeMcRange.LAYOUT.withName("images"),
                                       PrimeMcRange.LAYOUT.withName("frames"),
                                       JAVA_INT.withName("normal_image"),
-                                      JAVA_INT.withName("specular_image"))
+                                      JAVA_INT.withName("specular_image"),
+                                      JAVA_INT.withName("flags"), MemoryLayout.paddingLayout(4))
                         .withName("PrimeMcSprite");
         static {
             if (LAYOUT.byteSize() != SIZE || LAYOUT.byteAlignment() != ALIGN)
@@ -2593,6 +2596,8 @@ public final class PrimeAbi {
                 throw new ExceptionInInitializerError("PrimeMcSprite.normal_image offset");
             if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("specular_image")) != 84)
                 throw new ExceptionInInitializerError("PrimeMcSprite.specular_image offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("flags")) != 88)
+                throw new ExceptionInInitializerError("PrimeMcSprite.flags offset");
         }
         public static int id(MemorySegment value) {
             return value.get(JAVA_INT, 0L);
@@ -2642,6 +2647,12 @@ public final class PrimeAbi {
         }
         public static void specular_image(MemorySegment value, int field) {
             value.set(JAVA_INT, 84L, field);
+        }
+        public static int flags(MemorySegment value) {
+            return value.get(JAVA_INT, 88L);
+        }
+        public static void flags(MemorySegment value, int field) {
+            value.set(JAVA_INT, 88L, field);
         }
     }
     public static final class PrimeMcResourceBatch {

@@ -3,6 +3,7 @@
 #include <cstdio>
 
 int main() {
+    static_assert(sizeof(PrimePbrVertex_0) == 32, "canonical query-crossing vertex stays 32B");
     unsigned failures = 0, delta = 0, guide = 0, tir = 0;
     unsigned masks[11] = {};
     for (unsigned i = 0; i < 74088; ++i) {
@@ -26,8 +27,14 @@ int main() {
             std::printf("FAIL edge=%u\n", i);
         }
     }
+    for (unsigned i = 0; i < 256; ++i) {
+        if (pbrCanonicalByteCheck_0(i).x != 0) {
+            ++failures;
+            std::printf("FAIL canonical byte=%u\n", i);
+        }
+    }
     std::printf(
-            "PBR narrow contracts: 74088 cases, 13 edges; failures=%u delta=%u guide=%u TIR=%u\n",
+            "PBR narrow contracts: 74088 cases, 13 edges, 256 canonical bytes; failures=%u delta=%u guide=%u TIR=%u\n",
             failures, delta, guide, tir);
     for (unsigned bit = 0; bit < 11; ++bit)
         std::printf("mask%u=%u ", 1u << bit, masks[bit]);

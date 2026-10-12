@@ -1,6 +1,6 @@
 # FFM ABI v19
 
-Java 适配器与 Rust 核心作为同一构建产物配套使用。公共 ABI 为19，Minecraft 源 schema 为7，设置文件 schema 为15；版本用于边界拒绝，不承诺不同发布之间的二进制兼容。两版适配器共享同次构建的核心，JAR 和引擎不能混用。
+Java 适配器与 Rust 核心作为同一构建产物配套使用。公共 ABI 为19，Minecraft 源 schema 为9，设置文件 schema 为15；版本用于边界拒绝，不承诺不同发布之间的二进制兼容。两版适配器共享同次构建的核心，JAR 和引擎不能混用。
 
 ## 唯一结构契约与生成
 
@@ -76,7 +76,7 @@ Java 适配器与 Rust 核心作为同一构建产物配套使用。公共 ABI �
 
 Rust先验证最终批状态，允许同批新增原型并引用，或迁移/删除实例后移除旧原型；存活实例仍引用的原型不可移除。失败不改变顺序、引用、几何或实例。相同有效pose不更新内容版本，删除不存在身份只推进观察序号。`InstanceCapture` 仅在FFM成功后acknowledge，跳过的hook不丢脏记录；动态清空不清除独立实例，实例通过removal或world reset清理。
 
-## MC 源批次（source version 7）
+## MC 源批次（source version 9）
 
 字段类型和数组分组以 `prime_mc.h` 为准。MC 262/263的类型、枚举、palette和颜色语义只由 `prime_minecraft` 解释，场景/GPU不识别它们。未知game/source version明确拒绝；原型支持范围见 [源兼容待修复项](../FIXME.md)。
 
@@ -94,8 +94,9 @@ MC source数组不因C结构增加256 MiB逻辑整批上限，按checked count/e
 - model kind为0未知、1直接quad、2权重子项、3实际选中multipart子项、4别名。quad给四角位置、原packed UV（U高32位、V低32位）、face/tint/layer/sprite/emission；face0..5为下/上/北/南/西/东，6无剔除。真实源层和0..15发光级由版本层解释。必要selector只在显式资源准备按真实顺序求值一次。
 - face profile的U/V轴在X法向为Z/Y、Y法向为X/Z、Z法向为X/Y，格索引 `u*(v_count-1)+v`，word低位先行；0/1内置空/全面，其余ID≥2。support按direction×3+SupportType（FULL=0），未知动态支撑只置bit31。Java不做形状合并。
 - section present=0明确无源，不等于空段。bits=0恰好一个palette项及零word；其余每word存 `floor(64/bits)` 项、不跨word，顺序 `y*256+z*16+x`，恰好4096项。空palette表示全局registry ID，非空为局部索引。Rust校验后自持数据。
-- sprite ID为1..0x3fffffff，generic映射 `0x40000000+id`；动态ID不得进入此区间。静态mip0空payload共享atlas，动画mip0须完整sheet；尺寸/mip/索引/正时长和周期在资源准备验证。累计时长预计算，运行时查相位；同相位跳过新mip视图和辅助插值。变化相位保持原千分量化及分类材质插值规则，资源重载不因相位相同复用旧材质。
-- 只有 `format=lab-pbr/1.3` 和真实辅助图声明normal/specular，缺图不伪造像素。原始RGBA进入Rust，G/B清洗、sheet、mip、height和辅助动画仍归Rust；通道见[材质契约](materials.md)。
+- sprite ID为1..0x3fffffff，generic映射 `0x40000000+id`；动态ID不得进入此区间。静态mip0空payload共享atlas，动画mip0须完整sheet；尺寸/mip/索引/正时长和周期在资源准备验证。累计时长预计算，运行时查相位；同相位跳过新mip视图和辅助插值。变化相位保持千分量化，内部MERS连续混合，Aux按法线moment混合并保持当前帧IOR，资源重载不因相位相同复用旧材质。
+- `PrimeMcSprite`为96 B，flags bit0（`PRIME_MC_SPRITE_VANILLA_COLOR`）报告获胜基色Resource的实际`sourcePackId=vanilla`来源；bit1（`PRIME_MC_SPRITE_PRIVATE_COLOR`）表示独立于共享block atlas的自持Color，mip0必须有完整像素，且不进入block atlas lookup。其余位拒绝。Java只绑定来源，Rust按固定ID/版本表选择内嵌PNG；有效Lab材质整组优先。normal_image/specular_image仍是原始Lab输入引用；sheet、翻译、mip与动画归Rust，AO/height/porosity不进入内部格式，见[材质契约](materials.md)。
+- 独立item atlas的真实Preparations参与资源代失效；成功的native资源事务之后才发布实际sprite到canonical texture ID的映射。真实item quad只在绑定atlas一致且全部UV处于声明sprite范围时采用该映射，原packed UV保留在prototype，既有instance UV affine转换到local。未知sprite、不同绑定和跨sprite UV沿用实际atlas来源；不以像素或debug label猜运行时身份。
 
 ### 颜色源批次
 
@@ -113,10 +114,12 @@ Rust执行zoom、颜色规则、halo去重、整数前缀和及原版整数除�
 | --- | --- |
 | 0 | 基础像素偏移、视图宽、高、行步长；行步长 bit31 为 sprite 局部采样标记 |
 | 16 | 下一帧像素偏移、首个 lower-mip descriptor、lower-mip 数量、动画 blend 的 f32 bits |
-| 32 | normal descriptor、specular descriptor、材料 flags、coverage/atlas-lookup descriptor；0 表示缺失引用 |
+| 32 | Aux descriptor、MERS descriptor、材料 flags、coverage/atlas-lookup descriptor；0 表示缺失引用 |
 | 48 | sprite 的归一化 atlas bounds `[loU,loV,hiU,hiV]` 的 f32 bits；无 bounds 时为0 |
 
-材料 flags 的 bit0/1 表示 normal/specular，bit2 表示 authored emission，bit3 表示 atlas material lookup。lookup 的原始 CPU texel 是 source texture identity，上传时变为稳定 GPU sprite descriptor index；值0表示该处无辅助材质，采样不得将它当颜色。普通 presence coverage 使用 R 的位0/1/2。atlas 命中先解析 sprite descriptor 和 bounds，再按 local UV 消费该 sprite 的独立辅助视图。辅助图动画已由 CPU 按分类通道规则混合，其描述符 blend 固定0；基色保留源 RGBA 插值。
+材料flags的bit0/1表示Aux/MERS页存在，bit2为authored emission，bit3为atlas lookup，bit4为hasNormal；仅IOR的Aux不触发法线映射。lookup的CPU texel为source texture identity，上传变为稳定GPU sprite descriptor；值0不表示颜色。普通presence coverage的R位0/1/2仍区分页面与发光。atlas命中通过lookup和bounds取得sprite有效Color和两张辅助页，保证预处理颜色与直接sprite一致。Color/MERS/Aux每mip层内最近点、跨mip线性；Aux在CPU mip/动画按moment准备，GPU跨mip用RGBA线性近似；IOR与实际发光Color/G从当前帧mip0点采。辅助动画由CPU准备，descriptor blend=0，Color保持源RGBA动画插值。
+
+`PrimePbrVertex`仍为32 B，control保存M8/S8/IOR8及flags；不跨query保留源分类、发光或法线分布。
 
 共享 pixel backing 只上传与计费一次，描述符身份在当前纹理生命周期内稳定。所有材质平面及其完整 mip/动画 backing 进入既有512 MiB唯一像素预算；旧资源仍依最后消费者和 GPU 完成证明回收。光学邻接的 IOR 源引用复用已有 quad UV 记录的空闲字段，传输 GPU descriptor identity；不增加 quad 步长或新的 binding。
 

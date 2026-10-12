@@ -32,13 +32,15 @@ pub struct Texture {
 }
 #[derive(Clone, Debug, Default)]
 pub struct TextureMaterial {
-    /// RG tangent direction, B source AO, A GGX distribution perceptual roughness.
+    /// Internal RGBA8 Aux: biased tangent XY, distribution perceptual roughness, IOR.
     pub normal: Option<Texture>,
-    /// Complement roughness, canonical Fresnel identity, SSS intensity byte 0..190, emission.
+    /// Internal RGBA8 MERS: metalness, emission, perceptual roughness, thin SSS weight.
     pub specular: Option<Texture>,
+    /// Aux may contain only IOR. Its presence does not authorize a normal map.
+    pub has_normal: bool,
     /// Per-texel presence bits, or identities when `atlas_lookup` is set.
     pub coverage: Option<Texture>,
-    /// Any source alpha below 255 authorizes replacing ordinal host emission.
+    /// Source adapter explicitly authorizes replacing ordinal host emission.
     pub authored_emission: bool,
     /// Coverage texels store source texture identities, translated to GPU descriptor indices.
     pub atlas_lookup: bool,
@@ -114,7 +116,8 @@ impl Texture {
                             (Some(a), Some(b)) => a.same(b),
                             _ => false,
                         };
-                        a.authored_emission == b.authored_emission
+                        a.has_normal == b.has_normal
+                            && a.authored_emission == b.authored_emission
                             && a.atlas_lookup == b.atlas_lookup
                             && a.bounds == b.bounds
                             && same(&a.normal, &b.normal)
@@ -204,7 +207,8 @@ impl Texture {
             }
         }
         if let Some(material) = &self.material {
-            if material.authored_emission && material.specular.is_none()
+            if material.has_normal && material.normal.is_none()
+                || material.authored_emission && material.specular.is_none()
                 || material.atlas_lookup && material.coverage.is_none()
                 || material.bounds.is_some_and(|b| {
                     b.iter().any(|v| !v.is_finite() || !(0.0..=1.0).contains(v))

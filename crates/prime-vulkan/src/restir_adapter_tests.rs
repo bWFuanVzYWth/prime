@@ -144,7 +144,8 @@ fn medium_crossing_scene(explicit_source_water: bool) -> Scene {
     );
     let mut glass = texture(1, 1, vec![255; 4]);
     glass.material = Some(Arc::new(TextureMaterial {
-        specular: Some(texture(1, 1, vec![255, 10, 0, 0])),
+        normal: Some(texture(1, 1, vec![128, 128, 0, 79])),
+        specular: Some(texture(1, 1, vec![0, 0, 0, 0])),
         ..Default::default()
     }));
     fixture.textures.insert(7, glass);
@@ -480,7 +481,8 @@ pub(super) fn fixtures() -> Vec<(&'static str, Scene)> {
     let mut air = scene(1, vec![face(0.), mapped_rear, lamp()]);
     let mut normal_mapped = texture(1, 1, vec![255; 4]);
     normal_mapped.material = Some(Arc::new(TextureMaterial {
-        normal: Some(texture(1, 1, vec![128, 128, 255, 0])),
+        normal: Some(texture(1, 1, vec![128, 128, 0, 85])),
+        has_normal: true,
         ..Default::default()
     }));
     air.textures.insert(8, normal_mapped);
@@ -509,7 +511,8 @@ pub(super) fn fixtures() -> Vec<(&'static str, Scene)> {
     let mut refractive = scene(5, vec![interface, rear.clone(), lamp(), lower_lamp]);
     let mut glass = texture(1, 1, vec![255; 4]);
     glass.material = Some(Arc::new(TextureMaterial {
-        specular: Some(texture(1, 1, vec![80, 10, 0, 0])),
+        normal: Some(texture(1, 1, vec![128, 128, 0, 79])),
+        specular: Some(texture(1, 1, vec![0, 0, 175, 0])),
         ..Default::default()
     }));
     refractive.textures.insert(7, glass);
@@ -534,7 +537,8 @@ pub(super) fn fixtures() -> Vec<(&'static str, Scene)> {
     let mut coated = scene(4, vec![coating, rear, lamp()]);
     let mut material = texture(1, 1, vec![30, 170, 90, 128]);
     material.material = Some(Arc::new(TextureMaterial {
-        specular: Some(texture(1, 1, vec![80, 20, 0, 0])),
+        normal: Some(texture(1, 1, vec![128, 128, 0, 128])),
+        specular: Some(texture(1, 1, vec![0, 0, 175, 0])),
         ..Default::default()
     }));
     coated.textures.insert(7, material);
@@ -723,8 +727,17 @@ fn normal_measure_scene(revision: u64, normal: Option<[u8; 4]>, glossy: bool, ne
     let mut fixture = scene(revision, vec![front, rear, emitter]);
     let mut material = texture(1, 1, vec![255; 4]);
     material.material = Some(Arc::new(TextureMaterial {
-        normal: normal.map(|value| texture(1, 1, value.to_vec())),
-        specular: glossy.then(|| texture(1, 1, vec![175, 50, 0, 0])),
+        normal: normal
+            .map(|[x, y, distribution, _]| {
+                texture(
+                    1,
+                    1,
+                    vec![x, y, distribution, if glossy { 239 } else { 85 }],
+                )
+            })
+            .or_else(|| glossy.then(|| texture(1, 1, vec![128, 128, 0, 239]))),
+        has_normal: normal.is_some(),
+        specular: glossy.then(|| texture(1, 1, vec![0, 0, 80, 0])),
         ..Default::default()
     }));
     fixture.textures.insert(8, material);
@@ -755,7 +768,7 @@ fn gpu_restir_self_shift_preserves_strong_normal_and_grazing_measures() {
         ("flat", None, false, false, camera(), 1024),
         (
             "tilt-x",
-            Some([215, 128, 255, 0]),
+            Some([215, 128, 0, 85]),
             false,
             false,
             camera(),
@@ -763,7 +776,7 @@ fn gpu_restir_self_shift_preserves_strong_normal_and_grazing_measures() {
         ),
         (
             "tilt-y-glossy",
-            Some([128, 215, 255, 0]),
+            Some([128, 215, 0, 85]),
             true,
             false,
             camera(),
@@ -772,7 +785,7 @@ fn gpu_restir_self_shift_preserves_strong_normal_and_grazing_measures() {
         ("grazing-flat", None, false, false, grazing, 1024),
         (
             "grazing-tilt-x",
-            Some([215, 128, 255, 0]),
+            Some([215, 128, 0, 85]),
             false,
             false,
             grazing,
@@ -781,7 +794,7 @@ fn gpu_restir_self_shift_preserves_strong_normal_and_grazing_measures() {
         ("near-flat", None, false, true, camera(), 4096),
         (
             "near-tilt-x",
-            Some([215, 128, 255, 0]),
+            Some([215, 128, 0, 85]),
             false,
             true,
             camera(),
@@ -1133,7 +1146,8 @@ fn gpu_restir_rc_view_change_preserves_final_emitter_competing_pdf() {
     let mut fixture = scene(2001, vec![face(0.), rear, lamp(), other_lamp]);
     let mut material = texture(1, 1, vec![255; 4]);
     material.material = Some(Arc::new(TextureMaterial {
-        normal: Some(texture(1, 1, vec![215, 128, 255, 0])),
+        normal: Some(texture(1, 1, vec![215, 128, 0, 85])),
+        has_normal: true,
         ..Default::default()
     }));
     fixture.textures.insert(8, material);
@@ -1330,8 +1344,9 @@ fn gpu_restir_authored_thin_sss_self_shift_preserves_source_measure() {
             let mut material = texture(1, 1, vec![255; 4]);
             material.material = Some(Arc::new(TextureMaterial {
                 // Roughness1, non-conductor F0, pure SSS, no authored emission.
-                specular: Some(texture(1, 1, vec![0, 10, 190, 255])),
-                normal: mapped.then(|| texture(1, 1, vec![128, 128, 255, 0])),
+                specular: Some(texture(1, 1, vec![0, 0, 255, 255])),
+                normal: Some(texture(1, 1, vec![128, 128, 0, 79])),
+                has_normal: mapped,
                 ..Default::default()
             }));
             fixture.textures.insert(8, material);
@@ -1452,8 +1467,9 @@ fn rear_sun_scene(revision: u64, mapped: bool) -> Scene {
     let mut fixture = scene(revision, vec![primary]);
     let mut material = texture(1, 1, vec![255; 4]);
     material.material = Some(Arc::new(TextureMaterial {
-        specular: Some(texture(1, 1, vec![0, 10, 190, 255])),
-        normal: mapped.then(|| texture(1, 1, vec![128, 128, 255, 0])),
+        specular: Some(texture(1, 1, vec![0, 0, 255, 255])),
+        normal: Some(texture(1, 1, vec![128, 128, 0, 79])),
+        has_normal: mapped,
         ..Default::default()
     }));
     fixture.textures.insert(8, material);

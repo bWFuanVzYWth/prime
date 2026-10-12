@@ -11,9 +11,6 @@ import "bsdf/full/contract/flags.slang";
 import "bsdf/full/math/delta.slang";
 import "bsdf/full/math/fresnel.slang";
 import "bsdf/full/math/spectrum.slang";
-import "model/material/fresnel_code.slang";
-import "model/material/translation.slang";
-import "model/material/defaults.slang";
 import "service/bsdf/contract/sample.slang";
 import "service/bsdf/support/conversion.slang";
 import "service/bsdf/support/sanitization.slang";
@@ -97,11 +94,9 @@ public PrimePbrSample primeSamplePbrDelta(PrimePbrVertex vertex, float3 viewDire
                               : primeFullRefractiveDeltaSample(wi, randomEvent, fresnel,
                                                                PRIME_FULL_OPENPBR_FLAG_ALL);
         } else if (wi.z > 0.0) {
-            PrimeConductorFresnel source = primeConductorFresnel(
-                    vertex.baseColor, vertex.control & PRIME_OPTICAL_FRESNEL_MASK);
             PrimeFullOpenPbrConductorFresnel fresnel = {};
-            fresnel.f0 = source.f0;
-            fresnel.f82 = source.f82Tint;
+            fresnel.f0 = saturate(vertex.baseColor);
+            fresnel.f82 = float3(1.0);
             fresnel.f90 = float3(1.0);
             fresnel.weight = 1.0;
             sampled.wo = reflect(-wi, float3(0.0, 0.0, 1.0));

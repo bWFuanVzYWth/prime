@@ -308,7 +308,8 @@ fn gpu_primary_half_selection_preserves_delta_energy_and_leaves_rough_first_surf
     };
     let mut texture = image(vec![255; 4]);
     texture.material = Some(Arc::new(TextureMaterial {
-        specular: Some(image(vec![128, 5, 0, 0])),
+        normal: Some(image(vec![128, 128, 0, 56])),
+        specular: Some(image(vec![0, 0, 127, 0])),
         ..Default::default()
     }));
     rough.textures.insert(1, texture);

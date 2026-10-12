@@ -32,9 +32,9 @@ K2 的交接点是 landing 的 coverage、纹理/材质解析、该段 Beer、co
 
 ## 当前顶点接口与查询切面
 
-`pbr/vertex.slang` 的 `PrimePbrVertex` 保留 working RGB、面向视角的世界着色法线、有效粗糙度和分类控制字，共八个 32-bit 分量。控制字包含 Fresnel/SSS 身份、法线贴图存在性、材质薄壁、dielectric 与 conductor 分类；缺图默认值已经进入顶点。`SurfacePoint` 另有 position、几何 normal 和安全偏移量。两者都不保存 UV/TBN、原始纹理记录或完整 closure；其源码尺寸不等于物理寄存器数。
+`pbr/vertex.slang` 的 `PrimePbrVertex` 保留 working RGB、面向视角的世界着色法线、有效粗糙度和材质控制字，共八个 32-bit 分量。控制字保存M8/S8/IOR8及法线贴图、材质薄壁、dielectric标志；缺图默认值已经进入顶点。`SurfacePoint` 另有 position、几何 normal 和安全偏移量。两者都不保存 UV/TBN、原始纹理记录或完整 closure；其源码尺寸不等于物理寄存器数。
 
-整闭包 delta 判定使用实际过滤、LabPBR 解码及 normal 分布组合后的 roughness：conductor 为 `r*r < 1e-4`；厚 optical 为同一边界或实际界面 IOR 比等于1；薄 optical 为现有 IOR scaler 调整后的 transmission alpha `< 1e-4`。普通 opaque/SSS 保留连续分量，始终在 landing 停下。`pbr/delta.slang` 共享 Full 的离散 Fresnel、薄壁级数、折射和响应数学，不进入一般 evaluate/sample 分派；`pbr/guide_albedo.slang` 单独保留原方向能量与清洗，不准备采样概率或完整状态。
+整闭包 delta 判定使用实际过滤、内部MERS/Aux解码及 normal 分布组合后的 roughness：conductor 为 `r*r < 1e-4`；厚 optical 为同一边界或实际界面 IOR 比等于1；薄 optical 为现有 IOR scaler 调整后的 transmission alpha `< 1e-4`。普通 opaque/SSS 保留连续分量，始终在 landing 停下。`pbr/delta.slang` 共享 Full 的离散 Fresnel、薄壁级数、折射和响应数学，不进入一般 evaluate/sample 分派；`pbr/guide_albedo.slang` 单独保留原方向能量与清洗，不准备采样概率或完整状态。
 
 | 当前切面 | 此后仍有消费者的数据 | 已结束的消费 |
 | --- | --- | --- |
@@ -80,13 +80,13 @@ K1/K2/post分别采用128B、80B、112B push接口和各自实际资源视图。
 | 当前 view | 框架、入射局部方向、Fresnel/能量调整、lobe 权重及介质接口选择 | 可重算或缓存；前置后是否覆盖阴影遍历、是否在无消费者路径白做，需核算 |
 | 当前 outgoing 或 sample | 完整 response/PDF、事件、方向、eta、几何支持、结果清洗、throughput 与下一介质 | 依赖本次方向和实际运算结果，不能由源输入合法性替代 |
 
-specular 分类 G/B 使用当前帧 mip0 点采样身份；可靠的 CPU 全域证明可用于去掉不可能的分支。specular 连续 R/A 按实际 UV/LOD 过滤后量化、解码；normal atlas A 则保存过滤后的分布粗糙度，并参与有效粗糙度组合。非线性解码与过滤一般不能交换顺序，不能将“类别可预先规范化”推广为“所有纹理解码都可前移”。
+内部Color/MERS/Aux按实际UV每mip层内最近点、跨mip线性过滤；M/S因32B持久control各量化一次，roughness直接消费过滤值。发光使用当前帧mip0 Color/G，与NEE/ReSTIR一致。Aux A的IOR固定当前帧mip0点采；Aux B保存CPU mip/动画的法线分布粗糙度，GPU跨mip过滤使用轻量RGBA插值近似。可靠CPU全域证明可去掉不可能的能力分支；非线性解码与过滤不能任意交换，准备阶段源翻译不等于实际BSDF求值可提前。
 
-同一 bilinear level 的不可变 image/stride/frame/blend metadata 只解析一次，四个邻点保持原 normalized UV、sprite clamp/whole-texture repeat、每 texel RGBA8 动画量化及两层 lerp 顺序。它不改为硬件过滤，不跨 LOD/资源代次缓存；独立旧/新实现逐位对照覆盖 clamp/repeat 和动画混合。普通 blocker 的阴影 candidate 只有原物理 optical bit 有消费者时才准备 boundary IOR；最近交点仍保留真实介质解析。
+层内最近点保留原normalized UV、sprite clamp/whole-texture repeat、每texel RGBA8动画量化及跨mip lerp顺序，不跨LOD/资源代次缓存。独立CPU oracle与实际GPU测试覆盖非中心UV、texel边界、clamp/repeat、动画混合及分数LOD。普通 blocker 的阴影 candidate 只有原物理 optical bit 有消费者时才准备 boundary IOR；最近交点仍保留真实介质解析。
 
 CPU 证明必须说明生产者、覆盖域、未知情况和失效路径。当前可见像素、单帧动画或旧资源代次不能证明整个 resident 场景没有某种材质；不能证明时使用通用路径。增加 CPU 扫描、复制、缓存和重编译也有成本，须分别评估稳态、加载与更新，不把 GPU 节省无条件视作整帧收益。
 
-LabPBR SSS强度在CPU清洗为0..190，资源准备对完整确定性源建立薄片证明；所有动画帧的SSS能力复用已有源像素扫描，只有证明薄片且可能含SSS的简单quad转入rich表面。主/第二层证明使用现有word43的两个bit，176/240/272/432B记录stride、上传容量、描述符和GPU退休合同不变；每次实际保留该字段的`loadQuad`新增4B逻辑读取，真实事务及寄存器成本未测。资源更新重算CPU证明，未知/厚体按普通opaque消费；不新增纹理副本、全图状态、pass、队列或GPU等待。CPU rich记录的容量与实际整帧成本另行测量，不由删Lite和厚SSS分支推断加速。
+LabPBR SSS强度在CPU翻译为内部0..255薄壁权重，资源准备对完整确定性源建立薄片证明；所有动画帧的SSS能力复用已有源像素扫描，只有证明薄片且可能含SSS的简单quad转入rich表面。主/第二层证明使用现有word43的两个bit，176/240/272/432B记录stride、上传容量、描述符和GPU退休合同不变；每次实际保留该字段的`loadQuad`新增4B逻辑读取，真实事务及寄存器成本未测。资源更新重算CPU证明，未知/厚体按普通opaque消费；不新增纹理副本、全图状态、pass、队列或GPU等待。CPU rich记录的容量与实际整帧成本另行测量，不由删Lite和厚SSS分支推断加速。
 
 ## 必须保持的语义与可复用简化
 
@@ -100,7 +100,7 @@ LabPBR SSS强度在CPU清洗为0..190，资源准备对完整确定性源建立�
 
 静态灯采样和静态最近交点共用 translation-only 安全重构，使用各自实际页的 origin 与原物理三角形，保留 RTX 误差界；不为静态 emitter 构造通用正反仿射矩阵。局部灯选择的全局 index 在查询目录后结束，只将有消费者的样本值返回；接收侧 cosine 在局部评价内消费，不作为无用 output 传回 PT。天空/发光命中与其它消费者共用同一个功率启发式数学入口。源码收窄与数学复用本身不声明驱动寄存器或帧时收益。
 
-同 hit 的发光当前复用已解析材质和已过滤 specular A；证明包含同一选中记录、动画帧、UV/LOD 与资源代次，并保留 front/two-sided gate、EOTF 和 legacy fallback。局部灯 emitter 没有现成的相同样本时仍走自身解析；原物理边界的 IOR 也不能用选中着色记录代替。消除重复计算必须证明输入和消费语义一致。
+同hit的发光复用已解析材质；LOD0可复用Color/MERS G，高LOD authored emission另取当前帧mip0 G，只有发光确实依赖Color时补取mip0 Color。证明包含同一选中记录、动画帧、UV与资源代次，并保留front/two-sided gate、EOTF和legacy fallback；发光LOD统一为0。局部灯emitter使用相同域；原物理边界的IOR不能用选中着色记录代替。消除重复计算必须证明输入和消费语义一致。
 
 ## 光源采样与发布成本
 
@@ -158,3 +158,17 @@ RR 的 input/output 尺寸、抖动、格式、运动和历史边界见[重建�
 单次测量、假设、失败实验、计数脚本、编译/抓帧原件、版本与冻结产物放 Git 忽略的 `artifacts/`。这里保留可复用的依赖分析和当前实现说明，不以某次本地报告为阅读前提；性能敏感设计改变时同步更新本文及相应语义契约。
 
 ReSTIR既有质量问题与FG呈现验收已按用户确认关闭；现存萤火虫及水下收敛振荡独立见[问题登记](../FIXME.md)。当前5×5空间滤波是未明确接受的临时替代（PT-021，归入FIXME），不符合最终时域重建目标，不计作正式降噪后端完成。SDK严格同步和未支持来源边界仍独立维护。
+
+## 固定 RGBA8 材质执行
+
+Color/MERS/Aux在资源准备时固定，GPU不解释外部分类码。必要值为共享颜色、coverage、MERS、normal方向/分布与IOR；明确接受8bit量化和标准金属共享颜色。标准金属n/k、AO、porosity、height与发光哨兵在源适配边界结束。几何、介质身份、完整PDF/MIS、实际帧和完成证明继续保持。
+
+32 B `PrimePbrVertex`保存RGB、世界normal、有效roughness和M8/S8/IOR8/flags。normal分布先合并roughness，发光在实际命中结束，不新增跨query闭包或ONB。分数M只在当前evaluate/sample准备两支混合与完整marginal PDF，m=0/1复用端点；去掉Lab分类和GPU n/k数学，但混合本身增加成本。CPU一次判断原版基色来源及预设资格、准备全部帧支持域和必要颜色override，资源换代重算。
+
+不新增pass/队列/记录stride或全屏buffer，atlas有效Color通过既有lookup解析。验证检查生产shader产物和sample/evaluate/PDF、字段布局、资源原子发布；实际寄存器/物理事务/稳态帧时未由结构变化证明。正式保留判断按原生1920×1080、固定场景/seed/预算的CPU/GPU及初始化/动画/重载分离测量，收益不足不叠加精度补偿路径。
+
+内嵌预设覆盖扩展的RGB精确/模糊匹配及源帧投影全部离线完成，运行时仅在资源代准备时二分查询冻结ID表。共享宿主Color/alpha/tint，新增MERS/Aux仍经现有材质准备、缓存、动画与完成证明路径；没有逐帧RGB扫描或shader外部格式解释。PNG按需解码并共享像素所有者。扩大覆盖会增加材质准备/上传、实际材质采样、分数金属混合和发光支持的工作，不能把离线前移解释为稳态提速；容量、加载及原生1080p帧成本分别验收。
+
+独立item atlas的真实quad新增一次sprite身份读取和O(1)发布目录查询；只对已知绑定检查四角UV，原packed值读取一次并保留。典型单sprite物品仍为一个实例组，多sprite来源可以分组增加；inverse UV affine只在组准备时计算，沿用既有instance记录与GPU变换。资源代额外保存item Color各帧/mip，原dynamic atlas仍可供raw回退，因此须计入CPU源与GPU真实唯一backing，不能声称全链零复制。没有新增pass、队列、跨查询状态或ABI结构尺寸。
+
+材质空间采样与Color共用层内nearest、跨mip线性：每页每层1个texel，分数LOD最多2个，避免近景为无消费者的四邻居插值和人为混合金属/发光边界。CPU mip/动画与法线moment继续保持。发光命中、NEE/ReSTIR统一mip0 point域，高LOD命中为authored G及确需Color的分支补采，零G不重取Color；没有新增query活跃字段或pass。逻辑读数减少不证明实际事务、寄存器或帧率提升，正式性能仍需固定1080p场景测量。

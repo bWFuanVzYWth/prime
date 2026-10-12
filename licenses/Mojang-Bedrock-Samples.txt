@@ -1,0 +1,42 @@
+Mojang Bedrock sample material assets
+===================================
+
+Upstream notice from Mojang/bedrock-samples LICENSE.md:
+
+(c) Mojang AB. All rights reserved.
+
+By downloading the files in this repository, you agree to the [Minecraft End User License Agreement](https://www.minecraft.net/en-us/eula) and that these files are subject to its terms.
+
+Incorporated asset scope and processing
+--------------------------------------
+
+Source repository: https://github.com/Mojang/bedrock-samples
+Source commit: 921fafb05c93abeae56c2f2868cd8f942bdbcc0f
+Source version: 1.26.30.5, published 2026-06-16
+
+Prime incorporates material images for the Java blocks and items atlases,
+including conduit/bell/enchanting-book sprites, from this reference as
+editable 8-bit RGBA PNG files in:
+  crates/prime-minecraft/assets/vanilla_pbr/minecraft/
+
+The complete Java sprite IDs, selected source paths, matching decisions and
+incorporated planes are recorded in the adjacent manifest.json. Matching uses
+existing Java RGB, including explicitly accepted fuzzy matches; the game's own
+base color, alpha and tint remain the source of those channels.
+
+The offline importer changes material containers to PNG, aligns source frames
+to the Java sheet layout, resolves the source metalness/subsurface winner rule
+before filtering, and converts authored normals to the internal format.
+RGB MER sources receive a zero subsurface channel. Original source paths and
+hashes, per-version RGB matching and generated baseline pixel/file hashes
+are recorded in the adjacent manifest.json and source.lock.json. Committed PNGs
+are the final editable assets; later art edits may differ from those baselines.
+Missing auxiliary planes use the internal constant defaults.
+No Bedrock base-color images, original TGA files, models, behaviors, scripts or
+general resource-pack loader are incorporated in this asset scope.
+
+The material images retain Mojang's copyright and upstream Minecraft EULA terms.
+Their PNG representation does not relicense them as Prime-authored GPL assets.
+Prime's offline importer, registry and material adaptation code remain under the
+project LICENSE and LICENSE-EXCEPTIONS. This notice preserves the source terms
+and identifies the included material assets; it grants no additional rights.

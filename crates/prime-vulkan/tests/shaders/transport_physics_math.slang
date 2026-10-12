@@ -10,8 +10,10 @@ import "model/material/medium.slang";
 import "service/bsdf/contract/sample.slang";
 [[vk::binding(0, 0)]] StructuredBuffer<uint4> inputs;
 [[vk::binding(1, 0)]] RWStructuredBuffer<uint4> outputs;
-[[vk::binding(2, 0)]] StructuredBuffer<uint4> textures;
-[[vk::binding(3, 0)]] StructuredBuffer<uint> texels;
+[[vk::binding(2, 0)]] StructuredBuffer<uint4> physicsTextures;
+[[vk::binding(3, 0)]] StructuredBuffer<uint> physicsTexels;
+[[vk::binding(4, 0)]] StructuredBuffer<InstanceMaterial> unusedInstances;
+[[vk::binding(5, 0)]] StructuredBuffer<TrianglePage> unusedPages;
 [[vk::push_constant]] ConstantBuffer<uint4> dispatch;
 
 public struct PhysicsTestEnergy : IPrimeFullOpenPbrTransmissionGgxEnergy {
@@ -22,11 +24,11 @@ public struct PhysicsTestEnergy : IPrimeFullOpenPbrTransmissionGgxEnergy {
 
 // Locked pre-refactor arithmetic, independent of production prepared metadata helpers.
 float4 legacyTexel(uint address) {
-    uint packed = texels[address];
+    uint packed = physicsTexels[address];
     return float4(packed & 255, (packed >> 8) & 255, (packed >> 16) & 255, packed >> 24) / 255.0;
 }
 float4 legacyPoint(float2 uv) {
-    uint4 image = textures[0];
+    uint4 image = physicsTextures[0];
     bool sprite = (image.w & 0x80000000u) != 0;
     float2 local = sprite ? saturate(uv) : frac(uv);
     uint2 pixel = min(uint2(local * float2(image.yz)), image.yz - 1);
@@ -34,24 +36,13 @@ float4 legacyPoint(float2 uv) {
     uint at = pixel.y * stride + pixel.x;
     float4 color = legacyTexel(image.x + at);
     if (sprite) {
-        uint4 extra = textures[1];
+        uint4 extra = physicsTextures[1];
         float blend = asfloat(extra.w);
         if (blend > 0.0)
             color = floor(lerp(color, legacyTexel(extra.x + at), blend) * 255.0 + 0.5) / 255.0;
     }
     return color;
 }
-float4 legacyLinear(float2 uv) {
-    float2 dimensions = float2(textures[0].yz);
-    float2 position = uv * dimensions - 0.5;
-    float2 lo = floor(position), f = frac(position);
-    float4 a = legacyPoint((lo + float2(.5, .5)) / dimensions);
-    float4 b = legacyPoint((lo + float2(1.5, .5)) / dimensions);
-    float4 c = legacyPoint((lo + float2(.5, 1.5)) / dimensions);
-    float4 d = legacyPoint((lo + float2(1.5, 1.5)) / dimensions);
-    return lerp(lerp(a, b, f.x), lerp(c, d, f.x), f.y);
-}
-
 [numthreads(1, 1, 1)] void main(uint3 id : SV_DispatchThreadID) {
     uint index = id.x;
     if (index >= dispatch.y)
@@ -108,8 +99,9 @@ float4 legacyLinear(float2 uv) {
         first = asuint(float4(evaluated.response, evaluated.pdf));
         second.x = primePbrVertexIsDiscreteOnly(vertex, incident, transmitted) ? 1 : 0;
     } else {
-        first = asuint(primeLinearMaterialLevel(textures, texels, 0, a.xy));
-        second = asuint(legacyLinear(a.xy));
+        TraceScene resources = {physicsTextures, physicsTexels, unusedInstances, unusedPages};
+        first = asuint(sampleMaterial(resources, 0, a.xy, 0.0));
+        second = asuint(legacyPoint(a.xy));
     }
     outputs[2 * index] = first;
     outputs[2 * index + 1] = second;

@@ -25,9 +25,8 @@ public float4 rrCpuEta(float etaScale, float relativeEta, bool transmission) {
 public PrimePbrSample rrCpuDeltaBsdf(float cosine, bool thin, float4 incident, float4 transmitted,
                                      float3 randomValue) {
     float3 view = float3(sqrt(max(0.0, 1.0 - cosine * cosine)), 0, cosine);
-    PrimePbrVertex vertex =
-            primePbrVertex(float3(1), float3(0, 0, 1), 0, float3(1.0, 4.0 / 255.0, 0), false, true,
-                           thin, true, view);
+    PrimePbrVertex vertex = primePbrVertex(float3(1), float3(0, 0, 1), 0, float4(0.0), 85.0 / 255.0,
+                                           false, true, thin, true, view);
     // Roulette's exact eta/medium seam needs only Full delta optics, which has no energy LUT.
     // Continuous Full BSDF/roughness behavior is exercised by the actual-LUT GPU fixtures.
     return primeSamplePbrDelta(vertex, view, float3(0, 0, 1), randomValue.z, incident, transmitted);

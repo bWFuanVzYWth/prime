@@ -1,0 +1,34 @@
+{
+  "schema": 1,
+  "enabled_atlases": ["blocks", "items"],
+  "forced_matches": {
+    "minecraft:block/lightning_rod_on": {
+      "source": "textures/blocks/lightning_rod_powered",
+      "frame": 0,
+      "reason": "Java powered rod RGB is uniform white; RGB loses material identity. Use powered-rod source MERS preserving host Color/tint."
+    },
+    "minecraft:entity/conduit/wind": {
+      "source": "textures/blocks/conduit_wind_horizontal",
+      "frame": 0,
+      "projection": "frame-index",
+      "reason": "RGB hidden texels/normalized small-feature collision; real conduit wind source visible RGB is equal. Align 64x32 source frames with the Java 22-frame layout."
+    },
+    "minecraft:entity/conduit/wind_vertical": {
+      "source": "textures/blocks/conduit_wind_vertical",
+      "frame": 0,
+      "projection": "frame-index",
+      "reason": "RGB hidden texels/normalized small-feature collision; real conduit wind source visible RGB is equal. Align 64x32 source frames with the Java 22-frame layout."
+    }
+  },
+  "exclude_java": {},
+  "exclude_bedrock": {},
+  "source_frame_extent": {
+    "textures/blocks/conduit_wind_horizontal": {"extent": [64, 32], "reason": "Pinned source 64x704 and Java height32 metadata; all 22 same-index source/Java frames have identical visible RGB"},
+    "textures/blocks/conduit_wind_vertical": {"extent": [64, 32], "reason": "Pinned source 64x704 and Java height32 metadata; all 22 same-index source/Java frames have identical visible RGB"},
+    "textures/items/compass_atlas": {"extent": [16, 16], "reason": "Pinned vanilla compass directional atlas: 16x512, 32 numbered direction icons"},
+    "textures/items/lodestonecompass_atlas": {"extent": [16, 16], "reason": "Pinned vanilla lodestone compass directional atlas: 16x512, 32 numbered direction icons"},
+    "textures/items/recovery_compass_atlas": {"extent": [16, 16], "reason": "Pinned vanilla recovery compass directional atlas: 16x512, 32 numbered direction icons"},
+    "textures/items/watch_atlas": {"extent": [16, 16], "reason": "Pinned vanilla clock time atlas: 16x1024, 64 numbered time icons"}
+  },
+  "notes": "Corrections: JavaID or versionInteger:JavaID -> {source: textures/... Bedrock ID, frame: integer, reason: text}. Exclusions map IDs to reasons. Frame extent overrides require source layout evidence. Items activation must follow runtime source integration. No runtime matching."
+}

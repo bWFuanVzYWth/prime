@@ -102,10 +102,10 @@ public float3 primeTraceLanding<Distance>(TraceScene resources, AtmLighting envi
             float3 albedo = sourceToWorking(saturate(hit.sourceColor.rgb));
             float3 normal = dot(hit.shadingNormal, direction) > 0.0 ? -hit.shadingNormal
                                                                     : hit.shadingNormal;
-            material = primePbrVertex(albedo, normal, hit.normalSample.a, hit.specularSample.rgb,
-                                      (hit.materialFlags & 1) != 0, (hit.materialFlags & 2) != 0,
-                                      hit.optical ? hit.thin : hit.materialThin, hit.optical,
-                                      -direction);
+            material = primePbrVertex(
+                    albedo, normal, hit.normalSample.b, hit.specularSample, hit.normalSample.a,
+                    (hit.materialFlags & PRIME_MATERIAL_NORMAL) != 0, (hit.materialFlags & 2) != 0,
+                    hit.optical ? hit.thin : hit.materialThin, hit.optical, -direction);
             thin = hit.thin;
             incident = hit.optical && !thin ? hit.incident : medium;
             transmitted = thin ? primeThinInsideMedium(hit) : hit.transmitted;

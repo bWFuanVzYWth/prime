@@ -120,30 +120,38 @@ pub(super) fn fixture(case: Case, revision: u64) -> (Scene, Camera) {
         vertical_fov_radians: 0.45,
     };
     let mut source = texel([255; 4]);
+    if matches!(
+        case,
+        Case::MirrorMiss | Case::NormalRoughMirror | Case::EmissiveMirror
+    ) {
+        // The former Lab iron fixture now supplies its preconverted shared sRGB F0 color.
+        source = texel([193, 190, 187, 255]);
+    }
     let mut faces = Vec::new();
     let specular = match case {
-        Case::MirrorMiss | Case::NormalRoughMirror => Some([255, 231, 0, 255]),
-        Case::EmissiveMirror => Some([255, 231, 0, 128]),
+        Case::MirrorMiss | Case::NormalRoughMirror => Some([255, 0, 0, 0]),
+        Case::EmissiveMirror => Some([255, 128, 0, 0]),
         Case::GlassLanding | Case::GlassLights | Case::ThinGlass | Case::TirLanding => {
-            Some([255, 5, 0, 255])
+            Some([0, 0, 0, 0])
         }
         Case::RoughGlass
         | Case::RoughGlassLights
         | Case::EqualIorRoughGlass
-        | Case::ThinEqualIorRoughGlass => Some([150, 5, 0, 255]),
-        Case::SmoothMixed => Some([255, 5, 0, 255]),
-        Case::Subsurface | Case::ThinSubsurface => Some([120, 5, 190, 255]),
-        Case::CoverageNormal => Some([160, 5, 0, 255]),
+        | Case::ThinEqualIorRoughGlass => Some([0, 0, 105, 0]),
+        Case::SmoothMixed => Some([0, 0, 0, 0]),
+        Case::Subsurface | Case::ThinSubsurface => Some([0, 0, 135, 255]),
+        Case::CoverageNormal => Some([0, 0, 95, 0]),
         _ => None,
     };
     let normal = match case {
-        Case::CoverageNormal => Some(texel([170, 110, 255, 0])),
-        Case::NormalRoughMirror => Some(texel([128, 128, 255, 128])),
+        Case::CoverageNormal => Some(texel([170, 110, 0, 85])),
+        Case::NormalRoughMirror => Some(texel([128, 128, 128, 85])),
         _ => None,
     };
     if specular.is_some() || normal.is_some() {
         source.material = Some(Arc::new(TextureMaterial {
             specular: specular.map(texel),
+            has_normal: normal.is_some(),
             normal,
             authored_emission: matches!(case, Case::EmissiveMirror),
             ..Default::default()

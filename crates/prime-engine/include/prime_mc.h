@@ -2,7 +2,9 @@
 #define PRIME_MC_H
 #include <stdint.h>
 
-#define PRIME_MC_SOURCE_VERSION 7
+#define PRIME_MC_SOURCE_VERSION 9
+#define PRIME_MC_SPRITE_VANILLA_COLOR 1
+#define PRIME_MC_SPRITE_PRIVATE_COLOR 2
 #define PRIME_MC_RESOURCE_REPLACE 1
 
 typedef struct PrimeMcIdentity {
@@ -124,6 +126,7 @@ typedef struct PrimeMcSprite {
     PrimeMcRange frames;
     uint32_t normal_image;
     uint32_t specular_image;
+    uint32_t flags;
 } PrimeMcSprite;
 
 typedef struct PrimeMcResourceBatch {

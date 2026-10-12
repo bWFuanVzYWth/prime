@@ -478,7 +478,8 @@ impl Textures {
             let material_flags = u32::from(planes[0].is_some())
                 | u32::from(planes[1].is_some()) << 1
                 | u32::from(material.is_some_and(|m| m.authored_emission)) << 2
-                | u32::from(material.is_some_and(|m| m.atlas_lookup)) << 3;
+                | u32::from(material.is_some_and(|m| m.atlas_lookup)) << 3
+                | u32::from(material.is_some_and(|m| m.has_normal)) << 4;
             let bounds = material
                 .and_then(|m| m.bounds)
                 .unwrap_or([0.; 4])

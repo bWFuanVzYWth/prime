@@ -71,7 +71,7 @@ Windows 构建的 Streamline C++ 静态桥接需要 MSVC C++ 工具链；Streaml
 
 ## ABI 生成与验证
 
-公共 C ABI 为 v19，Minecraft 源 schema 为 v7，配置文件 schema 为 v15。JAR 与 DLL 必须配套重建；旧字节入口不再导出。只修改 `crates/prime-engine/include/prime.h` / `prime_mc.h`，由头文件生成 `prime_abi/src/generated.rs`、Java `PrimeAbi` 和两份 Rust export 类型检查，不要手工维护布局或 export 名单。
+公共 C ABI 为 v19，Minecraft 源 schema 为 v9，配置文件 schema 为 v15。JAR 与 DLL 必须配套重建；旧字节入口不再导出。只修改 `crates/prime-engine/include/prime.h` / `prime_mc.h`，由头文件生成 `prime_abi/src/generated.rs`、Java `PrimeAbi` 和两份 Rust export 类型检查，不要手工维护布局或 export 名单。
 
 ```powershell
 python scripts/generate-abi.py --probe clang
@@ -320,10 +320,21 @@ cargo test -p prime_vulkan --features shader-tests --lib --locked object_tests::
 cargo test -p prime_vulkan --features shader-tests --lib --locked gpu_optical_visibility -- --ignored --nocapture --test-threads=1
 cargo test -p prime_vulkan --features shader-tests --lib --locked gpu_solar_sampled_radiance -- --ignored --nocapture --test-threads=1
 cargo test -p prime_vulkan --features shader-tests --lib --locked gpu_cross_bilateral_uvs -- --ignored --nocapture --test-threads=1
-# Full 窄构造/真实LUT、薄壁SSS/厚壁拒绝及采样/评价；LabPBR 上传、atlas 查询与动画
+# Full 窄构造/真实LUT、连续metalness完整PDF、薄壁SSS/厚壁拒绝；内部MERS/Aux上传、atlas共享C与动画
 cargo test -p prime_vulkan --features shader-tests --lib --locked pbr_tests:: -- --ignored --nocapture --test-threads=1
 cargo test -p prime_vulkan --features shader-tests --lib --locked pbr_texture_tests:: -- --ignored --nocapture --test-threads=1
 ```
+
+内嵌PNG与Lab源翻译的CPU行为随`prime_minecraft`测试执行。资产检查与离线工具验证：
+
+```powershell
+python scripts/import-vanilla-pbr.py --check
+python -B -m unittest discover -s scripts -p test_import_vanilla_pbr.py
+```
+
+生成依赖、固定来源参数、匹配规则及人工覆盖入口见[预设资产说明](crates/prime-minecraft/assets/vanilla_pbr/README.md)。匹配工具长期保留；更新Java或Bedrock来源时重新生成候选，检查精确/模糊匹配、冲突赢家、帧投影和完整未接入清单，再更新冻结登记。PNG是可编辑最终源，构建不重生成；数据alpha为0时必须保留RGB，不能以重新生成覆盖艺术修改。两版`cpuSmoke`的model_sprite组同时验证实际获胜资源包的原版来源与Lab读取。材质内部格式见[材质合同](docs/materials.md)。
+
+内嵌预设的游戏验收由用户分别启动两版客户端：观察金/铁/铜等金属、发光方块与火/熔岩动画、植物薄SSS及物品图集；覆盖动画相位、离线冻结、资源重载、外部Lab（含normal-only）优先和非原版基色退出预设。独立实体贴图的预设资格按清单中的来源接口边界判断，不把物品图集覆盖外推到全部实体。增加发光和金属材质会改变场景实际工作量，稳态帧数需另按原生1080p固定场景验证。
 
 光学测试组合水/厚薄玻璃与前、中、后方的 opaque/cutout/stochastic blocker，并反转 mesh/primitive 顺序；无遮挡时对照解析 Beer/Fresnel，遮挡使用独立 coverage 参照。太阳测试使用实际圆盘采样，覆盖昼、夜和地平线部分可见，验证同一采样方向的辐亮度与支持域。它们是行为检查，不是稳态性能基线。
 

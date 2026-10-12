@@ -84,7 +84,7 @@ FG统计有效时，F3显示实际呈现帧率，并在括号内保留渲染帧�
 
 ## 材质资源包
 
-已接入 LabPBR 1.3 的法线、粗糙度、介电反射率、标准/自定义金属和发光贴图，支持辅助图动画与法线分布过滤。资源包必须在 `assets/minecraft/optifine/texture.properties` 声明 `format=lab-pbr/1.3`，并提供对应方块图集 sprite 的 `_n.png` / `_s.png`；缺少声明或贴图时使用默认材质。地形与使用同一图集 UV 的物品共享材质。
+已接入 LabPBR 1.3 的法线、粗糙度、介电反射率、标准/自定义金属和发光贴图，加载时统一转换到8bit内部格式，支持辅助图动画与法线分布过滤。资源包必须在 `assets/minecraft/optifine/texture.properties` 声明 `format=lab-pbr/1.3`，并提供对应方块／物品 sprite 的 `_n.png` / `_s.png`；没有有效外部材质时，受支持的原版方块和物品使用内嵌PBR预设，包含金属、发光和动画材质，其余使用默认材质。预设采用离线RGB精确及模糊匹配，保留游戏自己的基色、透明度和tint；仅对实际原版基色启用，地形及已路由的常见物品使用同一内部材质。覆盖清单与未接入原因见[预设说明](crates/prime-minecraft/assets/vanilla_pbr/README.md)。基岩版材质包暂不直接支持。
 
 实时与离线共同使用OpenPBR支持子域及多次散射补偿；水/已证明玻璃支持粗糙反射/透射。常见树叶、草叶、花和作物在没有 specular 材质图时使用50%薄壁SSS艺术近似，材质图可以覆盖该默认值；钟乳石等非植物不会因十字模型进入预设。一般来源仍要求CPU薄片证明，LabPBR厚SSS不支持并回退常规漫反射。LitePBR与厚SSS近似已删除。AO/height不作乘色/位移，完整foliage体积模型未接入，旧PBR预设不导入。支持域见[材质说明](docs/materials.md)，已接受近似见[HACK](HACK.md)。
 

@@ -5,11 +5,7 @@ module "pbr/vertex.slang";
 
 import "bsdf/full/contract/material.slang";
 import "bsdf/full/math/frame.slang";
-import "model/material/labpbr.slang";
-import "model/material/defaults.slang";
-import "model/material/optical.slang";
-import "model/material/fresnel_code.slang";
-import "model/material/translation.slang";
+__exported import "model/material/canonical.slang";
 import "service/bsdf/contract/sample.slang";
 
 public struct PrimePbrSample {
@@ -18,10 +14,9 @@ public struct PrimePbrSample {
     public float4 medium;
 };
 
-public static const uint PRIME_PBR_VERTEX_THIN_WALLED = 1u << 16u;
-public static const uint PRIME_PBR_VERTEX_DIELECTRIC = 1u << 17u;
-public static const uint PRIME_PBR_VERTEX_HAS_NORMAL = 1u << 18u;
-public static const uint PRIME_PBR_VERTEX_CONDUCTOR = 1u << 19u;
+public static const uint PRIME_PBR_VERTEX_THIN_WALLED = 1u << 24u;
+public static const uint PRIME_PBR_VERTEX_DIELECTRIC = 1u << 25u;
+public static const uint PRIME_PBR_VERTEX_HAS_NORMAL = 1u << 26u;
 
 public struct PrimePbrVertex {
     public float3 baseColor;
@@ -43,14 +38,24 @@ public bool primePbrVertexIsThinWalled(PrimePbrVertex vertex) {
 }
 
 public bool primePbrVertexIsConductor(PrimePbrVertex vertex) {
-    return (vertex.control & PRIME_PBR_VERTEX_CONDUCTOR) != 0u;
+    return (vertex.control & 255u) == 255u;
+}
+public float primePbrVertexMetalness(PrimePbrVertex vertex) {
+    return float(vertex.control & 255u) / 255.0;
+}
+public float primePbrVertexSubsurface(PrimePbrVertex vertex) {
+    return float((vertex.control >> 8u) & 255u) / 255.0;
+}
+public float primePbrVertexIor(PrimePbrVertex vertex) {
+    return primeDecodeMaterialIor((vertex.control >> 16u) & 255u);
 }
 
-// R/A are continuous filtered inputs; G/B retain their canonical point-selected identity.
-// No frame, closure, source AO, emission alpha or tangent normal remains in this vertex.
+// M/S are quantized once for the compact query-crossing control word. IOR already came
+// from current-frame mip0; roughness consumes the filtered MERS B without another byte round.
 public PrimePbrVertex primePbrVertex(float3 baseColor, float3 normal, float normalVariance,
-                                     float3 opticalSample, bool hasNormal, bool hasSpecular,
-                                     bool thinWalled, bool dielectric, float3 viewDirection) {
+                                     float4 mersSample, float iorSample, bool hasNormal,
+                                     bool hasMers, bool thinWalled, bool dielectric,
+                                     float3 viewDirection) {
     PrimePbrVertex vertex;
     vertex.baseColor = baseColor;
     vertex.normal = dot(normal, viewDirection) < 0.0 ? -normal : normal;
@@ -60,27 +65,21 @@ public PrimePbrVertex primePbrVertex(float3 baseColor, float3 normal, float norm
                      (dielectric ? PRIME_PBR_VERTEX_DIELECTRIC : 0u);
     // Missing specular on a CPU-declared plant preset uses a colored thin SSS fallback.
     // Authored specular (including an explicit zero SSS channel) always takes precedence.
-    if (!hasSpecular && thinWalled && !dielectric)
-        vertex.control |= 95u << PRIME_OPTICAL_SUBSURFACE_SHIFT; // 50% of canonical 190.
-    if (hasSpecular) {
-        uint roughnessByte = uint(round(opticalSample.r * 255.0));
-        vertex.roughness = clamp(1.0 - float(roughnessByte) / 255.0, 0.0, 1.0);
+    vertex.control |= uint(round(saturate(iorSample) * 255.0)) << 16u;
+    if (!hasMers && thinWalled && !dielectric)
+        vertex.control |= 128u << 8u;
+    if (hasMers) {
+        vertex.roughness = saturate(mersSample.b);
         if (!dielectric) {
-            uint fresnelCode = uint(round(opticalSample.g * 255.0));
-            vertex.control |= fresnelCode;
-            if (primeIsSupportedConductorCode(fresnelCode)) {
-                vertex.control |= PRIME_PBR_VERTEX_CONDUCTOR;
-            } else if (thinWalled) {
-                // CPU publishes a proven thin surface and canonical SSS strength 0..190.
-                // Unsupported thick sources use ordinary opaque shading, without transmission.
-                uint subsurface = uint(round(opticalSample.b * 255.0));
-                vertex.control |= subsurface << PRIME_OPTICAL_SUBSURFACE_SHIFT;
-            }
+            uint metalness = uint(round(saturate(mersSample.r) * 255.0));
+            vertex.control |= metalness;
+            if (thinWalled && metalness < 255u)
+                vertex.control |= uint(round(saturate(mersSample.a) * 255.0)) << 8u;
         }
     }
     if (hasNormal)
-        vertex.roughness = primeCombineLabPbrNormalRoughness(vertex.roughness,
-                                                             clamp(normalVariance, 0.0, 1.0));
+        vertex.roughness =
+                primeCombineNormalRoughness(vertex.roughness, clamp(normalVariance, 0.0, 1.0));
     return vertex;
 }
 

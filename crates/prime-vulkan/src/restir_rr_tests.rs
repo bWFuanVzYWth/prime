@@ -518,9 +518,10 @@ fn mirror() -> Scene {
     let mut rear = face(6.0);
     rear.geometry.positions.reverse();
     let mut result = scene(4, vec![mirror, rear]);
-    let mut material = texture(1, 1, vec![255; 4]);
+    // Shared C contains the old standard-iron F0 in encoded BT.709.
+    let mut material = texture(1, 1, vec![193, 190, 187, 255]);
     material.material = Some(Arc::new(TextureMaterial {
-        specular: Some(texture(1, 1, vec![255, 231, 0, 255])),
+        specular: Some(texture(1, 1, vec![255, 0, 0, 0])),
         ..Default::default()
     }));
     result.textures.insert(7, material);

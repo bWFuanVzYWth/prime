@@ -25,6 +25,7 @@ public struct PrimeFullCompactLayerState {
 public struct PrimeFullCompactOpaqueState {
     public PrimeFullOpenPbrOnb onb;
     public uint kind;
+    public float metalness;
     public float3 baseColor;
     public float subsurfaceWeight;
     public float3 subsurfaceColor;

@@ -25,5 +25,12 @@ primeFullCompactOpaqueEnergy(float3 wi, PrimeFullCompactOpaqueState state) {
     result.diffuse = base * state.layer.transmittanceIn;
     result.specular = primeFullCompactDielectricEnergy(
             wi, state, PRIME_FULL_OPENPBR_FLAG_SPECULAR | PRIME_FULL_OPENPBR_FLAG_DELTA);
+    if (state.metalness > 0.0) {
+        result.diffuse *= 1.0 - state.metalness;
+        result.specular =
+                lerp(result.specular,
+                     primeFullCompactConductorEnergy(wi, state, PRIME_FULL_OPENPBR_FLAG_ALL),
+                     state.metalness);
+    }
     return result;
 }

@@ -314,19 +314,21 @@ int main() {
         for (bool thin : {false, true})
             for (float roughness : {0.0f, 0.25f, 0.8f})
                 for (float cosine : {0.05f, 0.5f, 1.0f})
-                    for (unsigned code : {0u, 4u, 230u, 231u, 239u, 255u}) {
-                        auto result =
-                                rrCpuAlbedos_0({0.2f, 0.4f, 0.8f}, {0.5f, float(code) / 255, 0},
-                                               roughness, dielectric, thin, cosine);
-                        for (float value :
-                             {result.diffuse_0.x, result.diffuse_0.y, result.diffuse_0.z,
-                              result.specular_0.x, result.specular_0.y, result.specular_0.z})
-                            require(std::isfinite(value) && value >= 0 && value <= 1,
-                                    "material energy guide finite range");
-                        if (!dielectric && (code == 231 || code == 239))
-                            require(result.diffuse_0.x == 0 && result.diffuse_0.y == 0 &&
-                                            result.diffuse_0.z == 0,
-                                    "conductor has no diffuse albedo");
+                    for (unsigned iorByte : {0u, 56u, 85u, 128u, 239u, 255u}) {
+                        for (float metalness : {0.0f, 0.5f, 1.0f}) {
+                            auto result = rrCpuAlbedos_0({0.2f, 0.4f, 0.8f},
+                                                         {metalness, float(iorByte) / 255, 0},
+                                                         roughness, dielectric, thin, cosine);
+                            for (float value :
+                                 {result.diffuse_0.x, result.diffuse_0.y, result.diffuse_0.z,
+                                  result.specular_0.x, result.specular_0.y, result.specular_0.z})
+                                require(std::isfinite(value) && value >= 0 && value <= 1,
+                                        "material energy guide finite range");
+                            if (!dielectric && metalness == 1.0f)
+                                require(result.diffuse_0.x == 0 && result.diffuse_0.y == 0 &&
+                                                result.diffuse_0.z == 0,
+                                        "conductor has no diffuse albedo");
+                        }
                     }
     std::printf("RR production motion/color/material CPU contracts: %u checks passed.\n", checks);
 }

@@ -12,22 +12,38 @@ fn rgba(bytes: [u8; 4]) -> u32 {
     u32::from_le_bytes(bytes)
 }
 
-fn canonical([r, g, b, a]: [u8; 4]) -> u32 {
-    let fresnel = if g <= 237 {
-        g + 1
-    } else if g == 255 {
-        239
-    } else {
-        0
-    };
-    let scattering = b.saturating_sub(65);
-    rgba([r, fresnel, scattering, a])
+// Legacy numeric cases are translated by this test adapter; GPU inputs are canonical MERS/Aux.
+fn canonical([smoothness, fresnel, scattering, emission]: [u8; 4]) -> u32 {
+    rgba([
+        if (230..=237).contains(&fresnel) || fresnel == 255 {
+            255
+        } else {
+            0
+        },
+        if emission == 255 {
+            0
+        } else {
+            (f32::from(emission) * 255.0 / 254.0).round() as u8
+        },
+        255 - smoothness,
+        (f32::from(scattering.saturating_sub(65)) * 255.0 / 190.0).round() as u8,
+    ])
 }
-
 fn source_case(specular: [u8; 4], flags: u32, dielectric: bool) -> [u32; INPUT_WORDS] {
     let mut result = [0; INPUT_WORDS];
+    let f0 = if specular[1] <= 229 {
+        (f32::from(specular[1]) / 255.0).clamp(0.02, 0.17)
+    } else {
+        0.04
+    };
+    let ior = (1.0 + f0.sqrt()) / (1.0 - f0.sqrt());
+    let ior_byte = if flags & 2 != 0 {
+        ((ior - 1.0) * 255.0 / 1.5).round() as u8
+    } else {
+        85
+    };
     result[..4].copy_from_slice(&[
-        rgba([128, 128, 191, 0]),
+        rgba([128, 128, 0, ior_byte]),
         canonical(specular),
         flags,
         u32::from(dielectric),
@@ -79,8 +95,132 @@ fn random(index: u32) -> [f32; 4] {
 }
 
 #[test]
+#[ignore = "requires Vulkan; verifies canonical metallic mixtures against independent endpoint response/PDF/guide measures"]
+fn gpu_canonical_fractional_metalness_preserves_marginal_pdf_and_delta_measure() {
+    let mut cases = Vec::new();
+    for m in [0, 1, 64, 128, 254, 255] {
+        for roughness in [0, 2, 3, 96, 255] {
+            for s in [0, 128, 255] {
+                for thin in [false, true] {
+                    for cosine in [1.0, 0.8, 0.02] {
+                        for sample in 0..32 {
+                            let mut case = source_case([0; 4], 2 | u32::from(thin) * 4, false);
+                            case[0] = rgba([128, 128, 0, 85]);
+                            case[1] = rgba([m, 0, roughness, s]);
+                            case[8..12].copy_from_slice(&bits(direction(cosine, 0.7)));
+                            case[12..16].copy_from_slice(&bits(random(sample)));
+                            cases.push(case);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let results = execute(15, &cases);
+    let mut discrete_mixed = 0;
+    let mut continuous_mixed = 0;
+    let mut mixed_transmission = 0;
+    let mut maximum_sample_evaluate_relative_error = 0.0_f32;
+    for (case, words) in cases.iter().zip(results) {
+        let m = case[1].to_le_bytes()[0];
+        let sampled = words[8] != 0;
+        let delta = words[8] & 16 != 0;
+        if sampled {
+            assert_eq!(
+                &words[12..16],
+                &case[16..20],
+                "opaque mixtures preserve the path medium"
+            );
+            for channel in 0..4 {
+                let expected = if m == 0 || m == 255 {
+                    words[56 + channel]
+                } else if delta {
+                    words[28 + channel]
+                } else {
+                    words[24 + channel]
+                };
+                let spec = case[1].to_le_bytes();
+                close(
+                    f32::from_bits(words[52 + channel]),
+                    f32::from_bits(expected),
+                    5e-5,
+                    &format!(
+                        "local mixed sample has full response and marginal probability M={} R={} S={} thin={} cos={} channel={channel}",
+                        spec[0],
+                        spec[2],
+                        spec[3],
+                        case[2] & 4 != 0,
+                        f32::from_bits(case[10])
+                    ),
+                );
+                close(
+                    f32::from_bits(words[4 + channel]),
+                    f32::from_bits(words[52 + channel]),
+                    1e-3,
+                    "float inlining/frame roundtrip at a near-delta GGX peak",
+                );
+                if !delta {
+                    let sample = f32::from_bits(words[4 + channel]);
+                    let evaluated = f32::from_bits(words[16 + channel]);
+                    maximum_sample_evaluate_relative_error = maximum_sample_evaluate_relative_error
+                        .max((sample - evaluated).abs() / sample.abs().max(1.0));
+                    if m != 255 || spec[2] >= 96 {
+                        close(
+                            sample,
+                            evaluated,
+                            1e-3,
+                            "sample/evaluate agreement away from the retained sharp conductor endpoint",
+                        );
+                    } else {
+                        // The retained conductor sampler evaluates its sampled half-vector;
+                        // evaluate reconstructs it from wi+wo. At near-delta/grazing peaks
+                        // f32 direction error is strongly amplified. Record it separately
+                        // rather than weakening the strict new mixture mathematics oracle.
+                        assert!(sample.is_finite() && evaluated.is_finite());
+                    }
+                }
+            }
+        }
+        for channel in 0..3 {
+            close(
+                f32::from_bits(words[40 + channel]),
+                f32::from_bits(words[32 + channel]),
+                5e-5,
+                "mixed diffuse guide energy",
+            );
+            close(
+                f32::from_bits(words[44 + channel]),
+                f32::from_bits(words[36 + channel]),
+                5e-5,
+                "mixed specular guide energy",
+            );
+        }
+        if m > 0 && m < 255 {
+            assert_eq!(
+                words[48], 0,
+                "a fractionally metallic closure retains continuous support"
+            );
+            if sampled {
+                if delta {
+                    discrete_mixed += 1;
+                } else {
+                    continuous_mixed += 1;
+                }
+                if words[8] & 2 != 0 {
+                    mixed_transmission += 1;
+                }
+            }
+        }
+    }
+    assert!(discrete_mixed > 0 && continuous_mixed > 0 && mixed_transmission > 0);
+    println!(
+        "metal mixture: {discrete_mixed} discrete, {continuous_mixed} continuous, {mixed_transmission} thin-SSS transmissions; maximum normalized float sample/evaluate error={maximum_sample_evaluate_relative_error}"
+    );
+}
+
+#[test]
 #[ignore = "requires Vulkan; executes production LabPBR and OpenPBR material translation"]
-fn gpu_labpbr_translation_preserves_codes_endpoints_and_defaults() {
+fn gpu_canonical_material_preserves_endpoints_and_defaults() {
     let mut cases = Vec::new();
     for channel in 0..=255u8 {
         cases.push(source_case([channel, channel, channel, channel], 6, false));
@@ -88,7 +228,7 @@ fn gpu_labpbr_translation_preserves_codes_endpoints_and_defaults() {
     for flags in [0, 1, 2, 3, 4, 5, 6, 7] {
         for smoothness in [0, 255] {
             let mut case = source_case([smoothness, 4, 255, 254], flags, false);
-            case[0] = rgba([0, 255, 128, 255]);
+            case[0] = rgba([0, 255, 128, 85]);
             cases.push(case);
         }
     }
@@ -96,18 +236,15 @@ fn gpu_labpbr_translation_preserves_codes_endpoints_and_defaults() {
     for (index, (case, words)) in cases.iter().zip(&results).enumerate() {
         let normal = case[0].to_le_bytes();
         let specular = case[1].to_le_bytes();
-        let roughness = 1.0 - f32::from(specular[0]) / 255.0;
-        let fresnel = specular[1];
-        let f0 = if fresnel == 0 || fresnel >= 231 {
-            0.04
-        } else {
-            (f32::from(fresnel - 1) / 255.0).clamp(0.02, 0.17)
-        };
-        let subsurface = specular[2];
+        let roughness = f32::from(specular[2]) / 255.0;
+        let metalness = specular[0];
+        let ior = 1.0 + 1.5 * f32::from(normal[3]) / 255.0;
+        let f0 = ((ior - 1.0) / (ior + 1.0)).powi(2);
+        let subsurface = specular[3];
         assert_eq!(
             words[4],
-            u32::from(fresnel) | u32::from(subsurface) << 8,
-            "canonical optical control case {index}"
+            u32::from(metalness) | u32::from(subsurface) << 8,
+            "canonical material control case {index}"
         );
         close(
             f32::from_bits(words[0]),
@@ -116,11 +253,7 @@ fn gpu_labpbr_translation_preserves_codes_endpoints_and_defaults() {
             "roughness endpoint",
         );
         close(f32::from_bits(words[1]), f0, 2e-7, "dielectric F0 codebook");
-        let emission = if specular[3] == 255 {
-            0.0
-        } else {
-            f32::from(specular[3]) / 254.0
-        };
+        let emission = f32::from(specular[1]) / 255.0;
         close(
             f32::from_bits(words[3]),
             emission,
@@ -131,7 +264,7 @@ fn gpu_labpbr_translation_preserves_codes_endpoints_and_defaults() {
         let has_normal = case[2] & 1 != 0;
         let material_roughness: f32 = if has_specular { roughness } else { 0.9 };
         let distribution = if has_normal {
-            f32::from(normal[3]) / 255.0
+            f32::from(normal[2]) / 255.0
         } else {
             0.0
         };
@@ -145,7 +278,7 @@ fn gpu_labpbr_translation_preserves_codes_endpoints_and_defaults() {
             3e-6,
             "normal mip roughness",
         );
-        let metal = has_specular && (231..=239).contains(&fresnel);
+        let metal = has_specular && metalness == 255;
         close(
             f32::from_bits(words[10]),
             if metal { 1.0 } else { 0.0 },
@@ -156,9 +289,9 @@ fn gpu_labpbr_translation_preserves_codes_endpoints_and_defaults() {
             f32::from_bits(words[11]),
             if !metal && case[2] & 4 != 0 {
                 if has_specular {
-                    f32::from(subsurface) / 190.0
+                    f32::from(subsurface) / 255.0
                 } else {
-                    0.5
+                    128.0 / 255.0
                 }
             } else {
                 0.0
@@ -389,12 +522,12 @@ fn gpu_full_sss_requires_cpu_thin_proof_and_preserves_path_medium() {
         let proven_thin = case[2] & 4 != 0;
         let specular = case[1].to_le_bytes();
         let thin = proven_thin;
-        let conductor = authored && (231..=239).contains(&specular[1]);
+        let conductor = authored && specular[0] == 255;
         let subsurface = if !conductor && thin {
             if authored {
-                f32::from(specular[2]) / 190.0
+                f32::from(specular[3]) / 255.0
             } else {
-                0.5
+                128.0 / 255.0
             }
         } else {
             0.0
@@ -440,7 +573,7 @@ fn gpu_full_sss_requires_cpu_thin_proof_and_preserves_path_medium() {
             assert!(values[4..8].iter().all(|v| v.is_finite() && *v > 0.0));
             assert!(values[16..20].iter().all(|v| v.is_finite() && *v > 0.0));
             close(values[3], 1.0, 0.0, "subsurface relative eta");
-            if specular[2] == 190 {
+            if specular[3] == 255 {
                 close(
                     values[5] / values[4],
                     1.5,
@@ -944,7 +1077,7 @@ fn gpu_full_production_samples_match_evaluation_mis_and_medium_handoff() {
         };
         assert_eq!(&words[12..16], expected_medium, "Full endpoint medium");
         if !dielectric && transmission {
-            assert!(thin && case[1].to_le_bytes()[2] > 0);
+            assert!(thin && case[1].to_le_bytes()[3] > 0);
             assert_ne!(flags & 4, 0, "thin SSS is diffuse");
             close(v[3], 1.0, 0.0, "thin SSS eta");
             diffuse_transmission += 1;

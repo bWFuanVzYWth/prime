@@ -13,6 +13,8 @@ pub(crate) struct Image {
 #[derive(PartialEq)]
 pub(crate) struct Sprite {
     pub name: String,
+    /// Only block-atlas members participate in the global atlas material lookup.
+    pub block_atlas: bool,
     pub bounds: [f32; 4],
     pub extent: [u32; 2],
     pub images: Vec<Image>,
@@ -56,6 +58,10 @@ impl Sprite {
             || bounds[2] <= bounds[0]
             || bounds[3] <= bounds[1]
             || value.interpolate > 1
+            || value.flags
+                & !(prime_abi::PRIME_MC_SPRITE_VANILLA_COLOR
+                    | prime_abi::PRIME_MC_SPRITE_PRIVATE_COLOR)
+                != 0
         {
             return Err("invalid source sprite".into());
         }
@@ -76,6 +82,10 @@ impl Sprite {
             images.push(image);
         }
         let base = &images[0];
+        let block_atlas = value.flags & prime_abi::PRIME_MC_SPRITE_PRIVATE_COLOR == 0;
+        if !block_atlas && base.pixels.is_empty() {
+            return Err("private source sprite is missing its color image".into());
+        }
         let descriptors = range(source.frames(), value.frames)?;
         if !base.width.is_multiple_of(extent[0])
             || !base.height.is_multiple_of(extent[1])
@@ -104,6 +114,7 @@ impl Sprite {
         coverage.dedup();
         let mut sprite = Self {
             name: string(source.bytes(), value.name)?,
+            block_atlas,
             bounds,
             extent,
             images,
@@ -132,6 +143,21 @@ impl Sprite {
         if normal.is_some() || specular.is_some() {
             sprite.material = Some(crate::labpbr::Material::from_images(
                 &sprite, normal, specular,
+            ));
+        } else if value.flags & prime_abi::PRIME_MC_SPRITE_VANILLA_COLOR != 0
+            && let Some(images) = crate::vanilla_pbr::images_for_version(
+                &sprite.name,
+                source.raw().identity.game_version,
+            )?
+            && [images.mers.width, images.mers.height]
+                == [sprite.images[0].width, sprite.images[0].height]
+        {
+            sprite.material = Some(crate::labpbr::Material::from_internal_images(
+                &sprite,
+                images.color,
+                images.mers,
+                images.auxiliary,
+                images.authored_normal,
             ));
         }
         Ok((value.id, sprite))
@@ -255,6 +281,7 @@ impl Sprite {
             id,
             Self {
                 name,
+                block_atlas: true,
                 bounds,
                 extent,
                 images,
@@ -314,6 +341,13 @@ impl Sprite {
         let base = &self.images[0];
         let [w, h] = self.extent;
         let (frame, next, blend) = self.phase(tick);
+        if let Some(material) = &self.material
+            && let Some(mut color) = material.color_image(self, frame, next, blend)
+        {
+            color.material = Some(material.image(self, frame, next, blend));
+            color.validate()?;
+            return Ok(color);
+        }
         let row = base.width / w;
         let mut texture = if base.pixels.is_empty() {
             let atlas = scene
@@ -396,15 +430,13 @@ impl Sprite {
             .as_ref()
             .is_some_and(crate::labpbr::Material::has_subsurface)
     }
-    pub fn fresnel_code(&self, frame: u32, uv: [f32; 2]) -> Option<u8> {
-        self.material
-            .as_ref()
-            .and_then(|m| m.fresnel_code(frame, uv))
+    pub fn ior_byte(&self, frame: u32, uv: [f32; 2]) -> Option<u8> {
+        self.material.as_ref().and_then(|m| m.ior_byte(frame, uv))
     }
-    pub fn fresnel_code_constant(&self) -> Option<u8> {
+    pub fn ior_byte_constant(&self) -> Option<u8> {
         self.material
             .as_ref()
-            .and_then(crate::labpbr::Material::fresnel_code_constant)
+            .and_then(crate::labpbr::Material::ior_byte_constant)
     }
 }
 
@@ -542,6 +574,7 @@ mod tests {
     fn local_uvs_only_repair_endpoint_ulps_and_keep_crops_and_orientation() {
         let sprite = Sprite {
             name: "test:uv".into(),
+            block_atlas: true,
             bounds: [0.25, 0.5, 0.375, 0.625],
             extent: [16, 16],
             images: vec![],
@@ -570,6 +603,7 @@ mod tests {
         let pixels: Arc<[u8]> = (0..64).flat_map(|i| [i, 0, 0, 255]).collect();
         let sprite = Sprite {
             name: "test:animated".into(),
+            block_atlas: true,
             bounds: [0., 0., 1., 1.],
             extent: [4, 4],
             images: vec![
@@ -629,6 +663,7 @@ mod tests {
             .unwrap();
         let sprite = Sprite {
             name: "test:offset_static".into(),
+            block_atlas: true,
             bounds: [0.5, 0.5, 0.75, 1.],
             extent: [4, 4],
             images: vec![
@@ -690,6 +725,7 @@ mod tests {
             .unwrap();
         let mut sprite = Sprite {
             name: "test:glass".into(),
+            block_atlas: true,
             bounds: [0., 0., 1., 1.],
             extent: [4, 4],
             images: vec![Image {

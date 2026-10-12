@@ -159,6 +159,7 @@ public final class ExclusiveTerrainCapture implements AutoCloseable {
         bridge.resources(current.resources.resources(SectionSources.GAME_VERSION, generation,
                                                      PrimeClient.CAPTURE.epoch(), 0, tick, true,
                                                      atlas.width(), atlas.height(), atlas.rgba()));
+        next.publishItemSprites();
         // Native replacement revokes all old geometry even when only model identity changed.
         // Recreate prototype/instance definitions and resend needed dynamic pixels in this epoch.
         DynamicCapture.close();

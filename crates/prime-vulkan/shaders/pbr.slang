@@ -17,10 +17,6 @@ import "bsdf/full/dielectric/evaluate.slang";
 import "bsdf/full/dielectric/refract.slang";
 import "bsdf/full/opaque/evaluate.slang";
 import "bsdf/full/opaque/state.slang";
-import "model/material/defaults.slang";
-import "model/material/optical.slang";
-import "model/material/fresnel_code.slang";
-import "model/material/translation.slang";
 import "service/bsdf/contract/sample.slang";
 import "service/bsdf/support/conversion.slang";
 import "service/bsdf/support/sanitization.slang";
@@ -51,24 +47,10 @@ PrimeFullCompactOpaqueState primePbrFullOpaqueState<Energy>(Energy energy, Prime
                                                             float3 wi,
                                                             float4 incidentMedium) where Energy
     : IPrimeFullOpenPbrTransmissionGgxEnergy {
-    bool conductor = primePbrVertexIsConductor(vertex);
-    uint fresnelCode = vertex.control & PRIME_OPTICAL_FRESNEL_MASK;
-    float3 f0 = float3(0.0);
-    float3 f82 = float3(0.0);
-    float interfaceIor = 1.0;
-    float subsurfaceWeight = 0.0;
-    if (conductor) {
-        PrimeConductorFresnel fresnel = primeConductorFresnel(vertex.baseColor, fresnelCode);
-        f0 = fresnel.f0;
-        f82 = fresnel.f82Tint;
-    } else {
-        interfaceIor = primeFullOpenPbrF0ToIor(primeDecodeDielectricF0(fresnelCode)) *
-                       (1.0 / incidentMedium.x);
-        subsurfaceWeight =
-                float((vertex.control >> PRIME_OPTICAL_SUBSURFACE_SHIFT) & 0xffu) / 190.0;
-    }
-    return primeFullPtOpaqueState(energy, vertex.baseColor, vertex.roughness, interfaceIor,
-                                  subsurfaceWeight, conductor, f0, f82, wi);
+    return primeFullPtMetallicState(energy, vertex.baseColor, vertex.roughness,
+                                    primePbrVertexIor(vertex) / incidentMedium.x,
+                                    primePbrVertexSubsurface(vertex),
+                                    primePbrVertexMetalness(vertex), wi);
 }
 
 BsdfEvaluation primePbrFullEvaluation(PrimeFullOpenPbrThroughput throughput, float pdf) {

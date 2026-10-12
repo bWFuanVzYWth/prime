@@ -29,6 +29,7 @@ public PrimeFullCompactOpaqueState primeFullCompactOpaqueStateInit<TransmissionG
     : IPrimeFullOpenPbrTransmissionGgxEnergy {
     PrimeFullCompactOpaqueState state;
     state.onb = material.geometry.onb;
+    state.metalness = material.weight.metalness;
     state.kind = material.weight.metalness == 1.0    ? PRIME_FULL_COMPACT_OPAQUE_CONDUCTOR
                  : material.weight.subsurface == 1.0 ? PRIME_FULL_COMPACT_OPAQUE_SUBSURFACE
                  : material.weight.subsurface > 0.0  ? PRIME_FULL_COMPACT_OPAQUE_MIXED_SUBSURFACE

@@ -24,6 +24,7 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.server.packs.PackLocationInfo;
 import net.minecraft.server.packs.PackResources;
 import net.minecraft.server.packs.PackType;
+import net.minecraft.server.packs.VanillaPackResourcesBuilder;
 import net.minecraft.server.packs.metadata.MetadataSectionType;
 import net.minecraft.server.packs.repository.PackSource;
 import net.minecraft.server.packs.resources.IoSupplier;
@@ -89,6 +90,7 @@ final class LabPbrSourcesCpuSmoke {
     }
 
     static void run() throws Exception {
+        vanillaOrigin();
         byte[] normal = png(NORMAL_BYTES), specular = png(SPECULAR_BYTES);
         var contents = new SpriteContents(NAME, new FrameSize(1, 1), new NativeImage(1, 1, true));
         try {
@@ -151,6 +153,34 @@ final class LabPbrSourcesCpuSmoke {
         var encoded = new ByteArrayOutputStream();
         check(ImageIO.write(image, "png", encoded), "RGBA PNG fixture writer");
         return encoded.toByteArray();
+    }
+
+    private static void vanillaOrigin() throws Exception {
+        var name = Identifier.withDefaultNamespace("block/stone");
+        var location = Identifier.withDefaultNamespace("textures/block/stone.png");
+        var info = new PackLocationInfo("vanilla", Component.literal("Vanilla fixture"),
+                                        PackSource.DEFAULT, Optional.empty());
+        for (boolean overridden : new boolean[] {false, true}) {
+            Object container = new VanillaPackResourcesBuilder()
+                                       .pushJarResources()
+                                       .exposeNamespace("minecraft")
+                                       .build(info);
+            // 26.3 wraps FixedPath resource layers; 26.2 is itself PackResources.
+            PackResources vanilla = container instanceof PackResources pack
+                                            ? pack
+                                            : (PackResources)container.getClass()
+                                                      .getMethod("fullResources")
+                                                      .invoke(container);
+            List<PackResources> packs =
+                    overridden ? List.of(vanilla, new MemoryPack(Map.of(location, new byte[] {1})))
+                               : List.of(vanilla);
+            try (var manager = new MultiPackResourceManager(PackType.CLIENT_RESOURCES, packs)) {
+                check(SourceSprites.vanillaColor(manager, name) == !overridden,
+                      "preset origin must follow the actual winning base resource");
+                check(!SourceSprites.vanillaColor(manager, NAME),
+                      "missing source must not authorize a vanilla preset");
+            }
+        }
     }
 
     private static void verify(TextureAtlasSprite sprite, Map<Identifier, byte[]> files,

@@ -30,6 +30,7 @@ primeFullPtOpaqueState<Energy>(Energy energy, float3 baseColor, float roughness,
                                float subsurfaceWeight, bool conductor, float3 f0, float3 f82,
                                float3 wi) where Energy : IPrimeFullOpenPbrTransmissionGgxEnergy {
     PrimeFullCompactOpaqueState state = {};
+    state.metalness = conductor ? 1.0 : 0.0;
     state.kind = conductor                 ? PRIME_FULL_COMPACT_OPAQUE_CONDUCTOR
                  : subsurfaceWeight == 1.0 ? PRIME_FULL_COMPACT_OPAQUE_SUBSURFACE
                  : subsurfaceWeight > 0.0  ? PRIME_FULL_COMPACT_OPAQUE_MIXED_SUBSURFACE
@@ -79,6 +80,32 @@ primeFullPtOpaqueState<Energy>(Energy energy, float3 baseColor, float roughness,
     return state;
 }
 
+// Canonical metalness mixes the two existing physical endpoints. The component
+// proposal uses the same m as its response weight, without another directional-energy
+// lookup or a second state. State is prepared only at its final local consumer.
+public PrimeFullCompactOpaqueState
+primeFullPtMetallicState<Energy>(Energy energy, float3 color, float roughness, float interfaceIor,
+                                 float subsurface, float metalness, float3 wi) where Energy
+    : IPrimeFullOpenPbrTransmissionGgxEnergy {
+    PrimeFullCompactOpaqueState state =
+            primeFullPtOpaqueState(energy, color, roughness, interfaceIor, subsurface,
+                                   metalness == 1.0, saturate(color), float3(1.0), wi);
+    if (metalness == 0.0 || metalness == 1.0)
+        return state;
+    state.metalness = metalness;
+    state.conductorFresnel.f0 = saturate(color);
+    state.conductorFresnel.f82 = float3(1.0);
+    state.conductorFresnel.f90 = float3(1.0);
+    state.conductorFresnel.weight = 1.0;
+    state.conductorFresnel.energyF0 = saturate(color);
+    state.conductorEss = primeFullOpenPbrMicrofacetEffectivelySmooth(state.microfacet)
+                                 ? 1.0
+                                 : primeFullOpenPbrMicrofacetDirectionalAlbedoReflection(
+                                           state.microfacet, wi.z, float3(1.0), float3(1.0))
+                                           .x;
+    return state;
+}
+
 public PrimeFullCompactTransmissionState
 primeFullPtTransmissionState<Energy>(Energy energy, float roughness, float interfaceIor,
                                      bool thinWalled, float3 thinExtinction, float3 wi) where Energy
@@ -110,7 +137,7 @@ primeFullPtTransmissionState<Energy>(Energy energy, float roughness, float inter
 public PrimeFullOpenPbrSample primeFullPtOpaqueSample(float3 wi, float3 randomValue,
                                                       PrimeFullCompactOpaqueState state) {
     PrimeFullOpenPbrSample sampled = primeFullCompactOpaqueSample(wi, randomValue, state);
-    if (state.kind != PRIME_FULL_COMPACT_OPAQUE_CONDUCTOR && primeFullOpenPbrHasSample(sampled) &&
+    if (state.metalness == 0.0 && primeFullOpenPbrHasSample(sampled) &&
         !primeFullOpenPbrIsDelta(sampled.throughput.flags)) {
         PrimeFullCompactOpaqueEvaluation evaluated =
                 primeFullCompactOpaqueEvaluate(wi, sampled.wo, state);

@@ -92,6 +92,23 @@ Its KTX2 container uses lossless Zstd supercompression; upload and GPU storage
 total 178,957,008 bytes. It is compiled into the shared native engine, with no
 second copy in the JAR.
 
+`crates/prime-minecraft/assets/vanilla_pbr/` incorporates material images for the
+Java blocks and items atlases from Mojang's [bedrock-samples](https://github.com/Mojang/bedrock-samples),
+commit `921fafb05c93abeae56c2f2868cd8f942bdbcc0f`, version `1.26.30.5`.
+The reference material channels were preprocessed into editable RGBA8 PNGs,
+with offline RGB matching and frame projection into the Java texture layout.
+The runtime embeds those PNGs and shares the actual Minecraft base color,
+alpha and tint; auxiliary data is embedded only where authored. Original TGA
+files, copied Bedrock base-color images,
+models, behavior packs and a general Bedrock pack loader are outside this scope.
+Source paths, input hashes, per-version RGB matches, conflicts, excluded
+resources and generated baseline hashes are in the adjacent manifests and
+source lock; later art edits
+may differ from the generated baseline. Mojang's assets retain their upstream
+copyright and Minecraft EULA terms, independently of Prime-authored code.
+See the [Mojang source notice and incorporated scope](licenses/Mojang-Bedrock-Samples.txt).
+Both adapter JARs carry this notice under `META-INF/licenses/`.
+
 Fixed asset decoding links Zstandard 1.5.7 through the Rust `zstd` 0.14.0,
 `zstd-safe` 8.0.0 and `zstd-sys` 2.1.0 crates. Zstandard and generated bindings
 are distributed under their BSD-3-Clause terms; the Rust wrappers are copyright

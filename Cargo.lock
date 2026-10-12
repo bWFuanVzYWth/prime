@@ -605,6 +605,7 @@ name = "prime_minecraft"
 version = "0.1.0"
 dependencies = [
  "mimalloc",
+ "png",
  "prime_abi",
  "prime_diagnostics",
  "prime_scene",

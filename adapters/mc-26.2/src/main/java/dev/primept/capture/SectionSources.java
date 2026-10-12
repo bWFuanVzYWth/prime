@@ -71,6 +71,9 @@ final class SectionSources {
             if (ready(models.get(state), new IdentityHashMap<>()))
                 state(out, state);
     }
+    void publishItemSprites() {
+        sprites.publishItemSprites();
+    }
     @SuppressWarnings("unchecked")
     private boolean ready(Object value, IdentityHashMap<Object, Boolean> visiting) {
         if (value == null || definitions.containsKey(value))

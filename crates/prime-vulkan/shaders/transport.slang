@@ -80,9 +80,10 @@ public float3 traceSample(TraceScene resources, AtmEnvironment environment,
                     dot(hit.shadingNormal, direction) > 0 ? -hit.shadingNormal : hit.shadingNormal;
             optical = hit.optical;
             thin = hit.thin;
-            material = primePbrVertex(albedo, normal, hit.normalSample.a, hit.specularSample.rgb,
-                                      (hit.materialFlags & 1) != 0, (hit.materialFlags & 2) != 0,
-                                      optical ? thin : hit.materialThin, optical, -direction);
+            material = primePbrVertex(
+                    albedo, normal, hit.normalSample.b, hit.specularSample, hit.normalSample.a,
+                    (hit.materialFlags & PRIME_MATERIAL_NORMAL) != 0, (hit.materialFlags & 2) != 0,
+                    optical ? thin : hit.materialThin, optical, -direction);
             incident = optical && !thin ? hit.incident : medium;
             transmitted = hit.thin ? primeThinInsideMedium(hit) : hit.transmitted;
             {

@@ -42,14 +42,15 @@ import "pbr/vertex.slang";
         float3 normal = dot(hit.shadingNormal, direction.xyz) > 0.0 ? -hit.shadingNormal
                                                                     : hit.shadingNormal;
         PrimePbrVertex vertex = primePbrVertex(
-                sourceToWorking(saturate(hit.sourceColor.rgb)), normal, hit.normalSample.a,
-                hit.specularSample.rgb, (hit.materialFlags & 1) != 0, (hit.materialFlags & 2) != 0,
+                sourceToWorking(saturate(hit.sourceColor.rgb)), normal, hit.normalSample.b,
+                hit.specularSample, hit.normalSample.a,
+                (hit.materialFlags & PRIME_MATERIAL_NORMAL) != 0, (hit.materialFlags & 2) != 0,
                 hit.optical ? hit.thin : hit.materialThin, hit.optical, -direction.xyz);
         outputs[i * 3] =
                 asfloat(uint4(1, hit.materialThin ? 1 : 0, hit.thin ? 1 : 0, hit.optical ? 1 : 0));
         outputs[i * 3 + 1] =
                 asfloat(uint4(vertex.control, hit.materialFlags, hit.physicalFront ? 1 : 0,
-                              uint(round(hit.specularSample.b * 255.0))));
+                              uint(round(hit.specularSample.a * 255.0))));
         outputs[i * 3 + 2] = hit.sourceColor;
         return;
     }

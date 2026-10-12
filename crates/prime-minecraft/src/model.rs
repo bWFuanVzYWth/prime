@@ -101,7 +101,7 @@ pub(crate) struct Catalog {
     pub volumes: HashMap<u32, crate::volume::Volume>,
     pub glass_references: HashMap<u32, [f32; 4]>,
     pub optical_materials: HashMap<(u32, u32), (u32, prime_scene::surface::Medium, bool)>,
-    medium_ids: HashMap<(String, [u32; 4], Option<u32>), u32>,
+    medium_ids: HashMap<(String, [u32; 4], Option<u32>, Option<u32>), u32>,
     contact_capable: bool,
     parents: HashMap<u32, HashSet<u32>>,
     state_users: HashMap<u32, HashSet<u32>>,
@@ -532,15 +532,15 @@ impl Catalog {
                 let sprite = self.sprites.get(&q.sprite);
                 let reference_code = sprite.and_then(|sprite| {
                     let frame = sprite.frames.first().map_or(0, |&(frame, _)| frame);
-                    sprite.fresnel_code(frame, [0.5; 2])
+                    sprite.ior_byte(frame, [0.5; 2])
                 });
-                let constant_code = sprite.and_then(crate::sprite::Sprite::fresnel_code_constant);
+                let constant_code = sprite.and_then(crate::sprite::Sprite::ior_byte_constant);
                 let varying_ior = reference_code.is_some() && constant_code.is_none();
                 // This midpoint initializes the medium. Uniform resources prove one IOR;
-                // varying current G is sampled per hit and adjacent G follows the current
+                // varying current Aux A is sampled per hit and adjacent Aux A follows the current
                 // GPU page at fixed reference coordinates.
                 let mut medium = crate::optics::glass(reference);
-                medium.ior = crate::optics::fresnel_code_ior(reference_code.unwrap_or(0));
+                medium.ior = crate::optics::ior_byte(reference_code.unwrap_or(85));
                 let key = (
                     family.to_string(),
                     [
@@ -551,6 +551,9 @@ impl Catalog {
                     ]
                     .map(f32::to_bits),
                     varying_ior.then_some(texture),
+                    sprite
+                        .and_then(|s| s.material.as_ref())
+                        .and_then(|m| m.ior_identity()),
                 );
                 let next = self.medium_ids.len() as u32 + 2;
                 let id = *self.medium_ids.entry(key).or_insert(next);

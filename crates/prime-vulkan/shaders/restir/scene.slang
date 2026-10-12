@@ -195,7 +195,8 @@ public SurfacePoint restirHitSurface(RestirScene scene, HitInfo identity) {
 
 public PrimePbrVertex restirMaterial(SurfaceHit hit, float3 view) {
     return primePbrVertex(sourceToWorking(saturate(hit.sourceColor.rgb)), hit.shadingNormal,
-                          hit.normalSample.a, hit.specularSample.rgb, (hit.materialFlags & 1u) != 0,
+                          hit.normalSample.b, hit.specularSample, hit.normalSample.a,
+                          (hit.materialFlags & PRIME_MATERIAL_NORMAL) != 0,
                           (hit.materialFlags & 2u) != 0, hit.optical ? hit.thin : hit.materialThin,
                           hit.optical, view);
 }

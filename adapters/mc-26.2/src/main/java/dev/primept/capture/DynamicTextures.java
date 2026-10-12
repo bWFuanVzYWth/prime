@@ -191,6 +191,11 @@ public final class DynamicTextures {
             NEEDED.add(source);
         return source.id;
     }
+    /** Actual source binding, without marking it as a requested dynamic upload. */
+    public static int capturedId(GpuTexture texture) {
+        Texture source = SOURCES.get(texture);
+        return source == null ? 0 : source.id;
+    }
     public static void submit(long epoch, NativeBridge bridge) {
         submit(epoch, bridge, Packets.MAX_PACKET_BYTES);
     }

@@ -12,6 +12,9 @@ import java.lang.reflect.Field;
 import java.nio.ByteOrder;
 import java.util.List;
 import java.util.Map;
+import java.util.IdentityHashMap;
+import java.util.concurrent.CompletableFuture;
+import dev.primept.PrimeClient;
 import net.minecraft.client.model.geom.builders.UVPair;
 import net.minecraft.client.renderer.Sheets;
 import net.minecraft.client.renderer.StagedVertexBuffer;
@@ -21,6 +24,9 @@ import net.minecraft.client.renderer.feature.RenderTypeFeatureRenderer;
 import net.minecraft.client.renderer.item.ItemStackRenderState.FoilType;
 import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
+import net.minecraft.client.renderer.texture.SpriteLoader;
+import net.minecraft.client.renderer.texture.TextureAtlasSprite;
+import net.minecraft.resources.Identifier;
 import net.minecraft.client.resources.model.geometry.BakedQuad;
 import net.minecraft.core.Direction;
 import net.minecraft.world.item.ItemDisplayContext;
@@ -38,6 +44,7 @@ public final class ItemCpuSmoke {
     private static final ItemFeatureRenderer RENDERER = new ItemFeatureRenderer() {};
     private static final Owner FIRST = new Owner(), SECOND = new Owner();
     private static int emitted;
+    private static int drawTexture;
     private static TypedSceneFixtureWire.Mesh baseline;
     public static void run() throws Exception {
         CAMERA.pos = Vec3.ZERO;
@@ -150,6 +157,7 @@ public final class ItemCpuSmoke {
         check(emitted == 0 && ItemCapture.stats().submits() == 1 && getters[0] == 1,
               "Custom source getter is read once before routing");
         cornerColors();
+        privateSprites();
         unknownConsumer();
         exclusive = false;
         DynamicCapture.close();
@@ -174,6 +182,14 @@ public final class ItemCpuSmoke {
                              UVPair.pack(.5f, .6f), UVPair.pack(.7f, .8f), Direction.SOUTH,
                              material);
     }
+    private static BakedQuad privateQuad(TextureAtlasSprite sprite) {
+        var material = new BakedQuad.MaterialInfo(sprite, ChunkSectionLayer.CUTOUT, TYPE, TYPE,
+                                                  TYPE, 0, null, 0);
+        return new BakedQuad(new Vector3f(), new Vector3f(1, 0, 0), new Vector3f(1, 1, 0),
+                             new Vector3f(0, 1, 0), UVPair.pack(.1875f, .375f),
+                             UVPair.pack(.5625f, .375f), UVPair.pack(.5625f, .625f),
+                             UVPair.pack(.1875f, .625f), Direction.SOUTH, material);
+    }
     private static void frame(List<BakedQuad> quads, boolean skip, boolean known, FoilType foil,
                               int outline, int tint, int offset, int sources, Runnable between)
             throws Exception {
@@ -185,7 +201,7 @@ public final class ItemCpuSmoke {
             Map<StagedVertexBuffer.Draw, DynamicCapture.Material> materials =
                     value(DynamicCapture.class, "DRAWS", null);
             if (known)
-                materials.put(draw, new DynamicCapture.Material(0, 1, false, true));
+                materials.put(draw, new DynamicCapture.Material(drawTexture, 1, false, true));
             BufferBuilder consumer = (BufferBuilder)staged.getVertexBuilder(draw);
             Class<?> groupType =
                     Class.forName(RenderTypeFeatureRenderer.class.getName() + "$Group");
@@ -299,6 +315,137 @@ public final class ItemCpuSmoke {
         } finally {
             DynamicCapture.end();
         }
+    }
+    private static void privateSprites() throws Exception {
+        DynamicCapture.close();
+        var capture = PrimeClient.CAPTURE;
+        capture.enable();
+        TextureAtlasSprite first = sprite(), second = sprite(), unknown = sprite();
+        var upload = new SpriteLoader.Preparations(
+                64, 64, 0, null,
+                Map.of(Identifier.fromNamespaceAndPath("minecraft", "item/test_first"), first,
+                       Identifier.fromNamespaceAndPath("minecraft", "item/test_second"), second),
+                CompletableFuture.completedFuture(null));
+        var ids = new IdentityHashMap<TextureAtlasSprite, Integer>();
+        ids.put(first, 11);
+        ids.put(second, 12);
+        drawTexture = 42;
+        capture.captureItemSprites(upload, drawTexture);
+        capture.publishItemSprites(ids);
+        BakedQuad q0 = privateQuad(first), q1 = privateQuad(second), q2 = privateQuad(unknown);
+        try {
+            frame(List.of(q0, q1, q2), true, true, FoilType.NONE, 0, -1, 2, 1, null);
+            var context = context();
+            var batch = context.sealDelta();
+            check(ItemCapture.stats().groups() == 3 && context.stats().prototypeUpserts() == 1 &&
+                          context.stats().instanceUpserts() == 3,
+                  "Distinct private sprite identities share unchanged geometry and retain separate materials");
+            var source = TypedSceneFixtureWire.prototypeSpan(batch, 0, 0);
+            var wire = TypedSceneFixtureWire.vertices(source).asByteBuffer().order(
+                    ByteOrder.LITTLE_ENDIAN);
+            int[] expectedPixels = {4, 7, 15, 12};
+            for (int index = 0; index < 3; ++index) {
+                var instance = TypedSceneFixtureWire.instance(batch, index);
+                check(PrimeInstanceSource.texture_id(instance) ==
+                              (index < 2 ? 0x40000000 + 11 + index : drawTexture),
+                      "Only registered actual item sprite selects its resource-owned canonical texture");
+                float[] affine =
+                        index < 2 ? new float[] {2, 2, -.25f, -.5f} : new float[] {1, 1, 0, 0};
+                for (int lane = 0; lane < 4; ++lane)
+                    check(PrimeInstanceSource.uv_transform(instance, lane) == affine[lane],
+                          "Private inverse-atlas UV affine or unknown-sprite identity UV");
+                for (int vertex = 0; vertex < 4; ++vertex) {
+                    int offset =
+                            vertex * PrimeMeshSpan.stride(source) + PrimeMeshSpan.uv_offset(source);
+                    check(wire.getInt(offset) == Float.floatToRawIntBits(
+                                                         UVPair.unpackU(q0.packedUV(vertex))) &&
+                                  wire.getInt(offset + 4) == Float.floatToRawIntBits(UVPair.unpackV(
+                                                                     q0.packedUV(vertex))),
+                          "Original packed source UV bits remain unchanged in shared prototype");
+                    if (index < 2) {
+                        float u = wire.getFloat(offset) * affine[0] + affine[2],
+                              v = wire.getFloat(offset + 4) * affine[1] + affine[3];
+                        int marker = 100 * (index + 1) + (int)(v * 4) * 4 + (int)(u * 4);
+                        check(marker == 100 * (index + 1) + expectedPixels[vertex],
+                              "Instance affine selects the correct local texel in each independent 4x4 image");
+                    }
+                }
+            }
+            context.acknowledge();
+            capture.reset();
+            capture.disable();
+            capture.enable();
+            check(capture.itemTexture(first, drawTexture) == 0x4000000b,
+                  "World and capture toggles retain current resource-owned item bindings");
+            drawTexture = 43;
+            frame(List.of(q0, q1), true, true, FoilType.NONE, 0, -1, 2, 1, null);
+            context = context(); // The world epoch change correctly retired the previous owner.
+            batch = context.sealDelta();
+            var fallback = TypedSceneFixtureWire.instance(batch, 0);
+            check(ItemCapture.stats().groups() == 1 &&
+                          PrimeInstanceSource.texture_id(fallback) == 43 &&
+                          PrimeInstanceSource.uv_transform(fallback, 0) == 1 &&
+                          PrimeInstanceSource.uv_transform(fallback, 2) == 0,
+                  "Third-party draw bound to a different actual atlas keeps original material and UV");
+            context.acknowledge();
+            drawTexture = 42;
+            var outside =
+                    new BakedQuad(q0.position0(), q0.position1(), q0.position2(), q0.position3(),
+                                  q0.packedUV0(), q0.packedUV1(), UVPair.pack(.75f, .625f),
+                                  q0.packedUV3(), q0.direction(), q0.materialInfo());
+            frame(List.of(outside), true, true, FoilType.NONE, 0, -1, 2, 1, null);
+            batch = context.sealDelta();
+            fallback = TypedSceneFixtureWire.instance(batch, 0);
+            check(PrimeInstanceSource.texture_id(fallback) == 42 &&
+                          PrimeInstanceSource.uv_transform(fallback, 0) == 1 &&
+                          PrimeInstanceSource.uv_transform(fallback, 1) == 1 &&
+                          PrimeInstanceSource.uv_transform(fallback, 2) == 0 &&
+                          PrimeInstanceSource.uv_transform(fallback, 3) == 0,
+                  "Custom cross-sprite quad retains actual bound atlas interpretation");
+            source = TypedSceneFixtureWire.prototypeSpan(batch, 0, 0);
+            wire = TypedSceneFixtureWire.vertices(source).asByteBuffer().order(
+                    ByteOrder.LITTLE_ENDIAN);
+            check(wire.getInt(2 * PrimeMeshSpan.stride(source) + PrimeMeshSpan.uv_offset(source)) ==
+                          Float.floatToRawIntBits(.75f),
+                  "Cross-sprite fallback preserves its authored UV outside the nominal sprite");
+            context.acknowledge();
+            capture.captureItemSprites(upload, drawTexture);
+            check(capture.itemTexture(first, drawTexture) == 0,
+                  "Replacement upload clears private bindings before resource transaction publication");
+            frame(List.of(q0), true, true, FoilType.NONE, 0, -1, 2, 1, null);
+            batch = context.sealDelta();
+            check(PrimeInstanceSource.texture_id(TypedSceneFixtureWire.instance(batch, 0)) == 42,
+                  "Unpublished replacement never reuses previous private item identity");
+            context.acknowledge();
+            ids.put(first, 21);
+            ids.put(second, 22);
+            capture.publishItemSprites(ids);
+            frame(List.of(q0, q1), true, true, FoilType.NONE, 0, -1, 2, 1, null);
+            batch = context.sealDelta();
+            check(PrimeInstanceSource.texture_id(TypedSceneFixtureWire.instance(batch, 0)) ==
+                                  0x40000015 &&
+                          PrimeInstanceSource.texture_id(
+                                  TypedSceneFixtureWire.instance(batch, 1)) == 0x40000016,
+                  "Successful replacement publishes new canonical item bindings");
+            context.acknowledge();
+            capture.releaseSources();
+            check(capture.itemTexture(first, drawTexture) == 0 && capture.itemSprites().isEmpty(),
+                  "Resource release drops actual item sprite identities and bindings");
+        } finally {
+            drawTexture = 0;
+            capture.releaseSources();
+            DynamicCapture.close();
+        }
+    }
+    private static TextureAtlasSprite sprite() throws Exception {
+        var unsafe = Class.forName("sun.misc.Unsafe");
+        var field = unsafe.getDeclaredField("theUnsafe");
+        field.setAccessible(true);
+        var sprite = (TextureAtlasSprite)unsafe.getMethod("allocateInstance", Class.class)
+                             .invoke(field.get(null), TextureAtlasSprite.class);
+        for (var bound : Map.of("u0", .125f, "v0", .25f, "u1", .625f, "v1", .75f).entrySet())
+            set(TextureAtlasSprite.class, bound.getKey(), sprite, bound.getValue());
+        return sprite;
     }
     private static void unknownConsumer() throws Exception {
         exclusive = true;

@@ -10,7 +10,7 @@
 | `math/rigid_motion.slang` | 已证明同一有序局部几何的前帧仿射命中重建；不含安全起点偏移或未知形变对应 |
 | `math/transport.slang` | 面积 PDF、MIS、稳定乘除、Beer、eta 补偿及 roulette；无资源依赖 |
 | `bsdf/full/` | 旧完整 OpenPBR 数学的 opaque/solid/thin 支持子域、显式 energy 资源接口与生产窄构造 |
-| `model/material/` | 已规范化 LabPBR 通道、默认值、Fresnel 身份和颜色/IOR 转换 |
+| `model/material/` | 内部MERS/Aux、默认值、共享颜色和IOR解码，不识别Lab分类码 |
 | `service/bsdf/`、`service/material/normal_mapping.slang` | BSDF 消费契约、数值清洗和法线有效反射修正 |
 | `pbr/vertex.slang` | canonical 顶点、分类控制字、frame 与物理 IOR 接口；不构造 closure |
 | `pbr/delta.slang` | 整闭包 delta 判定、普通离散采样、首纯 delta 透明条件 pair，以及独立的几何 guide 方向；无 LUT/NEE |

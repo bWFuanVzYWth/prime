@@ -12,7 +12,9 @@ pub const PRIME_STREAMLINE_RENDER_START: u32 = 1;
 pub const PRIME_STREAMLINE_RENDER_END: u32 = 2;
 pub const PRIME_STREAMLINE_SUSPEND: u32 = 3;
 pub const PRIME_STREAMLINE_HOST_SHUTDOWN: u32 = 4;
-pub const PRIME_MC_SOURCE_VERSION: u32 = 7;
+pub const PRIME_MC_SOURCE_VERSION: u32 = 9;
+pub const PRIME_MC_SPRITE_VANILLA_COLOR: u32 = 1;
+pub const PRIME_MC_SPRITE_PRIVATE_COLOR: u32 = 2;
 pub const PRIME_MC_RESOURCE_REPLACE: u32 = 1;
 
 #[repr(C)]
@@ -1216,6 +1218,7 @@ pub struct PrimeMcSprite {
     pub frames: PrimeMcRange,
     pub normal_image: u32,
     pub specular_image: u32,
+    pub flags: u32,
 }
 impl Default for PrimeMcSprite {
     fn default() -> Self {
@@ -1229,10 +1232,11 @@ impl Default for PrimeMcSprite {
             frames: PrimeMcRange::default(),
             normal_image: 0,
             specular_image: 0,
+            flags: 0,
         }
     }
 }
-const _: () = assert!(std::mem::size_of::<PrimeMcSprite>() == 88);
+const _: () = assert!(std::mem::size_of::<PrimeMcSprite>() == 96);
 const _: () = assert!(std::mem::align_of::<PrimeMcSprite>() == 8);
 const _: () = assert!(std::mem::offset_of!(PrimeMcSprite, id) == 0);
 const _: () = assert!(std::mem::offset_of!(PrimeMcSprite, interpolate) == 4);
@@ -1243,6 +1247,7 @@ const _: () = assert!(std::mem::offset_of!(PrimeMcSprite, images) == 48);
 const _: () = assert!(std::mem::offset_of!(PrimeMcSprite, frames) == 64);
 const _: () = assert!(std::mem::offset_of!(PrimeMcSprite, normal_image) == 80);
 const _: () = assert!(std::mem::offset_of!(PrimeMcSprite, specular_image) == 84);
+const _: () = assert!(std::mem::offset_of!(PrimeMcSprite, flags) == 88);
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]

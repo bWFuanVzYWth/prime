@@ -1,6 +1,6 @@
 # 固定资产格式与分发规范
 
-新增或重新打包固定资产时，GPU 纹理优先使用 **KTX2**；命名数组与物理参数使用带元数据的 **Safetensors**。分发压缩优先高等级 **Zstd**。容器迁移只改变存储和加载，不能隐式改动颜色、精度、采样、维度、通道或物理语义。
+可艺术编辑的内嵌材质使用固定三页 **RGBA8 PNG**，见[材质合同](materials.md)。其余新增或重新打包固定资产时，GPU 纹理优先使用 **KTX2**；命名数组与物理参数使用带元数据的 **Safetensors**。分发压缩优先高等级 **Zstd**。容器迁移只改变存储和加载，不能隐式改动颜色、精度、采样、维度、通道或物理语义。
 
 星图、OpenPBR transmission 表和五份大气纹理 LUT 使用 KTX2 内部 Zstd 22；物理介质数组使用 `.safetensors.zst`。容器、解压 payload 和源身份由[资产 manifest](../crates/prime-vulkan/assets/packed-assets.json)记录。当前数据与资源生命周期分别见[显示](display.md)、[大气](atmosphere.md)和[材质](materials.md)。
 
@@ -12,6 +12,7 @@
 | --- | --- |
 | `crates/prime-vulkan/assets/`，含锁定的作者原始二进制参考 | `.ktx2`、历史 `.bc6h.gz`、`.bytes`、`.safetensors`、`.zst` |
 | `crates/prime-vulkan/tests/fixtures/` 的固定二进制测试参照 | `.bin` |
+| `crates/prime-minecraft/assets/vanilla_pbr/` 的可编辑固定材质 | `.png` |
 | `third_party/streamline/bin/x64/` 的锁定运行时 | `.dll` |
 
 实际匹配规则由根 [.gitattributes](../.gitattributes) 统一维护，LFS 条目使用 `filter=lfs diff=lfs merge=lfs -text`。资产 JSON 清单、来源锁、参考头文件、许可证和说明文档保持普通 Git 文本；Gradle Wrapper JAR 继续按其工具链约定管理。可再生成的编译产物、下载缓存、日志和临时资产放在被忽略的构建目录或 `artifacts/`，不因属于二进制而加入 LFS。
@@ -24,7 +25,8 @@
 
 | 数据 | 首选容器 | 必须保留的信息 |
 | --- | --- | --- |
-| 星图、普通纹理、纹理形式的 2D/3D LUT | KTX2，原生 Vulkan 格式与 Zstd 超压缩 | 尺寸、层/面/深度、原有 mip、通道布局、颜色空间与传递函数、方向和必要语义元数据 |
+| 可艺术编辑的内嵌材质 | 8bit非预乘RGBA PNG | Color=sRGB RGB/coverage A，MERS/Aux为原始数据；保留数据A=0下的RGB |
+| 星图、其他普通纹理、纹理形式的 2D/3D LUT | KTX2，原生 Vulkan 格式与 Zstd 超压缩 | 尺寸、层/面/深度、原有 mip、通道布局、颜色空间与传递函数、方向和必要语义元数据 |
 | 命名介质数组、异形张量及物理参数集合 | Safetensors，分发文件为 `.safetensors.zst` | 张量名、dtype、shape、schema、单位、坐标映射、归一化与端点/插值约定 |
 
 KTX2 是纹理容器，不把没有纹理意义的命名参数强行解释为图像。Safetensors 自身不提供压缩；`.safetensors.zst` 解压后的内容必须是标准 Safetensors。shader 不解析任何容器，运行时解析和上传由 Rust 资源所有者处理。
@@ -50,3 +52,7 @@ JAR 仍是发行容器。已做 Zstd 压缩的内容不依赖外层 Deflate 获�
 独立作者交付的锁定参考文件保持原字节与来源身份，重新封装产物置于参考目录之外。加载验证覆盖尺寸/长度、mip 完整性、metadata、压缩流损坏与不支持的格式；上传验证覆盖正确布局、颜色解释和完成回收。临时压缩比较、耗时、日志和候选产物放在被 Git 忽略的 `artifacts/`，长期文档不维护单次测量流水账。
 
 格式依据：[KTX2](https://github.khronos.org/KTX-Specification/ktxspec.v2.html)、[Safetensors](https://github.com/safetensors/safetensors#format)、[Zstandard](https://facebook.github.io/zstd/)。
+
+## 可编辑材质资产
+
+固定材质及来源位于`crates/prime-minecraft/assets/vanilla_pbr/`，运行时按显式Java sprite ID嵌入PNG。长期匹配工具为`scripts/import-vanilla-pbr.py`，以锁定的Java RGB和Bedrock样例生成精确/模糊候选、冲突决定、帧投影和完整未接入原因；人工调整匹配规则与重新生成属于开发流程。样例源JSON/TGA只参与离线转换，不构成运行时包格式。PNG是最终艺术源，构建不覆盖编辑；manifest/source.lock记录生成基线，编辑后的像素允许不同。导出禁止预乘和清除数据alpha为0下的RGB。来源与许可在同目录说明，不将Mojang样例素材标为Prime原创。基岩资源包直接读取延期。

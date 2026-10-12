@@ -53,7 +53,7 @@ Single、Local 与 Global palette 的状态行都包含同一份接触、光学�
 
 ## 光学模型
 
-标准水为 IOR 1.333、线性 Rec.2020 消光 `(0.2916, 0.04444, 0.010182)`；玻璃消光沿用旧项目白底透明色校准和 0.4 参考不透明度。参考色取源 sprite 首帧中心 texel，避免边框油漆污染透明主体；自定义裁切 UV 的局部消光参考尚未独立建立。缺 LabPBR 时玻璃 IOR 为1.5，有规范 G 时按清洗后的 dielectric F0 转为 IOR。均匀源在 CPU 建立介质身份；空间/动画变化的 G 保留源身份，当前表面负侧按命中 UV、邻接正侧按固定 sprite midpoint，分别读取当前帧 mip0 G。消光仍为 homogeneous 参考。引用使用已有光学记录与稳定 texture descriptor，不扩张几何步长。通道及支持边界见[材质契约](materials.md)。
+标准水为IOR1.333、线性Rec.2020消光`(0.2916,0.04444,0.010182)`；玻璃吸收沿用旧项目白底透明色校准和0.4参考不透明度。参考色取原始sprite首帧中心texel，避免边框油漆污染主体；自定义裁切UV的局部吸收参考尚未独立建立。默认玻璃IOR1.5，内部Aux A按`1+1.5*A/255`解码。均匀源由CPU初始化，变化场保留资源身份；负侧按命中UV、邻接正侧按固定sprite midpoint，分别读当前帧mip0 Aux A。引用复用已有光学记录，不扩大步长；详见[材质合同](materials.md)。
 
 玻璃必须来自实际玻璃类型标志、无未知 tint，并具有确定性的闭合轴对齐体积或共面薄片证明；复杂开放/随机模型保留源 coverage，计入 `hacks.optics`。同介质身份包括颜色族与光学参数；仅在两侧都是实体透射、无涂层/发光/tint 时消去相同介质边界，不因名字或平均颜色相同猜测。
 
@@ -65,15 +65,17 @@ Single、Local 与 Global palette 的状态行都包含同一份接触、光学�
 
 Java 转录真实 sprite 身份、atlas bounds、帧尺寸、原始帧序列/时长/插值开关和各级 mip 像素。Rust 将已证明在 sprite 范围内的 atlas UV 转为 local UV，只修正端点外四个 ULP 内的误差；明显越界保留原 atlas UV 并计入 `hacks.sprite`，该兼容回退不承诺跨 sprite 动画和 mip。
 
-静态基色 mip0 直接共享已捕获的 atlas Arc，动画使用自持完整帧图，各级基色 mip 保留原始像素。CPU/GPU 按实际共享像素分配计费；全部动画帧、mip 和规范辅助图都计入 512 MiB 源纹理预算，不按可见窗口低估，也不将 atlas 每个视图重复计费。64 B 纹理描述符保存偏移、尺寸、行步长、下一帧、mip 区间、独立材料视图和 atlas bounds；基色动画只改描述符，LabPBR 辅助动画按源规则在 CPU 混合后局部发布，不重建 BLAS。静态 atlas lookup 使 atlas UV 消费共享对应 sprite 的材料视图，不随动画重建整张材质 atlas。资源仍以 epoch 为寿命，尚无活跃 sprite 的细粒度驱逐。
+静态基色 mip0 直接共享已捕获的 atlas Arc，动画使用自持完整帧图，各级基色 mip 保留原始像素。CPU/GPU 按实际共享像素分配计费；全部动画帧、mip 和规范辅助图都计入 512 MiB 源纹理预算，不按可见窗口低估，也不将 atlas 每个视图重复计费。64 B 纹理描述符保存偏移、尺寸、行步长、下一帧、mip 区间、独立材料视图和 atlas bounds；基色动画只改描述符，内部MERS/Aux辅助动画按固定规则在 CPU 混合后局部发布，不重建 BLAS。静态 atlas lookup 使 atlas UV 消费共享对应sprite的有效Color与辅助视图，不随动画重建整张材质 atlas。资源仍以 epoch 为寿命，尚无活跃 sprite 的细粒度驱逐。
+
+独立item atlas sprite以PRIVATE_COLOR自持原始Color，不借用block atlas，也不写入其lookup。Java成功发布资源事务后绑定真实quad sprite和实际atlas texture身份，原prototype UV保留，既有instance UV affine在消费者转换到local；未知或跨sprite UV保持原atlas回退。该路径不改变quad展开/三角化或资源完成证明，多个sprite可形成多个实例组，实际CPU分组及纹理容量需另计。
 
 26.2/26.3 的宿主 shader 对编码域 RGBA 四个通道插值并写入 UNORM8；Rust 按源 tick/时长生成相同的千分位进度，GPU 插值后按 UNORM8 舍入。着色按主像素射线锥估计 mip，层内最近点、层间线性；coverage 与灯支持域固定 mip0，因此不会随查询类型改变几何覆盖。射线锥不包含粗糙反弹的扩散，此过滤是明确的近似，不声称与光栅导数逐像素相同。动画按源帧传入的 game time 推进，离线冻结不更新。
 
-有效 `format=lab-pbr/1.3` 包的 `_n/_s` 原图由 Java 读取，在 Rust 生成规范 mip 和辅助动画。连续通道层内/层间线性过滤；normal 分布保持 GGX 平均长度，specular 的规范 G 身份与 B 强度在生产固定当前帧 mip0 点样。CPU把源 B 的0..65清洗为0、66..255翻译为1..190，只有完整源几何证明的薄片允许非金属 SSS；主/第二层分别消费自己的证明，cutout或物理介质薄片标志不能替代材质证明。厚体或未知来源回退常规Full opaque漫反射，Lite与厚SSS近似已删除；薄SSS介质身份不变，foliage不套用旧树叶预设。AO/porosity不直接乘着色，porosity不进入规范B；height保留逐帧min解码，旧voxel displacement几何管线不移植。旧材质预设不参与默认值或分类。
+有效`format=lab-pbr/1.3`的原图由Java读取，Rust转换成固定Color/MERS/Aux、生成mip和动画。Color/MERS/Aux每mip层内最近点、跨mip线性，近景保留像素边界；MERS各通道参与CPU mip平均和动画连续插值。Aux的CPU mip/动画按GGX moment准备，GPU跨mip插值沿用轻量RGBA近似；IOR固定当前帧mip0点采。命中与NEE/ReSTIR发光采用同一当前帧mip0 Color/G域，不随散射LOD改变。SSS按内部A/255消费，主/第二层分别使用完整来源的薄壁证明，厚体或未知回退常规opaque。AO、porosity、未使用height不保留；植物近似与闭包支持域见[材质合同](materials.md)。
 
 游戏发光使用实际 block/quad emission 的较大值，按旧校准 `1.5 * (level/15)^2` 变为线性 BT.709 RGB，再乘采样点的解码纹理×tint。岩浆进入相同路径。光源从最终面提取，每个物理 patch 只计一次；复合面 proposal 覆盖两侧/层的功率上界，实际采样按选侧/coverage 计算发光，涂层挡住的底层不泄漏。
 
-存在 authored LabPBR emission 时，上述宿主 ordinal emission 由 specular A 替换：0..254 解码 A/254，255 sentinel 为0；全 source sheet 所有帧 A 均为255时保留宿主来源。0明确关闭发光。CPU 使用全帧最大强度建立静态 proposal，shader 命中/NEE 使用当前实际采样强度；动画不改变灯源支持域。满强度继续使用1.5校准，AO/porosity不额外降低发光。
+存在authored Lab emission时，源A在准备时转为内部MERS G并由metadata授权覆盖宿主ordinal emission。当前强度为G/255，0明确关闭；全源A为255则保留宿主值。CPU完整帧最大强度建立静态proposal，命中/NEE使用当前实际采样；满强度保持1.5校准并使用共享Color。
 
 生产仅使用双层功率距离Tree。先选灯页、再选页内灯，各用独立24-bit样本，实际整数区间PMF由前向选择与反向PDF共同重放。Tree不考虑方向，选灯后按实际BSDF、发光和可见性计算贡献；旧配置规范化规则见[ABI](abi.md)，整数PDF见[采样域](shaders.md#采样域)。
 

@@ -149,7 +149,7 @@ impl TerrainContext {
                 .map(|v| shape::Face::from_typed(v, source)),
         )?;
         let fluids = collect(source.fluids().iter().map(fluid::FluidMaterial::from_typed))?;
-        let sprites = collect(
+        let mut sprites = collect(
             source
                 .sprites()
                 .iter()
@@ -172,18 +172,6 @@ impl TerrainContext {
                     }
                 }
             }
-        }
-        if let Some(old) = old {
-            if !unchanged(&old.states, &states)
-                || !unchanged(&old.models, &models)
-                || !unchanged(&old.faces, &faces)
-                || !unchanged(&old.fluids, &fluids)
-                || !unchanged(&old.sprites, &sprites)
-            {
-                return Err("resource definition changed without generation replacement".into());
-            }
-            states.retain(|id, _| !old.states.contains_key(id));
-            models.retain(|id, _| !old.models.contains_key(id));
         }
         for value in states.values() {
             if value.faces.iter().any(|id| {
@@ -224,6 +212,24 @@ impl TerrainContext {
         };
         let mut staging = SourceScene::default();
         staging.set_texture(1, atlas.clone())?;
+        for sprite in sprites.values_mut() {
+            if let Some(mut material) = sprite.material.take() {
+                material.prepare_color(sprite, &staging)?;
+                sprite.material = Some(material);
+            }
+        }
+        if let Some(old) = old {
+            if !unchanged(&old.states, &states)
+                || !unchanged(&old.models, &models)
+                || !unchanged(&old.faces, &faces)
+                || !unchanged(&old.fluids, &fluids)
+                || !unchanged(&old.sprites, &sprites)
+            {
+                return Err("resource definition changed without generation replacement".into());
+            }
+            states.retain(|id, _| !old.states.contains_key(id));
+            models.retain(|id, _| !old.models.contains_key(id));
+        }
         let mut textures = Vec::with_capacity(sprites.len() + 1);
         let mut references = Vec::with_capacity(sprites.len());
         for (&id, sprite) in &sprites {

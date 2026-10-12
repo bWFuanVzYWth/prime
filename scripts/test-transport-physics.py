@@ -13,6 +13,9 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[1]
 SHADERS = ROOT / "crates/prime-vulkan/shaders"
 FIXTURE = ROOT / "crates/prime-vulkan/tests/shaders/transport_physics_math.slang"
+PBR_THIN_WALLED = 1 << 24
+PBR_DIELECTRIC = 1 << 25
+PBR_HAS_NORMAL = 1 << 26
 DRIVER = r'''
 #define _CRT_SECURE_NO_WARNINGS
 #include <cstdio>
@@ -37,8 +40,8 @@ int main(int argc, char** argv) {
     GlobalParams_0 params{};
     params.inputs_0 = {input.data(), input.size()};
     params.outputs_0 = {output.data(), output.size()};
-    params.textures_0 = {textures.data(), textures.size()};
-    params.texels_0 = {texels.data(), texels.size()};
+    params.physicsTextures_0 = {textures.data(), textures.size()};
+    params.physicsTexels_0 = {texels.data(), texels.size()};
     params.dispatch_0 = &config;
     params.surfaceFeatures_0 = 2;
     ComputeVaryingInput varying{};
@@ -70,6 +73,24 @@ def fresnel(cosine, outside, inside):
     ct = math.sqrt(1 - sin2)
     return .5 * (((outside * cosine - inside * ct) / (outside * cosine + inside * ct)) ** 2 +
                  ((inside * cosine - outside * ct) / (inside * cosine + outside * ct)) ** 2)
+
+
+def pbr_control(metalness=0, subsurface=0, ior=85, flags=0):
+    return metalness | (subsurface << 8) | (ior << 16) | flags
+
+
+def discrete_closure(row):
+    rough, control, incident, transmitted = f(row[0]), row[1], f(row[2]), f(row[3])
+    dielectric = bool(control & PBR_DIELECTRIC)
+    thin = bool(control & PBR_THIN_WALLED)
+    if dielectric and thin:
+        eta = max(transmitted / incident, incident / transmitted)
+        alpha = min(1., max(0., rough * rough * 3.7 * (eta - 1) * (eta - .5) ** 2 / eta ** 3))
+        return alpha < 1e-4
+    if dielectric:
+        return rough * rough < 1e-4 or transmitted == incident
+    # Only the pure conductor endpoint has no continuous dielectric base component.
+    return (control & 255) == 255 and rough * rough < 1e-4
 
 
 def main():
@@ -161,24 +182,21 @@ def main():
     counts["unordered_terminal"] = len(boundary_rows)
 
     classify_rows = []
+    closures = [(0, 0, 0), (0, 255, PBR_THIN_WALLED), (1, 0, 0),
+                (127, 128, PBR_THIN_WALLED | PBR_HAS_NORMAL), (254, 0, 0),
+                (255, 0, 0), (255, 255, PBR_THIN_WALLED),
+                (0, 0, PBR_DIELECTRIC), (0, 0, PBR_DIELECTRIC | PBR_THIN_WALLED)]
+    controls = [pbr_control(m, s, ior, flags)
+                for (m, s, flags), ior in itertools.product(closures, (0, 85, 255))]
     for rough, control, incident, transmitted in itertools.product((0., .005, .1, 1.),
-            (0, (1 << 19) | 231, 1 << 17, (1 << 17) | (1 << 16)), (1., 1.333), (1., low, 1.5)):
+            controls, (1., 1.333), (1., low, 1.5)):
         classify_rows.append((u(rough), control, u(incident), u(transmitted), 0, 0, u(1), u(1)))
     for row, actual in zip(classify_rows, execute(4, classify_rows), strict=True):
-        rough, control, incident, transmitted = f(row[0]), row[1], f(row[2]), f(row[3])
-        dielectric, thin = bool(control & (1 << 17)), bool(control & (1 << 16))
-        eta = transmitted / incident
-        if dielectric and thin:
-            eta = max(eta, 1 / eta)
-            alpha = min(1., max(0., rough * rough * 3.7 * (eta - 1) * (eta - .5) ** 2 / eta ** 3))
-            expected = alpha < 1e-4
-        elif dielectric:
-            expected = rough * rough < 1e-4 or transmitted == incident
-        else:
-            expected = bool(control & (1 << 19)) and rough * rough < 1e-4
+        expected = discrete_closure(row)
         assert actual[:2] == (int(expected), 1), (row, actual, expected)
     counts["whole_closure_delta"] = len(classify_rows)
-    support_rows = [(u(.1), 1 << 17, u(1.), u(1.5), u(nx), 0, u(nz), u(scatter_z))
+    support_rows = [(u(.1), pbr_control(flags=PBR_DIELECTRIC | PBR_HAS_NORMAL),
+                     u(1.), u(1.5), u(nx), 0, u(nz), u(scatter_z))
                     for nx, nz, scatter_z in ((-1., 1., .2), (1., 1., -.2), (0., 1., .2),
                                              (0., 1., -.2), (0., 1., 0.))]
     for row, actual in zip(support_rows, execute(4, support_rows), strict=True):
@@ -190,10 +208,13 @@ def main():
     continuous_rows = [(*row[:7], u(sign)) for row, sign in itertools.product(classify_rows, (-1., 1.))]
     discrete_checks = 0
     for row, actual in zip(continuous_rows, execute(6, continuous_rows), strict=True):
-        if actual[4] != 0:
+        expected = discrete_closure(row)
+        assert bool(actual[4]) == expected, (row, actual, expected)
+        if expected:
             assert actual[:4] == (0, 0, 0, 0), (row, actual)
             discrete_checks += 1
     assert discrete_checks >= 30
+    assert discrete_checks == sum(discrete_closure(row) for row in continuous_rows)
     counts["discrete_zero_continuous_response_pdf"] = discrete_checks
 
     uv_rows = [(u(x), u(y), 0, 0, 0, 0, 0, 0) for x, y in itertools.product(
@@ -202,7 +223,7 @@ def main():
     for sprite, blend in ((False, 0.), (True, 0.), (True, .1), (True, .5), (True, .999), (True, 1.)):
         for row, actual in zip(uv_rows, execute(5, uv_rows, sprite=sprite, blend=blend), strict=True):
             assert actual[:4] == actual[4:], (row, sprite, blend, actual)
-    counts["bilinear_bit_exact"] = len(uv_rows) * 6
+    counts["point_bit_exact"] = len(uv_rows) * 6
     report = {"status": "PASS", "consumer": "production Slang CPU", "gpu": False, "cases": counts}
     (output / "result.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf8")
     print(json.dumps(report))

@@ -1038,9 +1038,10 @@ fn mirror_chain() -> Scene {
         2,
         vec![boundary(1.0, false, glass, true), mirror, plane(-2.0, true)],
     );
-    let mut texture = realtime_tests::texture(1, 1, vec![255; 4]);
+    // Shared C contains the old standard-iron F0 in encoded BT.709.
+    let mut texture = realtime_tests::texture(1, 1, vec![193, 190, 187, 255]);
     texture.material = Some(Arc::new(TextureMaterial {
-        specular: Some(realtime_tests::texture(1, 1, vec![255, 231, 0, 255])),
+        specular: Some(realtime_tests::texture(1, 1, vec![255, 0, 0, 0])),
         ..Default::default()
     }));
     scene.textures.insert(7, texture);
@@ -1070,9 +1071,10 @@ fn slow_reflection() -> Scene {
         5,
         vec![boundary(1.0, false, glass, true), plane(2.0, false), mirror],
     );
-    let mut texture = realtime_tests::texture(1, 1, vec![255; 4]);
+    // Shared C contains the old standard-iron F0 in encoded BT.709.
+    let mut texture = realtime_tests::texture(1, 1, vec![193, 190, 187, 255]);
     texture.material = Some(Arc::new(TextureMaterial {
-        specular: Some(realtime_tests::texture(1, 1, vec![255, 231, 0, 255])),
+        specular: Some(realtime_tests::texture(1, 1, vec![255, 0, 0, 0])),
         ..Default::default()
     }));
     scene.textures.insert(7, texture);

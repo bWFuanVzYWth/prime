@@ -128,7 +128,8 @@ fn fixtures() -> Vec<(&'static str, Scene)> {
     let mut material = texture(1, 1, vec![255; 4]);
     material.material = Some(Arc::new(TextureMaterial {
         // Authored roughness keeps this optical landing outside the delta prefix.
-        specular: Some(texture(1, 1, vec![80, 10, 0, 255])),
+        normal: Some(texture(1, 1, vec![128, 128, 0, 79])),
+        specular: Some(texture(1, 1, vec![0, 0, 175, 0])),
         ..Default::default()
     }));
     absorbing_scene.textures.insert(7, material);

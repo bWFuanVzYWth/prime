@@ -52,6 +52,11 @@
 - [x] 生产 opaque/conductor、薄材质 SSS 与 solid/thin dielectric 切换至旧 Full 支持子域，锁定独立作者 transmission-GGX 能量表与数学来源；不保留Lite库或厚SSS扩展。加入 eta-aware RR 与默认 12 顶点预算，末预算保留发光和 NEE，详情见 [PT 设计](docs/pt-state-design.md)。这不表示完整 OpenPBR 参数 API 或全部真实资源包已验收。
 - [ ] 为Full foliage建立真实源拓扑与数学合同；当前按用户要求恢复的植物50%缺图薄壁SSS属于显式艺术近似，不声明完整植物体积物理正确；其他厚SSS继续回退漫反射。AO/height用途另定，不默认恢复voxel displacement。
 - [ ] 扩展Full支持子域科学验证与资源包覆盖：sample/evaluate/PDF、能量、颜色、粗糙/掠射/薄壁、IOR、法线与发光分开对照独立参考；厚SSS不是待接入近似。实际两版资源重载、atlas与冻结及原生1080p整帧成本保持独立，不由底层测试推断性能。
+- [x] 固定内部Color/MERS/Aux三页RGBA8，Lab源在Rust准备时统一翻译，标准金属预处理共享C并固定F82 tint=1；丢弃AO/porosity/未消费height，保持32B PBR vertex。原版方块/物品以RGB精确及模糊匹配离线生成PNG、帧投影和冻结ID登记；长期保留匹配工具、人工覆盖入口、冲突记录与完整未接入原因。实际获胜原版基色来源限定资格，有效外部Lab整组优先。契约与已接受8bit/匹配边界见[材质](docs/materials.md)。
+- [ ] 手动验收两版内嵌PNG与Lab覆盖、normal-only植物、金属混合、atlas物品、发光、动画/水、资源重载与冻结；模糊匹配的艺术调整依完整清单逐项维护。正式原生1080p稳态/更新成本、寄存器/spill分别测量；旧Lab布局冻结SPIR-V不能直接作为新MERS fixture的同语义性能参照。
+- [ ] 优先检查水面模糊/艺术效果与岩浆不发光（[PT-030](FIXME.md#pt-030)、[PT-031](FIXME.md#pt-031)）；评估稀疏发光texel的CPU alias预计算、实际正反PDF/MIS及基于实际发光像素的总功率校准（[PT-032](FIXME.md#pt-032)）。采样方差与艺术强度分开验证，覆盖完整动画帧、alpha/tint、sprite/atlas和发布/冻结寿命。帧数下降与实体着火发光按用户要求延期（[PT-033](FIXME.md#pt-033)、[PT-034](FIXME.md#pt-034)）。
+- [ ] 为独立实体/方块实体/粒子等非方块图集纹理补充可靠的源ResourceLocation、获胜包来源与材质身份/生命周期合同，再扩展内嵌PBR；当前通用动态纹理接口只有数值ID和RGBA，不能把调试label当资源身份。生成的调色板sprite还需保留其实际输入/调色板的获胜来源，不能按不存在的同名PNG伪造原版资格。可匹配但未接入的来源见预设覆盖清单。
+- [ ] 基岩版材质包直接读取（延期）：当前使用稳定内部材质格式、LabPBR源翻译与固定内嵌PNG，不接入目录/MCPACK/ZIP、包栈或宿主虚拟资源包。后续明确Java版本的语义映射、基色/alpha/tint/动画与UV兼容、TextureSet同包引用及整套覆盖、资源代/冻结/完成证明后再实施；先支持明文原版材质子集，不宣称任意实体、模型或加密资产兼容。
 - [x] 移植旧星图资产、夜空方向与椭圆过滤，直接 RR 相机天空在重建后按真实前景 coverage 合成，间接环境仍读取星图；许可、压缩/解压产物及实际 GPU 前景/地面行为已验证。无需重复实现旧算法。
 - [ ] 补齐维度/天气环境真实源字段与失效，手动验收星图方向/反射、不同资源包与冻结；月亮、云和通用体积仍是独立新增能力。
 - [x] 移植旧曝光主算法和 HDR，保留 SDR primeDRT。256桶、时间适应、冻结/强度变更、FP16 scRGB 绝对亮度与手部/HUD 合成见[显示合同](docs/display.md)；BDA 计量避免完整累积输入复制，实际生成数学及 GPU 显示行为有验证。

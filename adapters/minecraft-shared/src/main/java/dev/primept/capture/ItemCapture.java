@@ -12,6 +12,7 @@ import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import net.minecraft.client.renderer.feature.ItemFeatureRenderer;
 import net.minecraft.client.renderer.item.ItemStackRenderState;
 import net.minecraft.client.resources.model.geometry.BakedQuad;
+import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.client.model.geom.builders.UVPair;
 import org.joml.Matrix4fc;
 
@@ -138,10 +139,25 @@ public final class ItemCapture {
         if (!uniform)
             tint = -1;
         try {
-            Group group = current.group(material, tint, matrix);
+            long uv0 = quad.packedUV0(), uv1 = quad.packedUV1(), uv2 = quad.packedUV2(),
+                 uv3 = quad.packedUV3();
+            var sprite = quad.materialInfo().sprite();
+            int canonicalTexture =
+                    dev.primept.PrimeClient.CAPTURE.itemTexture(sprite, material.texture());
+            // Cross-sprite UVs keep the actual bound atlas interpretation. Each packed source
+            // value is read once and the same bits are retained in the prototype below.
+            if (canonicalTexture != 0 && (!inside(sprite, uv0) || !inside(sprite, uv1) ||
+                                          !inside(sprite, uv2) || !inside(sprite, uv3)))
+                canonicalTexture = 0;
+            Group group = current.group(material, tint, matrix, sprite, canonicalTexture);
             for (int i = 0; i < 4; ++i) {
                 var position = quad.position(i);
-                long uv = quad.packedUV(i);
+                long uv = switch (i) {
+                    case 0 -> uv0;
+                    case 1 -> uv1;
+                    case 2 -> uv2;
+                    default -> uv3;
+                };
                 group.value(Float.floatToRawIntBits(position.x()));
                 group.value(Float.floatToRawIntBits(position.y()));
                 group.value(Float.floatToRawIntBits(position.z()));
@@ -163,6 +179,11 @@ public final class ItemCapture {
             DynamicCapture.fail(failure);
             return true;
         }
+    }
+    private static boolean inside(TextureAtlasSprite sprite, long uv) {
+        float u = UVPair.unpackU(uv), v = UVPair.unpackV(uv);
+        return u >= sprite.getU0() && u <= sprite.getU1() && v >= sprite.getV0() &&
+                v <= sprite.getV1();
     }
 
     public static final class Scope {
@@ -189,6 +210,17 @@ public final class ItemCapture {
             groupComparisons = 0;
         }
         Group group(DynamicCapture.Material material, int tint, Matrix4fc matrix) {
+            return group(material, tint, matrix, null);
+        }
+        Group group(DynamicCapture.Material material, int tint, Matrix4fc matrix,
+                    TextureAtlasSprite sprite) {
+            int canonicalTexture =
+                    dev.primept.PrimeClient.CAPTURE.itemTexture(sprite, material.texture());
+            return group(material, tint, matrix, sprite, canonicalTexture);
+        }
+        private Group group(DynamicCapture.Material material, int tint, Matrix4fc matrix,
+                            TextureAtlasSprite sprite, int canonicalTexture) {
+            int texture = canonicalTexture == 0 ? material.texture() : canonicalTexture;
             pose[0] = matrix.m00();
             pose[1] = matrix.m10();
             pose[2] = matrix.m20();
@@ -201,7 +233,7 @@ public final class ItemCapture {
             pose[9] = matrix.m12();
             pose[10] = matrix.m22();
             pose[11] = matrix.m32() - source.bz;
-            if (last != null && matches(last, material, tint))
+            if (last != null && matches(last, texture, material.flags(), tint))
                 return last;
             int hash = 0;
             if (last != null) {
@@ -211,9 +243,9 @@ public final class ItemCapture {
                     last.next = null;
                     indexed = true;
                 }
-                hash = hash(material.texture(), material.flags(), tint, pose);
+                hash = hash(texture, material.flags(), tint, pose);
                 for (Group group = index.get(hash); group != null; group = group.next)
-                    if (group != last && matches(group, material, tint)) {
+                    if (group != last && matches(group, texture, material.flags(), tint)) {
                         last = group;
                         return group;
                     }
@@ -225,7 +257,7 @@ public final class ItemCapture {
             } else
                 unused = groups.get(usedGroups);
             ++usedGroups;
-            unused.start(material, tint, pose);
+            unused.start(material, texture, tint, pose, canonicalTexture == 0 ? null : sprite);
             if (indexed)
                 unused.next = index.put(hash, unused);
             last = unused;
@@ -237,10 +269,9 @@ public final class ItemCapture {
                 hash = 31 * hash + Float.floatToIntBits(value == 0 ? 0 : value);
             return hash;
         }
-        private boolean matches(Group group, DynamicCapture.Material material, int tint) {
+        private boolean matches(Group group, int texture, int flags, int tint) {
             ++groupComparisons;
-            if (group.texture != material.texture() || group.flags != material.flags() ||
-                group.tint != tint)
+            if (group.texture != texture || group.flags != flags || group.tint != tint)
                 return false;
             for (int i = 0; i < pose.length; ++i)
                 if (group.affine[i] != pose[i])
@@ -271,14 +302,21 @@ public final class ItemCapture {
             context.release(geometry);
             geometry = replacement;
         }
-        void start(DynamicCapture.Material material, int tint, float[] pose) {
+        void start(DynamicCapture.Material material, int texture, int tint, float[] pose,
+                   TextureAtlasSprite sprite) {
             used = true;
             dirty = false;
             cursor = 0;
-            texture = material.texture();
+            this.texture = texture;
             flags = material.flags();
             this.tint = tint;
             System.arraycopy(pose, 0, affine, 0, affine.length);
+            // The original packed UVs stay in the reusable prototype. Bind the actual source
+            // sprite through the existing instance UV transform, evaluated by Rust/GPU.
+            uv[0] = sprite == null ? 1 : 1 / (sprite.getU1() - sprite.getU0());
+            uv[1] = sprite == null ? 1 : 1 / (sprite.getV1() - sprite.getV0());
+            uv[2] = sprite == null ? 0 : -sprite.getU0() * uv[0];
+            uv[3] = sprite == null ? 0 : -sprite.getV0() * uv[1];
         }
         void value(int value) {
             if (!dirty && geometry != null && cursor < geometry.bytes.remaining() &&

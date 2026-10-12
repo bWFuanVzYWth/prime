@@ -18,9 +18,6 @@ import "bsdf/full/opaque/state.slang";
 import "bsdf/full/opaque/energy.slang";
 import "bsdf/full/math/microfacet_measure.slang";
 import "bsdf/full/math/microfacet_energy.slang";
-import "model/material/defaults.slang";
-import "model/material/fresnel_code.slang";
-import "model/material/translation.slang";
 import "service/bsdf/contract/sample.slang";
 import "service/bsdf/contract/albedo.slang";
 import "service/bsdf/support/conversion.slang";
@@ -86,16 +83,10 @@ PrimePbrSample referenceFrame(PrimeFullOpenPbrSample fullSample, PrimeFullOpenPb
 }
 
 PrimeFullCompactOpaqueState referenceOpaque(PrimePbrVertex vertex, float3 wi, float4 incident) {
-    bool conductor = primePbrVertexIsConductor(vertex);
-    uint code = vertex.control & PRIME_OPTICAL_FRESNEL_MASK;
-    PrimeConductorFresnel fresnel = primeConductorFresnel(vertex.baseColor, code);
-    return primeFullPtOpaqueState(
-            DeltaTestEnergy(), vertex.baseColor, vertex.roughness,
-            conductor ? 1.0 : primeFullOpenPbrF0ToIor(primeDecodeDielectricF0(code)) / incident.x,
-            conductor ? 0.0
-                      : float((vertex.control >> PRIME_OPTICAL_SUBSURFACE_SHIFT) & 0xffu) / 190.0,
-            conductor, conductor ? fresnel.f0 : float3(0.0),
-            conductor ? fresnel.f82Tint : float3(0.0), wi);
+    return primeFullPtMetallicState(DeltaTestEnergy(), vertex.baseColor, vertex.roughness,
+                                    primePbrVertexIor(vertex) / incident.x,
+                                    primePbrVertexSubsurface(vertex),
+                                    primePbrVertexMetalness(vertex), wi);
 }
 
 PrimeDenoiseAlbedos referenceAlbedo(PrimePbrVertex vertex, float3 view, float4 incident,
@@ -156,13 +147,13 @@ uint4 pbrDeltaCase(uint index, uint mode) {
                     : normalIndex == 1u ? float3(0.6, 0.0, 0.8)
                                         : float3(-0.8, 0.0, 0.6);
     float3 geometric = float3(0.0, 0.0, 1.0);
-    uint fresnel = category == 3u ? 231u : category == 4u ? 239u : 4u;
+    float metalness = category == 3u ? 128.0 / 255.0 : category == 4u ? 1.0 : 0.0;
     float3 base = originalIndex % 5u == 0u ? float3(0.0) : float3(0.2, 0.6, 1.2);
     PrimePbrVertex vertex = primePbrVertex(
             base, normal, 0.0,
-            float3(1.0, float(fresnel) / 255.0,
-                   category == 1u || category == 2u ? 126.0 / 255.0 : 0.0),
-            normalIndex != 0u, true, category == 2u || category == 6u, category >= 5u, view);
+            float4(metalness, 0.0, 0.0, category == 1u || category == 2u ? 169.0 / 255.0 : 0.0),
+            85.0 / 255.0, normalIndex != 0u, true, category == 2u || category == 6u, category >= 5u,
+            view);
     vertex.roughness = roughnesses[roughnessIndex];
     float4 incident = float4(iors[iorIndex].x, 0.01, 0.03, 0.02);
     float4 transmitted =
@@ -178,7 +169,7 @@ uint4 pbrDeltaCase(uint index, uint mode) {
                                                       : primeFullOpenPbrMicrofacetEffectivelySmooth(
                                                                 state.specularMicrofacet) ||
                                                                 state.specularFresnel.ior == 1.0)
-                                    : ((category == 3u || category == 4u) &&
+                                    : ((category == 4u) &&
                                        primeFullOpenPbrMicrofacetEffectivelySmooth(
                                                referenceOpaque(vertex, wi, incident).microfacet));
     bool delta = primePbrVertexIsDiscreteOnly(vertex, incident, transmitted);
@@ -323,20 +314,37 @@ public uint4 pbrDeltaCheck(uint index) {
     return pbrDeltaCase(index, 0u);
 }
 
+// Executable byte contract, independent of the Vulkan upload fixture.
+public uint4 pbrCanonicalByteCheck(uint byteValue) {
+    float3 normal =
+            primeDecodeCanonicalNormal(float4(128.0 / 255.0, 128.0 / 255.0, 0.0, 85.0 / 255.0))
+                    .tangentNormal;
+    PrimePbrVertex vertex = primePbrVertex(
+            float3(0.5), normal, 0.0, float4(float(byteValue) / 255.0, 0.0, 0.0, 0.5),
+            float(byteValue) / 255.0, false, true, true, false, normal);
+    uint failure = any(normal != float3(0.0, 0.0, 1.0)) ? 1u : 0u;
+    if ((vertex.control & 255u) != byteValue || ((vertex.control >> 16u) & 255u) != byteValue ||
+        ((vertex.control >> 8u) & 255u) != (byteValue == 255u ? 0u : 128u))
+        failure |= 2u;
+    if (primePbrVertexIsDiscreteOnly(vertex, float4(1.0), float4(1.5)) != (byteValue == 255u))
+        failure |= 4u;
+    return uint4(failure, vertex.control, asuint(primePbrVertexIor(vertex)), 0u);
+}
+
 public uint4 pbrDeltaEdgeCheck(uint index) {
     float3 view = float3(0.0, 0.0, 1.0);
     float3 geometric = view;
     float4 incident = float4(1.0, 0.0, 0.0, 0.0);
     float4 transmitted = float4(1.5, 0.0, 0.0, 0.0);
-    PrimePbrVertex vertex = primePbrVertex(float3(0.0), view, 0.0, float3(1.0, 4.0 / 255.0, 0.0),
-                                           false, true, false, true, view);
+    PrimePbrVertex vertex = primePbrVertex(float3(0.0), view, 0.0, float4(0.0), 85.0 / 255.0, false,
+                                           true, false, true, view);
     uint failure = 0u;
     if (index == 0u) {
         vertex.control &= ~PRIME_PBR_VERTEX_DIELECTRIC;
         failure = primePbrVertexIsDiscreteOnly(vertex, incident, transmitted) ? 1u : 0u;
     } else if (index == 1u) {
-        vertex = primePbrVertex(float3(0.5), view, 0.01, float3(1.0, 231.0 / 255.0, 0.0), true,
-                                true, false, false, view);
+        vertex = primePbrVertex(float3(0.5), view, 0.01, float4(1.0, 0.0, 0.0, 0.0), 85.0 / 255.0,
+                                true, true, false, false, view);
         failure = primePbrVertexIsDiscreteOnly(vertex, incident, transmitted) ? 1u : 0u;
     } else if (index == 2u || index == 3u) {
         transmitted.x = 1.0;
@@ -382,14 +390,14 @@ public uint4 pbrDeltaEdgeCheck(uint index) {
                           ? 1u
                           : 0u;
     } else if (index == 6u) {
-        vertex = primePbrVertex(float3(0.5), float3(0.8, 0.0, 0.6), 0.0,
-                                float3(1.0, 231.0 / 255.0, 0.0), true, true, false, false, view);
+        vertex = primePbrVertex(float3(0.5), float3(0.8, 0.0, 0.6), 0.0, float4(1.0, 0.0, 0.0, 0.0),
+                                85.0 / 255.0, true, true, false, false, view);
         PrimePbrGuideDirection guide =
                 primePbrDeltaGuideDirection(vertex, view, geometric, 1.0, 1.5);
         failure = guide.geometricValid || guide.totalInternalReflection ? 1u : 0u;
     } else if (index == 7u) {
-        vertex = primePbrVertex(float3(0.0), view, 0.0, float3(1.0, 239.0 / 255.0, 0.0), false,
-                                true, false, false, view);
+        vertex = primePbrVertex(float3(0.0), view, 0.0, float4(1.0, 0.0, 0.0, 0.0), 85.0 / 255.0,
+                                false, true, false, false, view);
         PrimePbrGuideDirection guide =
                 primePbrDeltaGuideDirection(vertex, view, geometric, 1.0, 1.5);
         PrimePbrSample sample =
@@ -450,6 +458,7 @@ public uint4 pbrDeltaEdgeCheck(uint index) {
 
 [shader("compute")][numthreads(64, 1, 1)] void main(uint3 id : SV_DispatchThreadID) {
     if (id.x < config.y)
-        outputs[id.x] = config.x == 1u ? pbrDeltaEdgeCheck(inputs[id.x])
-                                       : pbrDeltaCase(inputs[id.x], config.x);
+        outputs[id.x] = config.x == 1u   ? pbrDeltaEdgeCheck(inputs[id.x])
+                        : config.x == 8u ? pbrCanonicalByteCheck(inputs[id.x])
+                                         : pbrDeltaCase(inputs[id.x], config.x);
 }

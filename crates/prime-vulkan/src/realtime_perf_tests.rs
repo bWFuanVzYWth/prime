@@ -59,9 +59,10 @@ fn fixtures() -> Vec<(&'static str, Scene)> {
     });
     floor.media = [7; 2];
     let mut water_scene = scene(3, vec![boundary(0., false, water), mirror, floor]);
-    let mut conductor = texture(1, 1, vec![255; 4]);
+    // Shared C contains the old standard-iron F0 in encoded BT.709.
+    let mut conductor = texture(1, 1, vec![193, 190, 187, 255]);
     conductor.material = Some(Arc::new(TextureMaterial {
-        specular: Some(texture(1, 1, vec![255, 231, 0, 255])),
+        specular: Some(texture(1, 1, vec![255, 0, 0, 0])),
         ..Default::default()
     }));
     water_scene.textures.insert(7, conductor);

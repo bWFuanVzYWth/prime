@@ -1119,7 +1119,7 @@ fn gpu_closest_material_thin_proof_selects_real_primary_secondary_and_physical_o
             });
         }
     }
-    // Ordinary 176B and extended 240B records: coverage=1 plus B=190 without proof
+    // Ordinary 176B and extended 240B records: coverage=1 plus MERS A=255 without proof
     // must remain opaque. Conversely coverage=0 does not disqualify a proven sheet.
     for (extended, thin, flags) in [
         (false, false, 1),
@@ -1226,10 +1226,15 @@ fn gpu_closest_material_thin_proof_selects_real_primary_secondary_and_physical_o
     ] {
         let mut color = realtime_tests::texture(width, 1, pixels);
         color.material = Some(Arc::new(TextureMaterial {
+            normal: Some(realtime_tests::texture(
+                width,
+                1,
+                [128, 128, 0, 79].repeat(width as usize),
+            )),
             specular: Some(realtime_tests::texture(
                 width,
                 1,
-                [128, 10, 190, 255].repeat(width as usize),
+                [0, 0, 127, 255].repeat(width as usize),
             )),
             ..Default::default()
         }));
@@ -1297,17 +1302,18 @@ fn gpu_closest_material_thin_proof_selects_real_primary_secondary_and_physical_o
             "{}: selected source proof and physical optics",
             w.label,
         );
-        // Independent ABI expectations: dielectric bit17, thin bit16, SSS byte8 and G=10.
-        let control = if w.optical {
-            (1 << 17) | (u32::from(w.physical_thin) << 16)
-        } else if proof {
-            (1 << 16) | (190 << 8) | 10
-        } else {
-            10
-        };
+        // Independent internal ABI: IOR79 in byte16, SSS byte8, thin24/dielectric25.
+        let control = (79 << 16)
+            | if w.optical {
+                (1 << 25) | (u32::from(w.physical_thin) << 24)
+            } else if proof {
+                (1 << 24) | (255 << 8)
+            } else {
+                0
+            };
         assert_eq!(
             row[4..8],
-            [control, 2, u32::from(w.front), 190],
+            [control, 3, u32::from(w.front), 255],
             "{}: Full vertex control",
             w.label
         );

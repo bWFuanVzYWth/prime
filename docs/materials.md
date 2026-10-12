@@ -1,43 +1,64 @@
-# LabPBR 源适配与 OpenPBR 支持子域
+# 内部材质格式、LabPBR 翻译与 OpenPBR 支持子域
 
-Java 读取资源包的实际声明、RGBA8 图像和 Minecraft sprite 字段；`prime_minecraft` 负责源布局、分类码、过滤、动画及发光支持域；`prime_scene` 持有规范纹理和光学端点；Vulkan 与 shader 消费这些自持数据。生产消费不再查询 Minecraft 或资源文件。源格式与 GPU 描述符见 [ABI](abi.md)，几何与介质证明见[表面编译](surface-compiler.md)。
+Java读取实际资源声明、图像、sprite字段与获胜基色的来源；`prime_minecraft`在资源准备时解释外部格式并选择固定预设；`prime_scene`持有自足纹理和光学端点，GPU只消费内部参数。生产着色不查询Minecraft或资源包。布局见[ABI](abi.md)，几何和介质证明见[表面编译](surface-compiler.md)。
 
-## 资源声明与规范通道
+## 固定内部格式 v1
 
-仅接受 `minecraft:optifine/texture.properties` 中的 `format=lab-pbr/1.3`，比较忽略大小写与首尾空白。辅助图位置为 `textures/<sprite path>_n.png` 和 `_s.png`，沿用 sprite namespace。缺少声明、格式不支持、缺图或非法图像均不伪装成已提供材质；非法资源记录诊断，该 sprite 不发布部分材料。当前读取通道位深不超过8 bit、可无损表示为 RGBA8 的 PNG，Java 不对像素做 PBR 数值清洗。
+三个逻辑页均为非预乘RGBA8。可编辑内嵌资产统一使用8bit RGBA PNG；页可缺省，宿主基色可以共享atlas backing，固定布局不要求每个sprite分配三张完整图。
 
-辅助图可以是单帧图，也可以匹配基色 sheet 的列/行布局；尺寸不同的有效图由 Rust 按源布局映射到基色帧。无法匹配 sheet 布局的图沿用源实现的单帧解释。资源定义在失效代次内不可原地改变；重新加载重新准备。当前每个 `SourceSprites` 实例一次准备完整 block atlas sprite 字典，无论是否存在有效 LabPBR 辅助图，使地形和使用 atlas UV 的物品共享同一份材料来源。独立资源owner在初始化/真实重载准备此字典，通过typed资源事务连同atlas原子登记；world/几何重置保留该资源代，renderer重建重新准备native/GPU所有者。
+| 页 | R | G | B | A |
+| --- | --- | --- | --- | --- |
+| Color | 共享颜色R | G | B | coverage alpha |
+| MERS | metalness | emission strength | perceptual roughness | thin SSS weight |
+| Aux | tangent normal X | tangent normal Y | normal distribution perceptual roughness | specular IOR |
 
-| 源通道 | 规范通道与消费 |
+Color RGB采用sRGB编码，alpha为线性coverage；辅助页全部作为原始数值，不应用gamma/ICC转换。Color按既有源规则在编码域与tint相乘，再做一次EOTF和working RGB转换。MERS/Aux的A是数据，艺术导出必须保留A=0下的RGB，不可预乘或清除隐藏颜色。
+
+MERS各通道按byte/255解码。粗糙度保存感知值，GGX alpha在执行时平方。IOR为`1 + 1.5 * byte/255`，范围[1,2.5]；85精确表示1.5，最近舍入误差上界约0.002941。超范围在准备时clamp。normal编码为`round(128+127*n)`，解码为`(byte-128)/127`；平面128/128精确表示零XY，Z重建非负半球。Aux B保存GGX方向分布对应的感知粗糙度，不保存AO或height。
+
+缺图默认M=0、E=0、S=0、IOR=1.5；opaque roughness=0.9，已证明光学介质缺图保持光滑边界。缺MERS和显式S=0由页存在性区别，沿用植物薄壁回退。Aux存在与hasNormal分开：仅IOR贴图不触发法线映射。发光是否覆盖宿主值由metadata表达，不占用数值哨兵。8bit量化、标准金属共享颜色及mip/动画过滤引起的视觉精度损失是明确接受的格式边界。
+
+## 外部输入与固定预设
+
+LabPBR只接受`minecraft:optifine/texture.properties`中的`format=lab-pbr/1.3`，忽略大小写和首尾空白。辅助图位于`textures/<sprite path>_n.png`和`_s.png`，沿用namespace。Java读取可无损表示为RGBA8、位深不超过8bit的PNG；错误沿用一次诊断与整组回退。Rust解释单帧或与基色sheet匹配的列/行，无法匹配的有效图按单帧处理。
+
+| LabPBR输入 | 准备阶段的内部输出 |
 | --- | --- |
-| `_n.RG` | 切线法线 XY；重建非负 Z 并归一化 |
-| `_n.B` | AO 保留于法线页 B，当前不直接乘着色或可见性 |
-| `_n.A` | 原始 height 单独保留，按每帧 minimum 解码 `(A-min)/255`；未接入旧 voxel displacement 几何管线 |
-| 法线页 A | 过滤法线分布对应的 GGX 感知粗糙度，替代原 height |
-| `_s.R` | 光滑度字节；光学解码在过滤与字节量化后取 `clamp(1-R/255,0,1)` |
-| `_s.G` | 源 `0..237 → +1`，`255 → 239`，保留码 `238..254 → 0`；规范码 0 为默认 dielectric，1..230 为 dielectric 身份，231..238 为八种标准金属，239 为自定义金属 |
-| `_s.B` | CPU将porosity/保留码0..65清洗为0，66..255翻译为SSS强度1..190；规范B只表达强度，GPU以B/190消费，不再分类或清洗源码 |
-| `_s.A` | 0..254 为发光强度，255 为未 authored 的 sentinel |
+| `_n.RG` | 重建方向、归一化并转为Aux XY偏置编码；过滤产生Aux B分布粗糙度 |
+| `_n.B/A` | AO和height丢弃，未消费源sheet不常驻 |
+| `_s.R` | `1-R/255`转为MERS B感知粗糙度 |
+| `_s.G` 0..229 | F0=`clamp(G/255,0.02,0.17)`转IOR并写Aux A；M=0 |
+| `_s.G` 230..237 | 八种标准金属n/k转F0并预处理入共享Color；M=1，F82 tint固定1 |
+| `_s.G` 255 | 共享Color为自定义金属F0；M=1 |
+| `_s.G` 保留码 | 默认介电IOR1.5与M=0 |
+| `_s.B` | 0..65丢弃；66..255的薄SSS权重转为MERS A的0..255 |
+| `_s.A` | 0..254转MERS G的0..255；255转E=0，整sheet是否有authored emission另存metadata |
 
-规范 dielectric F0 为 `clamp((code-1)/255,0.02,0.17)`；默认、保留码和需要 dielectric 退路的金属码使用 0.04。不同源身份即使清洗后 F0 相同也保留不同分类码，不能据此消除空气边界。标准金属保留源 eta/k 常量、BT.709/Rec.2020 颜色转换和 F82 tint；自定义金属使用规范基色。
+标准金属预转换接受与旧视角反射、tint和发光颜色的差异；一个RGB用于漫反射、薄SSS、发光和有色金属F0。GPU不读取Lab分类码、n/k表、porosity或哨兵。
 
-## 过滤与动画
+有效外部Lab材质整组优先，包括normal-only。没有有效外部材质时，Java报告获胜基色是否来自实际pack ID `vanilla`；Rust按显式Java sprite ID选择内嵌预设，否则使用默认。此判断在资源代准备时完成，不作逐帧或逐像素匹配。预设使用固定Bedrock样例来源，以两版Java现有RGB为离线匹配键，优先精确匹配，再接受有界的空间颜色相似匹配；alpha不参与匹配，也不从样例覆盖宿主。金属、发光和薄SSS同样进入内部MERS，源帧按Java布局离线投影。模糊匹配与帧投影是明确接受的艺术近似，不证明两个版本的模型、UV或材质语义等价。登记、冲突规则与完整未接入清单见[资产说明](../crates/prime-minecraft/assets/vanilla_pbr/README.md)。运行时不读取Bedrock JSON、TGA、目录或MCPACK；材质包解析延期见[TODO](../TODO.md)。
 
-Rust 为每个辅助图生成与基色帧尺寸对应的规范 mip。法线 footprint 内逐 texel 重建并归一化方向，平均后得到方向和平均长度；平均长度按 GGX macro-normal-length 表量化为页 A 的分布粗糙度，AO 作整数平均。光学页 R 作整数平均，G/B 取 footprint 中心；发光 sentinel 在混合 footprint 中贡献0，只有全 sentinel 时保留255。
+PNG是最终可编辑资产，构建读取当前文件并嵌入，不从样例自动覆盖。离线工具生成候选、记录schema/来源/生成参数与许可；已发布材质进入现有资源所有权和512 MiB唯一backing预算。标准金属转换的原始sprite图仍由资源catalog保留，用于原基色参考及同代定义比较；这部分CPU存储和转换峰值不等同于GPU纹理预算，须另计。
 
-辅助图按实际 Minecraft frame 序列、时长和千分位插值进度推进；进度沿用源 f32 比例向零截断到千分位。法线动画混合已过滤方向后归一化，AO/分布粗糙度按整数规则混合；光学动画只混合 R/A，G/B 保持当前帧直到离散切帧。两端都为发光 sentinel 时保持255，否则 sentinel 按0混合。这些动画结果由 CPU 发布，辅助图 GPU 描述符的 blend 为0；基色继续使用宿主编码域 RGBA→UNORM8 插值语义。冻结期间保留当前结果。
+## 过滤、动画与颜色一致性
 
-生产连续通道采用层内线性、层间线性过滤。法线线性过滤使用方向与 GGX 平均长度，过滤新增的分布粗糙度与材质粗糙度沿用源 squared-alpha-space 近似组合。光学 R/A 连续过滤后量化；分类 G/B 始终从当前帧 **mip0 点采样**，不随射线足迹选择分类 mip。各级 CPU categorical mip 仍保留完整源翻译语义。射线锥当前只估计主像素足迹，未包含粗糙反弹扩散。
+Rust在资源准备阶段把材质页生成到实际sprite的帧尺寸和mip级数。CPU mip中的normal按方向与GGX平均长度过滤并编码分布，动画也合成moment。Color/MERS/Aux统一采用每mip层内最近点、跨mip线性插值；LOD0不把相邻像素的发光、粗糙度或法线混在一起。MERS各通道仍参与CPU mip平均与动画连续插值。Aux跨mip以RGBA插值后重建法线，接受其moment近似；分布粗糙度与材质粗糙度沿用squared-alpha-space近似组合。IOR固定当前帧mip0点采，不受LOD或动画插值影响。
 
-静态基色视图共享 atlas backing；辅助图、所有动画帧和 mip 按实际 Arc backing 计入纹理预算。64B 描述符带独立 normal/specular 视图及归一化 atlas bounds。atlas UV 消费先读静态 lookup，取得稳定 sprite descriptor，再转为局部 UV；动画更新 sprite 辅助图，不重建整张材质 atlas 或 BLAS。lookup 不替代基色跨 sprite UV 的原有兼容边界。纹理元数据变化仍发布描述符；完整 backing 序列相同则不构造引用差分集合，保留现有像素所有权。序列不同或重新分配时仍按去重集合精确增减引用，不能按相同字节猜测同一 owner。资源按源引用、CPU 最后消费者和 GPU 完成证明退休。
+动画按实际Minecraft序列、时长和千分位进度推进。MERS各通道连续混合并量化到RGBA8；Aux混合方向moment后恢复方向和分布，IOR保持当前帧。辅助页的GPU blend为0；Color沿用编码域RGBA→UNORM8插值。冻结保留当前资源视图，同相位跳过新视图，真实资源换代始终重新准备。
+
+静态Color共享atlas；标准金属必要时一次生成替代Color并释放源specular。sprite-local与atlas-UV、发光、guide均消费同一有效Color。64 B描述符沿用两个辅助引用和atlas bounds，lookup将atlas UV映射到稳定sprite；动画只局部更新sprite，不重建整张材质atlas或BLAS。未知/跨sprite UV保持既有atlas边界。
+
+26.2/26.3的item atlas独立于block atlas。Java在资源准备收录其真实sprite、全部Color mip/帧和获胜来源，Rust作为自持Color准备，避免它们的UV覆盖block atlas lookup。真实item quad的sprite与实际绑定atlas一致、且UV在其范围内时，成功资源事务发布的canonical texture ID和既有instance UV affine将其接到同一材质消费；原顶点/packed UV不改。资源重载撤销旧映射，世界reset保留同代目录。未知、跨sprite UV、foil/outline或通用raw回退仍使用原atlas路径；独立实体贴图尚无可靠来源字段，不能由item支持外推。
+
+连续M过滤会产生分数金属度。m=0/1使用端点核，0<m<1使用介电/金属响应混合与完整marginal PDF，sample、evaluate、MIS、guide和delta判定一致；混合闭包保留非金属漫反射/薄SSS，不能只插值最终颜色。没有新增pass、队列、闭包持久状态或记录stride。实际寄存器与整帧收益需要生产测量，容量不变不能证明更快。
 
 ## 闭包与数值契约
 
 生产与测试只使用 `bsdf/full/` 的 OpenPBR 支持子域；LitePBR、旧通用材质 facade 及厚SSS近似已删除。`pbr.slang` 只适配实际源到Full窄构造，离线增加采样并冻结场景，不另选材质模型。Full框架、事件、sample/evaluate/完整PDF、介质和实际结果清洗保留；源清洗由CPU负责，不能由源合法性推断BSDF求值结果必然有限。
 
-Full来自锁定旧Prime `bsdf/compact`，使用精确介电Fresnel、F82 conductor、GGX方向能量、作者transmission-GGX LUT的多次散射补偿、thin-wall几何级数和完整marginal PDF。支持opaque/conductor、证明为薄表面的SSS及solid/thin dielectric；不声明任意coat/fuzz/thin-film等完整OpenPBR参数API。旧预设及独立轻量PT不移植。
+Full来自锁定旧Prime `bsdf/compact`，使用精确介电Fresnel、F82 conductor、GGX方向能量、作者transmission-GGX LUT的多次散射补偿、thin-wall几何级数和完整marginal PDF。支持opaque/conductor、证明为薄表面的SSS及solid/thin dielectric；连续M由生产窄构造支持；通用Full参数API的metalness支持gate仍限定端点，不声明任意coat/fuzz/thin-film等完整OpenPBR参数API。旧预设及独立轻量PT不移植。
 
-植物预设使用明确的艺术薄壁近似：宿主 `LeavesBlock` 身份及 Rust 版本适配中的常见叶片、花、作物、藤蔓、树苗等明确植物名称可将各表面当作叶片，完整模型可以是闭合的树叶方块。缺少 specular 图时使用50%有色薄壁SSS；只有normal图仍使用此回退。有specular图时完全采用其SSS（包括零值）及conductor语义，不生成伪材质图，不改变介质身份。不根据十字模型识别植物，钟乳石、蜘蛛网和未知模组名称不进入预设；普通来源继续要求完整薄片证明。该近似不声明植物体积的物理正确性；明确接受依据与撤销条件见 [HACK](../HACK.md)。
+植物预设使用明确的艺术薄壁近似：宿主 `LeavesBlock` 身份及 Rust 版本适配中的常见叶片、花、作物、藤蔓、树苗等明确植物名称可将各表面当作叶片，完整模型可以是闭合的树叶方块。缺少 specular 图时使用50%有色薄壁SSS；只有normal图仍使用此回退。有MERS图时完全采用其SSS（包括零值）及金属度，不生成伪材质图，不改变介质身份。不根据十字模型识别植物，钟乳石、蜘蛛网和未知模组名称不进入预设；普通来源继续要求完整薄片证明。该近似不声明植物体积的物理正确性；明确接受依据与撤销条件见 [HACK](../HACK.md)。
 
 **LabPBR厚SSS不支持。** 厚体和无法证明薄壁的来源忽略SSS强度，回到常规Full opaque漫反射/反射，保留基色、F0、粗糙度、法线与发光；不再白色漫透射，不做厚介质random walk。cutout、双面重复、树叶/草名称、体积证明失败均不能作为几何薄壁证据；植物预设是上述显式近似。
 
@@ -45,7 +66,7 @@ CPU在资源准备时检查完整确定性model source：全部quad须有限、�
 
 材质薄壁证明与物理介质薄片分开。主表面/第二层分别携带bool，裁切、合并、侧选择保留来源；普通quad的已有word43存bit0/bit1，不扩176B记录或描述符。GPU只消费CPU证明和规范强度，同sprite可同时服务薄片与厚体，不复制整套图或全局抹薄片强度。已证明的物理介质薄片继续按原Fresnel/Beer合同处理，不用SSS证明改写介质。
 
-`PrimePbrVertex`消费normal A、specular RGB和证明，emission A在发光阶段消费；AO/porosity不参与闭包。roughness仍先按实际UV/LOD过滤并量化，再组合normal分布。G的源身份由CPU规范化，视角相关F0/IOR、方向能量、BSDF采样/求值及结果清洗仍在实际消费者处。
+`PrimePbrVertex`保持32 B：共享颜色三float、世界法线三float、有效粗糙度一float与control一uint。control保存M8/S8/IOR8及flags；法线分布在准备顶点时并入有效粗糙度，发光在实际命中阶段消费。过滤后的粗糙度直接使用，M/S因持久记录需要各量化一次。IOR解码和实际Fresnel、方向能量、BSDF求值及结果清洗仍在消费者处。
 
 不可变transmission能量表为44×32×159 HALF4，解码后1,790,976 B，归一化线性clamp过滤。发行 `assets/openpbr/trans_ggx.ktx2` 使用Zstd22，作者原表与overlay锁在[来源清单](../crates/prime-vulkan/assets/openpbr/robocute.lock.json)，third_party原始参考不改。入口set0/binding9显式传入图像/采样器，初始化上传后按现有完成/失败隔离合同退休；不新增SSS查表、pass或全屏状态。
 
@@ -57,8 +78,10 @@ evaluate要求response/PDF有限非负，非法时整组清零；sample要求有
 
 ## 发光与介质
 
-若整张 specular source 的所有帧 A 都为255，则保留实际 block/quad emission。任意 A 小于255即为 authored emission，包括0明确关闭发光；真实强度按当前帧采样 A/254，255 解码为0，满强度沿用 1.5 的源校准并乘规范纹理×tint。CPU 静态灯 proposal 使用全部源帧的最大 authored 强度，因此动画不会使可发光支持域变得不可达，也无需逐帧重建 alias 表。命中与 NEE 的实际发光使用当前采样结果；proposal 不替代真实辐亮度。动态发光尚未注册静态灯目录。
+Lab整sheet所有帧A均为255时保留宿主block/quad emission；任意A小于255即授权覆盖，包括0明确关闭。内部真实强度为当前MERS G/255，满强度保持1.5校准并乘共享Color×tint。命中、NEE与ReSTIR emitter的实际发光统一当前帧mip0最近点域，包括Color及G；散射Color和M/R/S仍按ray-cone LOD采样。高LOD命中按需要重取mip0发光，LOD0复用已有值，背面/常量回退/零强度不重取无消费者的Color。CPU静态灯proposal使用完整帧最大强度，动画不会使发光支持域不可达；proposal不替代真实辐亮度。动态发光尚未注册静态灯目录。
 
-水保持 IOR 1.333 与既有消光。玻璃消光继续由首源帧中心基色建立 homogeneous 参考，不随纹理法线或 G 改变。均匀规范 G 可在 CPU 转为 IOR 并参与介质身份；空间或动画变化的 G 保留源身份，当前表面负侧在命中 UV 取 mip0 G，邻接正侧在固定 sprite midpoint 取当前帧 G。IOR 使用 `eta=(1+sqrt(F0))/(1-sqrt(F0))`。这些引用复用已有光学记录字段和稳定 descriptor，不扩张几何步长或增加 descriptor binding。
+水保持物理IOR1.333与既有消光。玻璃吸收仍由原始首帧中心基色建立homogeneous参考，不随颜色预转换或法线改变。均匀Aux A可在CPU初始化介质，变化场保留资源身份；当前表面负侧按命中UV、邻接正侧按固定sprite midpoint读取当前帧mip0 Aux A，CPU/GPU使用同一仿射解码。光学引用继续复用既有记录，介质身份与量化数值独立。
 
-介质占据、接触拥有者、coverage 和当前表面闭包各有独立证明。法线贴图不改变几何覆盖；opaque NEE 仅覆盖反射侧，SSS 的透射 continuation 命中发光体或太阳时不与该 NEE 竞争减权。dielectric 连续反射/透射均保留竞争 PDF，离散事件保持单独测度。直线 NEE 仍不解算折射焦散。自动化的 CPU/GPU 行为检查不等于完整资源包、双版本游戏画面或原生1080p稳态性能验收；后续工程与科学验证入口见 [TODO](../TODO.md) 和 [CONTRIBUTING](../CONTRIBUTING.md)。
+介质占据、接触拥有者、coverage与表面闭包各有独立证明。法线贴图不改变几何覆盖；opaque NEE只覆盖反射侧，SSS透射continuation命中发光体或太阳不与该NEE竞争减权。dielectric连续反射/透射保留竞争PDF，离散事件保持单独测度；直线NEE不解算折射焦散。
+
+验证覆盖PNG实际像素、量化端点、法线moment、Lab翻译、资源选择/换代、颜色与atlas一致性和生产BSDF response/sample/PDF。自动化无窗口验证不等于双版本游戏画面或原生1080p稳态性能验收；开发入口见[CONTRIBUTING](../CONTRIBUTING.md)。

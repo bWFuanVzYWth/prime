@@ -3,16 +3,11 @@
 #language slang 2026
 module "model/material/medium.slang";
 
-import "model/material/fresnel_code.slang";
+import "model/material/canonical.slang";
 
-// Producer proof: only glass with a varying authored G field carries this identity bit.
+// Producer proof: only glass with a varying authored Aux IOR carries this identity bit.
 // The reserved water identity and constant homogeneous media never carry it.
 public static const uint PRIME_PBR_DYNAMIC_MEDIUM_IOR = 0x80000000u;
-
-public float primePbrFresnelCodeIor(uint canonicalCode) {
-    float root = sqrt(primeDecodeDielectricF0(canonicalCode));
-    return (1.0 + root) / (1.0 - root);
-}
 
 // Physical endpoint identity, independent of relative IOR. A submerged sheet's glass
 // can have lower IOR than water; selecting the larger endpoint loses its extinction.

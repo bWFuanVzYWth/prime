@@ -23,5 +23,9 @@ public abstract class TextureAtlasMixin {
         if (((TextureAtlas)(Object)this).location().equals(TextureAtlas.LOCATION_BLOCKS))
             PrimeClient.CAPTURE.captureAtlas(preparations);
         DynamicTextures.atlas((TextureAtlas)(Object)this, preparations);
+        if (((TextureAtlas)(Object)this).location().equals(TextureAtlas.LOCATION_ITEMS))
+            PrimeClient.CAPTURE.captureItemSprites(
+                    preparations,
+                    DynamicTextures.capturedId(((TextureAtlas)(Object)this).getTexture()));
     }
 }

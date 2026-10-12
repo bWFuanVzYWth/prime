@@ -5,8 +5,12 @@ import java.lang.reflect.Field;
 import java.util.IdentityHashMap;
 import java.util.List;
 import dev.primept.abi.PrimeAbi.*;
+import dev.primept.abi.PrimeAbi;
 import net.minecraft.client.renderer.texture.SpriteContents;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
+import net.minecraft.client.Minecraft;
+import net.minecraft.resources.Identifier;
+import net.minecraft.server.packs.resources.ResourceManager;
 
 /** Actual immutable sprite fields, sent once per resource epoch. Rust owns sampling and animation. */
 final class SourceSprites {
@@ -14,6 +18,7 @@ final class SourceSprites {
                                FRAMES = field(ANIMATION.getType(), "frames"),
                                INTERPOLATE = field(ANIMATION.getType(), "interpolateFrames");
     private final IdentityHashMap<TextureAtlasSprite, Integer> ids = new IdentityHashMap<>();
+    private final IdentityHashMap<TextureAtlasSprite, Integer> itemIds = new IdentityHashMap<>();
     private final LabPbrSources materials = new LabPbrSources();
     private boolean atlasPrepared;
 
@@ -26,9 +31,18 @@ final class SourceSprites {
         // resource-owned coverage once, including sprites first encountered by later terrain.
         for (var sprite : sprites)
             prepare(out, sprite);
+        for (var sprite : dev.primept.PrimeClient.CAPTURE.itemSprites())
+            itemIds.put(sprite, prepare(out, sprite, true));
+    }
+
+    void publishItemSprites() {
+        dev.primept.PrimeClient.CAPTURE.publishItemSprites(itemIds);
     }
 
     int prepare(McSourceBatch out, TextureAtlasSprite sprite) {
+        return prepare(out, sprite, false);
+    }
+    private int prepare(McSourceBatch out, TextureAtlasSprite sprite, boolean privateColor) {
         Integer known = ids.get(sprite);
         if (known != null)
             return known;
@@ -41,7 +55,7 @@ final class SourceSprites {
         for (int mip = 0; mip < images.length; ++mip) {
             var image = images[mip];
             // The static base image already belongs to the shared atlas. No duplicate pixels.
-            if (mip == 0 && animation == null)
+            if (mip == 0 && animation == null && !privateColor)
                 out.emptyImage(image.getWidth(), image.getHeight());
             else {
                 var pixels = image.getPixelBytes();
@@ -76,7 +90,20 @@ final class SourceSprites {
                 .write(PrimeMcSprite.frames(value));
         PrimeMcSprite.normal_image(value, material[0]);
         PrimeMcSprite.specular_image(value, material[1]);
+        // Actual winning host resource, once per resource generation. Rust selects the preset.
+        var minecraft = Minecraft.getInstance();
+        int flags = privateColor ? PrimeAbi.PRIME_MC_SPRITE_PRIVATE_COLOR : 0;
+        if (minecraft != null && vanillaColor(minecraft.getResourceManager(), contents.name()))
+            flags |= PrimeAbi.PRIME_MC_SPRITE_VANILLA_COLOR;
+        PrimeMcSprite.flags(value, flags);
         return id;
+    }
+    static boolean vanillaColor(ResourceManager manager, Identifier name) {
+        if (manager == null)
+            return false;
+        var color = manager.getResource(Identifier.fromNamespaceAndPath(
+                name.getNamespace(), "textures/" + name.getPath() + ".png"));
+        return color.isPresent() && color.orElseThrow().sourcePackId().equals("vanilla");
     }
     private static Field field(Class<?> type, String name) {
         try {

@@ -224,6 +224,10 @@ fn malformed_material_extents_controls_and_nesting_cannot_publish() {
             ..Default::default()
         },
         TextureMaterial {
+            has_normal: true,
+            ..Default::default()
+        },
+        TextureMaterial {
             atlas_lookup: true,
             ..Default::default()
         },

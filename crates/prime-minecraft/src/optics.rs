@@ -2,18 +2,12 @@
 use crate::model::{Catalog, State};
 use prime_scene::surface::{Medium, Optics, SurfaceFace};
 
-/// A varying LabPBR IOR field retains its resource identity. The current surface samples its
-/// canonical code; a neighboring medium samples its current frame at the source midpoint.
+/// A varying internal IOR field retains its resource identity. The current surface samples its
+/// encoded value; a neighboring medium samples its current frame at the source midpoint.
 pub(crate) const DYNAMIC_IOR_MEDIUM: u32 = 0x8000_0000;
 
-pub(crate) fn fresnel_code_ior(code: u8) -> f32 {
-    let f0 = if code == 0 || code >= 231 {
-        0.04
-    } else {
-        (f32::from(code - 1) / 255.).clamp(0.02, 0.17)
-    };
-    let root = f0.sqrt();
-    (1. + root) / (1. - root)
+pub(crate) fn ior_byte(value: u8) -> f32 {
+    crate::material::decode_ior(value)
 }
 
 pub(crate) fn water() -> Medium {
@@ -51,7 +45,7 @@ pub(crate) fn glass(reference: [f32; 4]) -> Medium {
         })
     };
     Medium {
-        ior: fresnel_code_ior(0),
+        ior: ior_byte(85),
         extinction,
     }
 }
@@ -93,6 +87,7 @@ mod tests {
     fn source_sprite(green: [u8; 4]) -> Sprite {
         let mut sprite = Sprite {
             name: "test:glass".into(),
+            block_atlas: true,
             bounds: [0., 0., 1., 1.],
             extent: [4, 1],
             images: vec![Image {
@@ -131,22 +126,22 @@ mod tests {
     }
 
     #[test]
-    fn canonical_dielectric_codebook_preserves_clamps_and_conductor_fallback() {
-        for code in 0u8..=255 {
-            let ior = fresnel_code_ior(code);
-            let recovered = ((ior - 1.) / (ior + 1.)).powi(2);
-            let expected = if code == 0 || code >= 231 {
-                0.04
-            } else {
-                (f32::from(code - 1) / 255.).clamp(0.02, 0.17)
-            };
-            assert!((recovered - expected).abs() < 1e-7, "code {code}");
-            assert!(ior.is_finite() && ior > 1.);
+    fn internal_ior_encoding_has_fixed_endpoints_and_default() {
+        assert_eq!(ior_byte(0), 1.);
+        assert_eq!(ior_byte(85), 1.5);
+        assert_eq!(ior_byte(255), 2.5);
+        for value in 0u8..=255 {
+            let ior = ior_byte(value);
+            assert!(ior.is_finite() && (1. ..=2.5).contains(&ior));
+            let encoded = crate::material::encode_ior(f64::from(ior));
+            assert_eq!(encoded, value);
         }
-        assert_eq!(fresnel_code_ior(0), 1.5);
-        assert_eq!(fresnel_code_ior(230), fresnel_code_ior(45));
-        assert_eq!(fresnel_code_ior(231), 1.5);
-        assert_eq!(fresnel_code_ior(239), 1.5);
+    }
+
+    fn source_ior(value: u8) -> f32 {
+        let f0 = (f64::from(value) / 255.).clamp(0.02, 0.17);
+        let root = f0.sqrt();
+        ior_byte(crate::material::encode_ior((1. + root) / (1. - root)))
     }
 
     #[test]
@@ -181,8 +176,8 @@ mod tests {
             .collect();
         assert_eq!(media[0].0, media[1].0);
         assert_ne!(media[0].0, media[2].0);
-        assert_eq!(media[0].1.ior, fresnel_code_ior(11));
-        assert_eq!(media[2].1.ior, fresnel_code_ior(81));
+        assert_eq!(media[0].1.ior, source_ior(10));
+        assert_eq!(media[2].1.ior, source_ior(80));
         for &(id, medium, thin) in &media[..3] {
             assert_eq!(id & DYNAMIC_IOR_MEDIUM, 0);
             assert_eq!(medium.extinction, [0.; 3]);
@@ -190,7 +185,7 @@ mod tests {
         }
         for &(id, medium, _) in &media[3..] {
             assert_ne!(id & DYNAMIC_IOR_MEDIUM, 0);
-            assert_eq!(medium.ior, fresnel_code_ior(81));
+            assert_eq!(medium.ior, source_ior(80));
             assert_eq!(medium.extinction, [0.; 3]);
         }
         assert_ne!(media[3].0, media[4].0);

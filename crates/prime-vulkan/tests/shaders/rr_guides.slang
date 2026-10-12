@@ -130,7 +130,8 @@ public PrimeDenoiseAlbedos rrCpuAlbedos(float3 base, float3 optical, float rough
                                         bool dielectric, bool thin, float cosine) {
     float3 view = float3(sqrt(max(0.0, 1.0 - cosine * cosine)), 0, cosine);
     PrimePbrVertex vertex =
-            primePbrVertex(base, float3(0, 0, 1), 0, optical, false, true, thin, dielectric, view);
+            primePbrVertex(base, float3(0, 0, 1), 0, float4(optical.x, 0.0, roughness, optical.z),
+                           optical.y, false, true, thin, dielectric, view);
     vertex.roughness = roughness;
     return primePbrGuideAlbedos(RrCpuConstantEnergy(), vertex, view, float4(1, 0, 0, 0),
                                 float4(1.5, 0, 0, 0));

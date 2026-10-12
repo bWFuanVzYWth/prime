@@ -570,6 +570,199 @@ fn typed_append_keeps_prior_material_lookup_and_empty_or_invalid_batches_are_ato
     ));
 }
 
+#[test]
+fn typed_material_selection_uses_host_origin_and_external_group_priority() {
+    for (flags, plane) in [
+        (0, None),
+        (PRIME_MC_SPRITE_VANILLA_COLOR, None),
+        (PRIME_MC_SPRITE_VANILLA_COLOR, Some(false)),
+        (PRIME_MC_SPRITE_VANILLA_COLOR, Some(true)),
+    ] {
+        let mut context = TerrainContext::default();
+        let mut scene = SourceScene::default();
+        scene.reset_world(1).unwrap();
+        let mut bytes = [120, 95, 64, 255].repeat(16 * 16);
+        let name = b"minecraft:block/stone";
+        let name_offset = bytes.len() as u64;
+        bytes.extend(name);
+        let plane_offset = bytes.len() as u64;
+        bytes.extend(if plane == Some(true) {
+            [0, 30, 255, 254]
+        } else {
+            [128, 128, 255, 100]
+        });
+        let images = [
+            PrimeMcImage {
+                width: 16,
+                height: 16,
+                ..Default::default()
+            },
+            PrimeMcImage {
+                width: 1,
+                height: 1,
+                pixels: PrimeMcRange {
+                    offset: plane_offset,
+                    count: 4,
+                },
+            },
+        ];
+        let sprites = [PrimeMcSprite {
+            id: 1,
+            flags,
+            bounds: [0., 0., 1., 1.],
+            extent: [16, 16],
+            name: PrimeMcRange {
+                offset: name_offset,
+                count: name.len() as u64,
+            },
+            images: PrimeMcRange {
+                offset: 0,
+                count: 1,
+            },
+            normal_image: if plane == Some(false) { 1 } else { u32::MAX },
+            specular_image: if plane == Some(true) { 1 } else { u32::MAX },
+            ..Default::default()
+        }];
+        let mut raw = PrimeMcResourceBatch {
+            identity: identity(1, 0, 1),
+            flags: PRIME_MC_RESOURCE_REPLACE,
+            atlas: PrimeMcImage {
+                width: 16,
+                height: 16,
+                pixels: PrimeMcRange {
+                    offset: 0,
+                    count: 1024,
+                },
+            },
+            ..Default::default()
+        };
+        let input = resources_with_images(&mut raw, &bytes, &[], &[], &[], &sprites, &images);
+        context.prepare_resources(&input, &mut scene).unwrap();
+        let color = scene.texture(sprite::texture(1)).unwrap();
+        assert!(Arc::ptr_eq(
+            &color.pixels,
+            &scene.texture(1).unwrap().pixels
+        ));
+        match (flags, plane) {
+            (0, None) => assert!(color.material.is_none()),
+            (_, None) => {
+                let material = color.material.as_ref().unwrap();
+                let preset = crate::vanilla_pbr::images("minecraft:block/stone")
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(
+                    material.specular.as_ref().unwrap().pixels,
+                    preset.mers.pixels
+                );
+                assert!(!material.has_normal);
+            }
+            (_, Some(false)) => {
+                let material = color.material.as_ref().unwrap();
+                assert!(material.has_normal);
+                assert!(material.specular.is_none());
+            }
+            (_, Some(true)) => {
+                let material = color.material.as_ref().unwrap();
+                assert!(!material.has_normal);
+                assert_eq!(
+                    &material.specular.as_ref().unwrap().pixels[..4],
+                    &[0, 255, 255, 255]
+                );
+            }
+        }
+        // The same resource definition must compare prepared values, including color overrides.
+        raw.flags = 0;
+        raw.atlas = Default::default();
+        let input = resources_with_images(&mut raw, &bytes, &[], &[], &[], &sprites, &images);
+        context.prepare_resources(&input, &mut scene).unwrap();
+    }
+}
+
+#[test]
+fn typed_standard_metal_prepares_shared_color_before_atomic_publication() {
+    let mut context = TerrainContext::default();
+    let mut scene = SourceScene::default();
+    scene.reset_world(1).unwrap();
+    let bytes = [255, 255, 255, 63, 0, 231, 0, 255];
+    let images = [
+        PrimeMcImage {
+            width: 1,
+            height: 1,
+            ..Default::default()
+        },
+        PrimeMcImage {
+            width: 1,
+            height: 1,
+            pixels: PrimeMcRange {
+                offset: 4,
+                count: 4,
+            },
+        },
+    ];
+    let sprites = [PrimeMcSprite {
+        id: 1,
+        bounds: [0., 0., 1., 1.],
+        extent: [1, 1],
+        images: PrimeMcRange {
+            offset: 0,
+            count: 1,
+        },
+        normal_image: u32::MAX,
+        specular_image: 1,
+        ..Default::default()
+    }];
+    let mut raw = PrimeMcResourceBatch {
+        identity: identity(1, 0, 1),
+        flags: PRIME_MC_RESOURCE_REPLACE,
+        atlas: PrimeMcImage {
+            width: 1,
+            height: 1,
+            pixels: PrimeMcRange {
+                offset: 0,
+                count: 4,
+            },
+        },
+        ..Default::default()
+    };
+    let input = resources_with_images(&mut raw, &bytes, &[], &[], &[], &sprites, &images);
+    context.prepare_resources(&input, &mut scene).unwrap();
+    let color = scene.texture(sprite::texture(1)).unwrap();
+    assert_ne!(&color.pixels[..3], &[255; 3]);
+    assert_eq!(color.pixels[3], 63);
+    assert_eq!(
+        color
+            .material
+            .as_ref()
+            .unwrap()
+            .specular
+            .as_ref()
+            .unwrap()
+            .pixels[0],
+        255
+    );
+    let original_reference = context.catalog.glass_references[&sprite::texture(1)];
+    assert_eq!(original_reference, [1., 1., 1., 63. / 255.]);
+    let lookup = scene
+        .texture(1)
+        .unwrap()
+        .material
+        .as_ref()
+        .unwrap()
+        .coverage
+        .as_ref()
+        .unwrap();
+    assert_eq!(
+        u32::from_le_bytes(lookup.pixels[..4].try_into().unwrap()),
+        sprite::texture(1)
+    );
+    let converted = color.pixels.clone();
+    raw.flags = 0;
+    raw.atlas = Default::default();
+    let input = resources_with_images(&mut raw, &bytes, &[], &[], &[], &sprites, &images);
+    context.prepare_resources(&input, &mut scene).unwrap();
+    assert_eq!(scene.texture(sprite::texture(1)).unwrap().pixels, converted);
+}
+
 fn diagnostic_identity<T>(batch: u64) -> PrimeMcIdentity {
     PrimeMcIdentity {
         struct_size: std::mem::size_of::<T>() as u32,

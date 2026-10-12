@@ -8,13 +8,19 @@ fn authored_labpbr_emission_enters_the_ordinary_model_light_path_and_replaces_ho
         model: 1,
         ..Default::default()
     };
-    for (alpha, level, expected) in [(254, 0, 1.5), (127, 15, 0.75), (0, 15, 0.0), (255, 15, 1.5)] {
+    for (alpha, level, expected) in [
+        (254, 0, 1.5),
+        (127, 15, 1.5 * (128.0f32 / 255.0)),
+        (0, 15, 0.0),
+        (255, 15, 1.5),
+    ] {
         let mut q = face();
         q.sprite = 1;
         q.layer = 0;
         q.emission = level;
         let mut sprite = crate::sprite::Sprite {
             name: "test:lamp".into(),
+            block_atlas: true,
             bounds: [0., 0., 1., 1.],
             extent: [1, 1],
             images: vec![crate::sprite::Image {
@@ -87,6 +93,7 @@ fn sss_catalog(mut quads: Vec<Quad>) -> Catalog {
     let mut c = catalog(quads);
     let mut sprite = crate::sprite::Sprite {
         name: "test:shared".into(),
+        block_atlas: true,
         bounds: [0., 0., 1., 1.],
         extent: [1, 1],
         images: vec![crate::sprite::Image {
@@ -113,6 +120,7 @@ fn sss_catalog(mut quads: Vec<Quad>) -> Catalog {
         2,
         crate::sprite::Sprite {
             name: "test:ordinary".into(),
+            block_atlas: true,
             bounds: sprite.bounds,
             extent: sprite.extent,
             images: vec![crate::sprite::Image {
@@ -326,8 +334,8 @@ fn shared_sprite_uses_complete_parent_topology_and_rebuilds_proofs_for_appended_
             .specular
             .as_ref()
             .unwrap()
-            .pixels[2],
-        190,
+            .pixels[3],
+        255,
         "the same authored sprite remains available to the proven thin parent"
     );
 }

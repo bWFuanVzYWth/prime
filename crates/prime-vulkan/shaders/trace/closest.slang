@@ -3,7 +3,7 @@ module "trace/closest.slang";
 import "math/ray_offset.slang";
 import "math/color.slang";
 import "math/rigid_motion.slang";
-import "model/material/labpbr.slang";
+__exported import "model/material/canonical.slang";
 import "model/material/medium.slang";
 import "service/material/normal_mapping.slang";
 
@@ -164,12 +164,40 @@ public float4 sampleTexture(StructuredBuffer<uint4> textures, StructuredBuffer<u
         color = lerp(color, sampleLevel(textures, texels, extra.y + level, uv, sprite), blend);
     return color;
 }
+public struct MaterialSample {
+    public uint4 maps;
+    public float2 uv;
+    public uint colorTexture;
+};
+public MaterialSample materialSource(TraceScene resources, uint texture, float2 uv) {
+    uint colorTexture = texture;
+    uint4 maps = resources.textures[texture * 4 + 2];
+    if ((maps.z & 8) != 0) {
+        // Raw atlas coordinates use the base texture's repeat domain. Only the
+        // resolved sprite coordinates clamp at their local frame endpoints.
+        uv = frac(uv);
+        uint4 lookup = resources.textures[maps.w * 4];
+        uint2 pixel = min(uint2(uv * float2(lookup.yz)), lookup.yz - 1);
+        uint sprite = resources.texels[lookup.x + pixel.y * lookup.y + pixel.x];
+        if (sprite == 0) {
+            MaterialSample empty = {uint4(0), uv, texture};
+            return empty;
+        }
+        float4 bounds = asfloat(resources.textures[sprite * 4 + 3]);
+        uv = (uv - bounds.xy) / (bounds.zw - bounds.xy);
+        maps = resources.textures[sprite * 4 + 2];
+        colorTexture = sprite;
+    }
+    MaterialSample result = {maps, uv, colorTexture};
+    return result;
+}
 public struct SourceSample {
     public float4 color;
     public float2 uv;
     public float2 du;
     public float2 dv;
     public float lod;
+    public MaterialSample material;
 };
 public SourceSample sourceSample(TraceScene resources, SurfaceRecord record, float2 bary,
                                  float footprint) {
@@ -195,10 +223,14 @@ public SourceSample sourceSample(TraceScene resources, SurfaceRecord record, flo
         float3 gv = (e * (du.y * ff - dv.y * ef) + f * (dv.y * ee - du.y * ef)) * inv * image.z;
         lod = max(log2(max(footprint * sqrt(max(dot(gu, gu), dot(gv, gv))), 1.0)), 0.0);
     }
+    MaterialSample material = materialSource(resources, tri.texture, uv);
+    float4 color = sampleTexture(resources.textures, resources.texels, tri.texture, uv, lod);
+    if (material.colorTexture != tri.texture)
+        color.rgb = sampleTexture(resources.textures, resources.texels, material.colorTexture,
+                                  material.uv, lod)
+                            .rgb;
     SourceSample result = {
-            sampleTexture(resources.textures, resources.texels, tri.texture, uv, lod) *
-                    (tri.c0 * b.x + tri.c1 * b.y + tri.c2 * b.z),
-            uv, du, dv, lod};
+            color * (tri.c0 * b.x + tri.c1 * b.y + tri.c2 * b.z), uv, du, dv, lod, material};
     return result;
 }
 float4 sourceColor(TraceScene resources, SurfaceRecord record, float2 bary, float footprint) {
@@ -208,60 +240,11 @@ float4 sourceColor(TraceScene resources, SurfaceRecord record, float2 bary) {
     // Coverage and emitter evaluation share the source base-level support domain.
     return sourceColor(resources, record, bary, 0.0);
 }
-public struct MaterialSample {
-    public uint4 maps;
-    public float2 uv;
-};
-public MaterialSample materialSource(TraceScene resources, uint texture, float2 uv) {
-    uint4 maps = resources.textures[texture * 4 + 2];
-    if ((maps.z & 8) != 0) {
-        // Raw atlas coordinates use the base texture's repeat domain. Only the
-        // resolved sprite coordinates clamp at their local frame endpoints.
-        uv = frac(uv);
-        uint4 lookup = resources.textures[maps.w * 4];
-        uint2 pixel = min(uint2(uv * float2(lookup.yz)), lookup.yz - 1);
-        uint sprite = resources.texels[lookup.x + pixel.y * lookup.y + pixel.x];
-        if (sprite == 0) {
-            MaterialSample empty = {uint4(0), uv};
-            return empty;
-        }
-        float4 bounds = asfloat(resources.textures[sprite * 4 + 3]);
-        uv = (uv - bounds.xy) / (bounds.zw - bounds.xy);
-        maps = resources.textures[sprite * 4 + 2];
-    }
-    MaterialSample result = {maps, uv};
-    return result;
-}
-// Continuous channels use their own mip chain. Fresnel and subsurface categories always
-// retain the point-filtered base-level source identity, as in the original access service.
-public float4 primeLinearMaterialLevel(StructuredBuffer<uint4> textures,
-                                       StructuredBuffer<uint> texels, uint texture, float2 uv) {
-    uint4 image = textures[texture * 4];
-    bool sprite = surfaceFeatures >= 2 && (image.w & 0x80000000) != 0;
-    TextureLevelSample level = prepareTextureLevel(textures, texture, image, sprite);
-    float2 position = uv * float2(level.image.yz) - 0.5;
-    float2 lo = floor(position);
-    float2 f = frac(position);
-    // Metadata/frame/stride are identical for all four neighbors. Preserve each original
-    // normalized UV calculation and RGBA8 animation quantization before interpolation.
-    float4 a = samplePreparedLevel(texels, level, (lo + float2(0.5, 0.5)) / float2(level.image.yz));
-    float4 b = samplePreparedLevel(texels, level, (lo + float2(1.5, 0.5)) / float2(level.image.yz));
-    float4 c = samplePreparedLevel(texels, level, (lo + float2(0.5, 1.5)) / float2(level.image.yz));
-    float4 d = samplePreparedLevel(texels, level, (lo + float2(1.5, 1.5)) / float2(level.image.yz));
-    return lerp(lerp(a, b, f.x), lerp(c, d, f.x), f.y);
-}
-float4 linearMaterialLevel(TraceScene resources, uint texture, float2 uv) {
-    return primeLinearMaterialLevel(resources.textures, resources.texels, texture, uv);
-}
-public float4 linearMaterial(TraceScene resources, uint texture, float2 uv, float lod) {
-    uint4 extra = resources.textures[texture * 4 + 1];
-    lod = clamp(lod, 0.0, float(extra.z));
-    uint level = uint(lod);
-    uint index = level == 0 ? texture : extra.y + level - 1;
-    float4 value = linearMaterialLevel(resources, index, uv);
-    return frac(lod) == 0.0
-                   ? value
-                   : lerp(value, linearMaterialLevel(resources, extra.y + level, uv), frac(lod));
+// Preserve pixel-art boundaries with the same point-within-level, linear-between-mips
+// filter as Color. Continuous MERS values retain CPU mip averaging and animation blending.
+// Aux IOR is selected independently at current-frame mip0.
+public float4 sampleMaterial(TraceScene resources, uint texture, float2 uv, float lod) {
+    return sampleTexture(resources.textures, resources.texels, texture, uv, lod);
 }
 float3 mappedNormal(SurfaceRecord record, SourceSample source, float3 geometric, float4 sample) {
     float determinant = source.du.x * source.dv.y - source.du.y * source.dv.x;
@@ -275,7 +258,7 @@ float3 mappedNormal(SurfaceRecord record, SourceSample source, float3 geometric,
         return geometric;
     tangent = normalize(tangent);
     float3 bitangent = cross(geometric, tangent) * (determinant < 0.0 ? -1.0 : 1.0);
-    float3 normal = primeAdaptLabPbrNormalAtlas(sample).tangentNormal;
+    float3 normal = primeDecodeCanonicalNormal(sample).tangentNormal;
     return normalize(tangent * normal.x + bitangent * normal.y + geometric * normal.z);
 }
 float3 sourceEmissionResolved(SurfaceRecord record, SourceSample source, bool front,
@@ -285,7 +268,7 @@ float3 sourceEmissionResolved(SurfaceRecord record, SourceSample source, bool fr
     if (!front && (record.identity.w & 2) == 0)
         return float3(0);
     if ((materialFlags & 4) != 0) {
-        float value = primeDecodeLabPbrEmission(emissionSample);
+        float value = saturate(emissionSample);
         return decodeSrgb(saturate(source.color.rgb)) * (1.5 * value);
     }
     return record.emission.rgb *
@@ -293,15 +276,37 @@ float3 sourceEmissionResolved(SurfaceRecord record, SourceSample source, bool fr
 }
 public float3 sourceEmission(TraceScene resources, SurfaceRecord record, SourceSample source,
                              bool front) {
-    // Generic emitter callers do not have the surface's filtered material sample.
-    if (!front && (record.identity.w & 2) == 0 && (record.triangle.flags & 4u) == 0u)
+    // Emitter/coverage support is the shared mip0 point domain; callers supply base Color.
+    if ((record.triangle.flags & 4u) != 0u)
+        return decodeSrgb(saturate(source.color.rgb));
+    if (!front && (record.identity.w & 2) == 0)
         return float3(0);
-    MaterialSample material = materialSource(resources, record.triangle.texture, source.uv);
-    float emissionSample =
-            (material.maps.z & 4) != 0
-                    ? linearMaterial(resources, material.maps.y, material.uv, source.lod).a
-                    : 0.0;
+    MaterialSample material = source.material;
+    float emissionSample = (material.maps.z & 4) != 0
+                                   ? sampleMaterial(resources, material.maps.y, material.uv, 0.0).g
+                                   : 0.0;
     return sourceEmissionResolved(record, source, front, material.maps.z, emissionSample);
+}
+public float3 sourceEmissionAtHit(TraceScene resources, SurfaceRecord record, SourceSample source,
+                                  float2 bary, bool front, float emissionSample) {
+    bool unlit = (record.triangle.flags & 4u) != 0u;
+    if (!front && (record.identity.w & 2) == 0 && !unlit)
+        return float3(0);
+    uint flags = source.material.maps.z;
+    if (source.lod > 0.0) {
+        // BSDF mips remain filtered; emitted radiance must match the base-level NEE domain.
+        // An authored zero needs no Color read, and a constant fallback needs no resampling.
+        if (!unlit && (flags & 4) != 0)
+            emissionSample =
+                    sampleMaterial(resources, source.material.maps.y, source.material.uv, 0.0).g;
+        bool usesColor =
+                unlit || ((flags & 4) != 0 ? emissionSample > 0.0
+                                           : (record.identity.w & 16) != 0 &&
+                                                     any(record.emission.rgb != float3(0)));
+        if (usesColor)
+            source.color = sourceSample(resources, record, bary, 0.0).color;
+    }
+    return sourceEmissionResolved(record, source, front, flags, emissionSample);
 }
 public SurfaceRecord loadQuad(uint *base, uint format, uint primitive) {
     uint words = surfaceFeatures < 2 ? 44 + format * 16
@@ -420,26 +425,26 @@ public SurfaceRecord boundaryIors(TraceScene resources, SurfaceRecord record, fl
                                   float footprint) {
     if (opticalFeatures == 0)
         return record;
-    // Reference coordinates stay fixed while their G category follows the current frame.
+    // Reference coordinates stay fixed while Aux IOR follows the current frame.
     // Coatings cannot replace either physical medium's source field.
     if (record.positiveIorTexture != 0) {
         MaterialSample reference =
                 materialSource(resources, record.positiveIorTexture, float2(0.5));
-        if ((reference.maps.z & 2) != 0) {
-            float g = sampleTexture(resources.textures, resources.texels, reference.maps.y,
-                                    reference.uv, 0.0)
-                              .g;
-            record.positive.x = primePbrFresnelCodeIor(uint(round(g * 255.0)));
+        if ((reference.maps.z & PRIME_MATERIAL_AUX) != 0) {
+            float ior = sampleTexture(resources.textures, resources.texels, reference.maps.x,
+                                      reference.uv, 0.0)
+                                .a;
+            record.positive.x = primeDecodeMaterialIor(ior);
         }
     }
     if ((record.identity.x & PRIME_PBR_DYNAMIC_MEDIUM_IOR) != 0) {
         SourceSample source = sourceSample(resources, record, bary, footprint);
-        MaterialSample material = materialSource(resources, record.triangle.texture, source.uv);
-        if ((material.maps.z & 2) != 0) {
-            float g = sampleTexture(resources.textures, resources.texels, material.maps.y,
-                                    material.uv, 0.0)
-                              .g;
-            record.negative.x = primePbrFresnelCodeIor(uint(round(g * 255.0)));
+        MaterialSample material = source.material;
+        if ((material.maps.z & PRIME_MATERIAL_AUX) != 0) {
+            float ior = sampleTexture(resources.textures, resources.texels, material.maps.x,
+                                      material.uv, 0.0)
+                                .a;
+            record.negative.x = primeDecodeMaterialIor(ior);
         }
     }
     return record;
@@ -520,32 +525,29 @@ public SurfaceHit resolveSurfaceHit(TraceScene resources, SurfaceRecord record, 
     record.positive = boundary.positive;
     SourceSample sampled = sourceSample(resources, record, bary, footprint);
     hit.sourceColor = sampled.color;
-    MaterialSample material = materialSource(resources, record.triangle.texture, sampled.uv);
+    MaterialSample material = sampled.material;
     hit.materialFlags = material.maps.z;
     uint4 maps = material.maps;
-    hit.normalSample = (hit.materialFlags & 1) != 0
-                               ? linearMaterial(resources, maps.x, material.uv, sampled.lod)
-                               : float4(0.5, 0.5, 1, 0);
-    hit.specularSample =
-            (hit.materialFlags & 2) != 0
-                    ? sampleTexture(resources.textures, resources.texels, maps.y, material.uv, 0.0)
-                    : float4(0);
-    if ((hit.materialFlags & 2) != 0) {
-        float4 continuous = linearMaterial(resources, maps.y, material.uv, sampled.lod);
-        hit.specularSample.r = continuous.r;
-        hit.specularSample.a = continuous.a;
-    }
+    hit.normalSample = (hit.materialFlags & PRIME_MATERIAL_NORMAL) != 0
+                               ? sampleMaterial(resources, maps.x, material.uv, sampled.lod)
+                               : float4(128.0 / 255.0, 128.0 / 255.0, 0.0, 85.0 / 255.0);
+    if ((hit.materialFlags & PRIME_MATERIAL_AUX) != 0)
+        hit.normalSample.a =
+                sampleTexture(resources.textures, resources.texels, maps.x, material.uv, 0.0).a;
+    hit.specularSample = (hit.materialFlags & PRIME_MATERIAL_MERS) != 0
+                                 ? sampleMaterial(resources, maps.y, material.uv, sampled.lod)
+                                 : float4(0.0, 0.0, 0.9, 0.0);
     hit.shadingNormal =
-            (hit.materialFlags & 1) != 0
+            (hit.materialFlags & PRIME_MATERIAL_NORMAL) != 0
                     ? mappedNormal(record, sampled, hit.surface.normal, hit.normalSample)
                     : hit.surface.normal;
-    if ((hit.materialFlags & 1) != 0)
+    if ((hit.materialFlags & PRIME_MATERIAL_NORMAL) != 0)
         hit.shadingNormal = primeEnsureValidNormalMappedReflection(hit.surface.normal, -direction,
                                                                    hit.shadingNormal);
-    // Resident metadata guarantees authored emission has a specular map. Reuse the same
-    // selected shading record, animation frame, UV, LOD and filtered A already read above.
-    hit.emission = sourceEmissionResolved(record, sampled, dot(hit.surface.normal, direction) < 0,
-                                          hit.materialFlags, hit.specularSample.a);
+    // Emission shares the selected record/frame/UV and mip0 support with NEE emitters.
+    hit.emission =
+            sourceEmissionAtHit(resources, record, sampled, bary,
+                                dot(hit.surface.normal, direction) < 0, hit.specularSample.g);
     hit.light = (instance & 0x00800000) == 0 && record.identity.z != 0xffffffffu
                         ? resources.staticTrianglePages[instance + geometry].firstEmitter +
                                   record.identity.z
