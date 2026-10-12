@@ -354,16 +354,52 @@ def write_unintegrated(output,report):
             lines.extend(["### "+reason.replace("\n"," "),"","| Texture / sprite ID | Java versions |","| --- | --- |"])
             lines.extend("| `"+identifier+"` | "+", ".join(versions)+" |" for identifier,versions in sorted(entries.items()))
             lines.append("")
-    (output/"unintegrated.md").write_text("\n".join(lines)+"\n",encoding="utf-8",newline="\n")
+    (output/"unintegrated.md").write_text("\n".join(lines).rstrip()+"\n",encoding="utf-8",newline="\n")
 
 
-def write_summary(output,summary):
+def unmatched_family(identifier):
+    category,name=identifier.split(":",1)[1].split("/",1)
+    if category=="block" and (name.startswith("bed_") or "_bed_" in name or name.endswith("_bed")):return "Bed faces"
+    if name.endswith("_sign"):return "Signs and hanging signs"
+    if name.startswith("dried_ghast_hydration_"):return "Dried ghast hydration faces"
+    if name.startswith("destroy_"):return "Block breaking overlays"
+    if name.endswith("_chain"):return "Chains"
+    if name.startswith("sulfur_spike"):return "Sulfur spike blocks/items"
+    if "poplar" in name:return "Poplar blocks/items"
+    if name.endswith("_cushion"):return "Cushion items"
+    if category=="item" and "map" in name:return "Map icons/overlays"
+    if name.startswith(("debug","test_")) or category=="item" and (name=="light" or name.startswith("light_")):return "Debug/test/light icons"
+    if category=="entity" and name.startswith("conduit/") or identifier=="minecraft:block/conduit":return "Conduit"
+    return "Other "+category+" textures"
+
+
+def summary_groups(report,status,key):
+    groups={}
+    for version,records in report["java"].items():
+        for record in records:
+            if record["status"]!=status:continue
+            label=key(record["java_id"])
+            counts=groups.setdefault(label,{})
+            counts[version]=counts.get(version,0)+1
+    versions=list(report["java"])
+    text="| Texture family | "+" | ".join(versions)+" |\n| --- | "+" | ".join("---:" for _ in versions)+" |\n"
+    for label,counts in sorted(groups.items(),key=lambda item:(-sum(item[1].values()),item[0])):
+        text+="| "+label+" | "+" | ".join(str(counts.get(v,0)) for v in versions)+" |\n"
+    return text
+
+
+def write_summary(output,summary,report):
     text="# Frozen vanilla material matching\n\n"
     text+="Counts below enumerate literal Java PNG textures. Generated palette sprites are inventoried separately and deferred because their winning source and palette origins are unavailable. Eligibility follows the pinned JAR's actual blocks/items atlas declarations.\n\n"
     text+="| Java | Literal PNGs | Eligible atlas PNGs | Integrated | Eligible unmatched | Other deferred | Generated palette sprites deferred |\n| --- | ---: | ---: | ---: | ---: | ---: | ---: |\n"
     for version,values in summary["versions"].items():text+="| "+version+" | "+" | ".join(str(values.get(key,0)) for key in ("textures","eligible","integrated","unmatched","runtime_deferred","generated_palette_sprites_deferred"))+" |\n"
     text+="\n"+str(summary["registry_entries"])+" frozen entries ("+str(summary["common_entries"])+" shared); "+str(summary["png_files"])+" RGBA8 PNGs, "+str(summary.get("referenced_png_bytes",summary["png_bytes"]))+" encoded bytes and "+str(summary["decoded_rgba8_bytes"])+" base-level decoded bytes. These are asset costs, not runtime performance measurements.\n\n"
     text+="Bedrock sets: "+", ".join(str(count)+" "+status for status,count in summary["bedrock_status"].items())+".\n\n"
+    text+="## What the long exclusion list contains\n\n"
+    text+="Counts are texture/sprite IDs, not distinct block or item types. Bed colors/faces, hydration stages and two Java versions expand a small number of families into many rows. Eligible unmatched IDs have no accepted RGB/frame correspondence; other literal PNGs are outside the activated blocks/items source boundary. Generated palette sprites are counted separately, and unused Bedrock sets are a second source inventory rather than additional Java gaps.\n\n"
+    text+="### Eligible atlas textures without a match\n\n"+summary_groups(report,"unmatched",unmatched_family)+"\n"
+    text+="### Other literal textures deferred by source boundary\n\n"+summary_groups(report,"runtime-deferred",lambda identifier:identifier.split(":",1)[1].split("/",1)[0])+"\n"
+    text+="Entity/particle textures need trustworthy runtime source identity, winning-pack origin and UV/material ownership before activation. GUI/font/map/environment/colormap data also include inputs with no ordinary surface-PBR role; inventory presence alone does not justify attaching a material. Palette-derived armor/item sprites additionally need the winning origins of both source image and palette.\n\n"
     text+="[unintegrated.md](unintegrated.md) lists every excluded ID and reason. Every Java decision, top accepted alternatives, unused Bedrock set and failure reason is in [matching-report.json](matching-report.json). Exact RGB ignores alpha; fuzzy RGB uses Java visible texels and spatial structure. Host color, alpha and tint remain authoritative. Pixel similarity supports an artistic transfer, not model/UV or rendering equivalence.\n\n"
     text+="Source-frame correspondence and normalized layer rescaling are frozen per entry. Repeated RGB frames can have different materials; deterministic same-index ties and the selected first used frame are recorded. RGB24 MER with S=0 is an importer compatibility approximation. Bedrock metal/subsurface winner selection is applied before encoding. Four DirectX normals preserve green sign for Prime's +V basis.\n\n"
     text+="Common routed item geometry is covered. Raw, foil/outline, unknown source or cross-sprite UV fallback, standalone dynamic textures and generated palette sprites retain their existing material behavior. Build/runtime consumes only frozen PNGs and registry.rs.\n"
@@ -555,7 +591,7 @@ def generate(source,java_jars,output,replace=False,policy_path=DEFAULT_POLICY):
     summary["preserved_artist_pngs"]=preserved
     summary["referenced_png_bytes"]=sum((output/e[role]).stat().st_size for e in entries for role in ("mers","auxiliary") if e[role])
     (output/"matching-report.json").write_bytes(json_bytes(report,True))
-    write_summary(output,summary)
+    write_summary(output,summary,report)
     write_unintegrated(output,report)
     return verify_assets(output)
 

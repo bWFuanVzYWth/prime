@@ -40,6 +40,10 @@ LabPBR只接受`minecraft:optifine/texture.properties`中的`format=lab-pbr/1.3`
 
 PNG是最终可编辑资产，构建读取当前文件并嵌入，不从样例自动覆盖。离线工具生成候选、记录schema/来源/生成参数与许可；已发布材质进入现有资源所有权和512 MiB唯一backing预算。标准金属转换的原始sprite图仍由资源catalog保留，用于原基色参考及同代定义比较；这部分CPU存储和转换峰值不等同于GPU纹理预算，须另计。
 
+内嵌原版预设的全帧MERS G全零时继承宿主发光，保留MERS的其他通道；任意帧存在非零G则仍按authored发光处理，当前暗texel保持暗。该规则在资源准备使用已有完整源最大值决定，不增加GPU源格式分支。外部Lab和通用内部材质的显式零发光仍覆盖宿主，不由内嵌预设策略改变作者语义。
+
+内嵌静水/流水预设按相同帧索引投影波纹，避免颜色最近匹配导致normal帧重复或跳序；最终PNG将感知粗糙度B艺术调整为0，保留normal方向。远处mip与动画的normal分布仍可增加有效粗糙度，不声明所有距离均为镜面。外部Lab水材质继续消费作者粗糙度。
+
 ## 过滤、动画与颜色一致性
 
 Rust在资源准备阶段把材质页生成到实际sprite的帧尺寸和mip级数。CPU mip中的normal按方向与GGX平均长度过滤并编码分布，动画也合成moment。Color/MERS/Aux统一采用每mip层内最近点、跨mip线性插值；LOD0不把相邻像素的发光、粗糙度或法线混在一起。MERS各通道仍参与CPU mip平均与动画连续插值。Aux跨mip以RGBA插值后重建法线，接受其moment近似；分布粗糙度与材质粗糙度沿用squared-alpha-space近似组合。IOR固定当前帧mip0点采，不受LOD或动画插值影响。

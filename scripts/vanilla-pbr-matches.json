@@ -2,6 +2,18 @@
   "schema": 1,
   "enabled_atlases": ["blocks", "items"],
   "forced_matches": {
+    "minecraft:block/water_still": {
+      "source": "textures/blocks/water_still_grey",
+      "frame": 0,
+      "projection": "frame-index",
+      "reason": "Both pinned water sheets have 32 matching-layout frames. Preserve sequential normal-wave motion instead of nearest-RGB repeated/skipped frames; water roughness is independently artist-calibrated in the final MERS PNG."
+    },
+    "minecraft:block/water_flow": {
+      "source": "textures/blocks/water_flow_grey",
+      "frame": 0,
+      "projection": "frame-index",
+      "reason": "Both pinned water sheets have 32 matching-layout frames. Preserve sequential normal-wave motion instead of nearest-RGB repeated/skipped frames; water roughness is independently artist-calibrated in the final MERS PNG."
+    },
     "minecraft:block/lightning_rod_on": {
       "source": "textures/blocks/lightning_rod_powered",
       "frame": 0,

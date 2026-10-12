@@ -359,6 +359,66 @@ fn gpu_canonical_atlas_shared_color_override_keeps_original_coverage() {
 }
 
 #[test]
+#[ignore = "requires Vulkan; zero embedded emission inherits textured host radiance with MERS retained"]
+fn gpu_canonical_zero_emission_page_can_inherit_host_emission_at_all_lods() {
+    let context = Context::new().unwrap();
+    let mut scene = fixture();
+    let colors = [
+        [32, 64, 128, 255],
+        [224, 128, 32, 255],
+        [12, 190, 70, 255],
+        [200, 30, 240, 255],
+    ];
+    let mut color = image(&colors, Some([150, 120, 110, 255]));
+    color.material = scene.textures[&90].material.clone();
+    scene.textures.insert(90, color);
+    let geometry = geometry(&context, &scene);
+    for lod in [0.0f32, 0.6, 3.0] {
+        for (id, uv) in [(90, [0.75f32, 0.25]), (1, [0.875, 0.25])] {
+            let input = [
+                [
+                    geometry.textures().index(id).unwrap(),
+                    uv[0].to_bits(),
+                    uv[1].to_bits(),
+                    lod.to_bits(),
+                ],
+                [0.2f32, 0.4, 0.6, 1.0].map(f32::to_bits),
+                [8.0f32.to_bits(), 9.0f32.to_bits(), 10.0f32.to_bits(), 0],
+                [0, 16, 0, 0], // Textured host emission belongs to record.identity.w.
+            ]
+            .concat();
+            let actual = run(
+                &context,
+                prime_shader_tests::pbr_texture(),
+                &input,
+                48,
+                [0, 1],
+                Some(&geometry),
+            );
+            assert_eq!(actual[2] & 6, 2, "MERS retained without authored emission");
+            assert_eq!(actual[13], 0, "G=0 remains a material byte");
+            for (channel, (tint, host)) in [(0.2, 8.0), (0.4, 9.0), (0.6, 10.0)]
+                .into_iter()
+                .enumerate()
+            {
+                let expected = decode(f32::from(colors[1][channel]) / 255.0 * tint) * host;
+                close(
+                    f32::from_bits(actual[16 + channel]),
+                    expected,
+                    "host emitter ignores unauthored zero G",
+                );
+                close(
+                    f32::from_bits(actual[40 + channel]),
+                    expected,
+                    "hit inherits host radiance in the same mip0 Color domain",
+                );
+            }
+            assert_eq!(&actual[20..23], &[0; 3], "one-sided host back remains dark");
+        }
+    }
+}
+
+#[test]
 #[ignore = "requires Vulkan; checks actual near texel boundaries and hit/NEE mip0 radiance"]
 fn gpu_canonical_material_nearest_detail_and_mip0_emission_match_hit_and_nee() {
     let context = Context::new().unwrap();
@@ -643,7 +703,7 @@ fn gpu_canonical_texture_upload_resolves_sprite_and_atlas_channels_and_authored_
         assert_eq!(
             &actual[16..19],
             &[8.0f32, 9.0, 10.0].map(f32::to_bits),
-            "missing authored alpha preserves host emission"
+            "material without authored emission preserves host emission"
         );
         if expected_flags == 0 {
             assert_eq!(

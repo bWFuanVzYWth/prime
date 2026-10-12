@@ -429,8 +429,8 @@ mod tests {
             let data = entry.images().unwrap();
             assert_eq!(
                 prepared.emission_maximum(),
-                Some(
-                    f32::from(
+                {
+                    let maximum = f32::from(
                         data.mers
                             .pixels
                             .as_chunks::<4>()
@@ -438,9 +438,10 @@ mod tests {
                             .iter()
                             .map(|p| p[1])
                             .max()
-                            .unwrap()
-                    ) / 255.
-                ),
+                            .unwrap(),
+                    ) / 255.;
+                    (maximum != 0.).then_some(maximum)
+                },
                 "{}",
                 entry.name
             );
@@ -772,6 +773,158 @@ mod tests {
                     .unwrap();
                 assert_eq!(mesh.lights.emitters.len(), 1);
                 assert_eq!(mesh.lights.emitters[0].power, expected);
+            }
+        }
+    }
+
+    #[test]
+    fn embedded_lava_zero_emission_preserves_native_fluid_faces_and_light_support() {
+        use crate::{
+            Job, SectionData,
+            contact::{Cache, Context},
+            fluid::{Fluid, FluidMaterial},
+            model::State,
+            schedule::Section,
+        };
+        use std::collections::{HashMap, HashSet};
+        let manifest: serde_json::Value =
+            serde_json::from_str(include_str!("../assets/vanilla_pbr/manifest.json")).unwrap();
+        for name in ["minecraft:block/lava_still", "minecraft:block/lava_flow"] {
+            for version in [262, 263] {
+                for external_zero in [false, true] {
+                    let entry = find(&PRESETS, name, version).unwrap();
+                    let metadata = manifest["entries"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .find(|m| m["java_id"] == name && m["game_version"] == entry.game_version)
+                        .unwrap();
+                    let extent = [
+                        metadata["frame_extent"][0].as_u64().unwrap() as u32,
+                        metadata["frame_extent"][1].as_u64().unwrap() as u32,
+                    ];
+                    let data = entry.images().unwrap();
+                    assert!(
+                        data.mers
+                            .pixels
+                            .as_chunks::<4>()
+                            .0
+                            .iter()
+                            .all(|p| p[1] == 0)
+                    );
+                    let mut fixture = Fixture::new(name, version, entry.extent, extent, false);
+                    fixture.animation(&metadata["animation"]);
+                    if external_zero {
+                        let offset = fixture.bytes.len() as u64;
+                        fixture.bytes.extend([0, 4, 0, 0]);
+                        fixture.images.push(PrimeMcImage {
+                            width: 1,
+                            height: 1,
+                            pixels: PrimeMcRange { offset, count: 4 },
+                        });
+                        fixture.sprites[0].specular_image = 1;
+                    }
+                    let mut context = TerrainContext::default();
+                    let mut scene = scene();
+                    context
+                        .prepare_resources(&fixture.source(), &mut scene)
+                        .unwrap();
+                    let prepared = &context.catalog.sprites[&1];
+                    assert_eq!(prepared.emission_maximum(), external_zero.then_some(0.));
+                    let view = scene
+                        .texture(sprite::texture(1))
+                        .unwrap()
+                        .material
+                        .as_ref()
+                        .unwrap();
+                    assert_eq!(view.authored_emission, external_zero);
+                    assert!(view.specular.is_some());
+                    if !external_zero {
+                        assert_eq!(&*view.specular.as_ref().unwrap().pixels, &*data.mers.pixels);
+                    }
+                    context.catalog.states.insert(
+                        0,
+                        State {
+                            flags: 1,
+                            ..Default::default()
+                        },
+                    );
+                    context.catalog.states.insert(
+                        1,
+                        State {
+                            id: 1,
+                            name: "minecraft:lava".into(),
+                            flags: 16,
+                            emission: 15,
+                            fluid: Fluid {
+                                kind: 2,
+                                amount: 8,
+                                falling: false,
+                                material: 1,
+                            },
+                            ..Default::default()
+                        },
+                    );
+                    let (id, material) = FluidMaterial::from_typed(&prime_abi::PrimeMcFluid {
+                        id: 1,
+                        identities: [1; 3],
+                        bounds: [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
+                        ..Default::default()
+                    })
+                    .unwrap();
+                    context.catalog.fluids.insert(id, material);
+                    context.catalog.prepare();
+                    let p = [8; 3];
+                    let at = (p[1] * 256 + p[2] * 16 + p[0]) as usize;
+                    let mut storage = vec![0; 64];
+                    storage[at / 64] |= 1 << (at % 64);
+                    let sections = HashMap::from([(
+                        Section(0, 0, 0),
+                        SectionData {
+                            palette: vec![0, 1],
+                            storage,
+                            bits: 1,
+                            per_word: 64,
+                        },
+                    )]);
+                    let cells = HashSet::from([[0; 3]]);
+                    let contacts = Context {
+                        catalog: &context.catalog,
+                        sections: &sections,
+                        cells: &cells,
+                        origin: [0; 3],
+                    };
+                    let mut job = Job {
+                        key: Section(0, 0, 0),
+                        first_y: 0,
+                        layers: Default::default(),
+                        surfaces: Default::default(),
+                        hacks: Default::default(),
+                        compiled: None,
+                        tints: Default::default(),
+                        color_start: 0,
+                    };
+                    contacts.emit(&mut Cache::new(), &mut job, p, 127);
+                    let faces: Vec<_> = job.layers[0]
+                        .iter()
+                        .copied()
+                        .map(prime_scene::surface::SurfaceFace::from_quad)
+                        .chain(job.surfaces[0].iter().cloned())
+                        .collect();
+                    assert_eq!(
+                        faces.len(),
+                        6,
+                        "{name} version{version} external={external_zero}"
+                    );
+                    let expected = if external_zero { [0.; 3] } else { [1.5; 3] };
+                    assert!(faces.iter().all(|face| face.emission.radiance == expected));
+                    let mesh = prime_scene::surface::SurfaceMesh::from_resolved(1, faces).unwrap();
+                    assert_eq!(
+                        mesh.lights.emitters.len(),
+                        if external_zero { 0 } else { 6 }
+                    );
+                    assert!(mesh.lights.emitters.iter().all(|e| e.power > 0.));
+                }
             }
         }
     }

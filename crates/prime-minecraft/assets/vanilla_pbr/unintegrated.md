@@ -4166,4 +4166,3 @@ Generated from the pinned sources and matching policy. Every ID is listed; repea
 | `textures/trims/wayfinder_leggings` |  |
 | `textures/trims/wild` |  |
 | `textures/trims/wild_leggings` |  |
-

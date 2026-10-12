@@ -152,13 +152,16 @@ impl Sprite {
             && [images.mers.width, images.mers.height]
                 == [sprite.images[0].width, sprite.images[0].height]
         {
-            sprite.material = Some(crate::labpbr::Material::from_internal_images(
-                &sprite,
-                images.color,
-                images.mers,
-                images.auxiliary,
-                images.authored_normal,
-            ));
+            sprite.material = Some(
+                crate::labpbr::Material::from_internal_images(
+                    &sprite,
+                    images.color,
+                    images.mers,
+                    images.auxiliary,
+                    images.authored_normal,
+                )
+                .inherit_host_emission_when_zero(),
+            );
         }
         Ok((value.id, sprite))
     }

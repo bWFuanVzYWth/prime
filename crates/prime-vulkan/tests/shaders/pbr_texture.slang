@@ -44,7 +44,7 @@ import "math/ray_offset.slang";
     record.triangle.uv2 = uv + float2(0.0, 1.0);
     record.triangle.texture = control.x;
     record.triangle.flags = 0u;
-    record.identity = uint4(inputs[i * 4 + 2].w, 0u, 0xffffffffu, 0u);
+    record.identity = uint4(inputs[i * 4 + 2].w, 0u, 0xffffffffu, inputs[i * 4 + 3].y);
     record.positiveIorTexture = inputs[i * 4 + 3].x;
     record.materialControl = 0u; // Synthetic material query has no CPU source topology proof.
     record.emission = float4(asfloat(inputs[i * 4 + 2]).xyz, 0.0);

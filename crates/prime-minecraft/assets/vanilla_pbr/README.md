@@ -73,8 +73,11 @@ There is no fuzzy matching or reference-file lookup at runtime.
 All material PNGs are 8-bit RGBA, consumed as linear data bytes without ICC/gamma
 conversion. MERS channels are R metalness, G emission, B perceptual roughness and
 A subsurface. All four filter continuously. MERS alpha is data: retain RGB at A=0,
-never premultiply or clear invisible RGB on export. An all-zero emission channel
-is explicitly authored E=0, so the importer does not invent emission.
+never premultiply or clear invisible RGB on export. PNG zero bytes remain zero;
+for this embedded vanilla preset only, a complete sheet with G=0 inherits native
+block/fluid emission rather than disabling it. Any nonzero frame retains authored
+emission and its local dark texels. External Lab and generic internal E=0 still
+explicitly disable native emission; the importer does not invent emission bytes.
 
 Generated layers apply Bedrock's
 [metal/subsurface winner rule](https://learn.microsoft.com/en-us/minecraft/creator/reference/content/texturesetsreference/texturesetsconcepts/texturesetsintroduction?view=minecraft-bedrock-stable):
@@ -100,6 +103,12 @@ Other matches freeze a source frame per Java sheet frame: the selected first-use
 frame is fixed, later frames use nearest visible RGB with equal-index duplicate
 ties, and a static source repeats. This projection is an explicit approximation;
 the host controls animation timing and visibility.
+
+Water still/flow use explicit same-index frame projection to keep their normal
+waves continuous. Their final MERS PNG B is artist-edited to zero for a clear near
+mirror boundary, with normal directions and distant normal-mip variance retained.
+Regeneration preserves and reports these edits; `--replace-art` restores the
+official roughness baseline, so it also reverses this water calibration.
 
 ## Reproduce and edit
 

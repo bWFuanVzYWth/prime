@@ -393,6 +393,12 @@ impl Material {
     pub fn emission_maximum(&self) -> Option<f32> {
         self.emission
     }
+    /// Embedded vanilla layers borrow native emission when the complete sheet has no authored E.
+    /// Generic internal and external authored zero retain their suppress-host semantics.
+    pub fn inherit_host_emission_when_zero(mut self) -> Self {
+        self.emission = self.emission.filter(|&maximum| maximum != 0.0);
+        self
+    }
     pub fn has_specular(&self) -> bool {
         self.mers.is_some()
     }
@@ -795,6 +801,32 @@ mod tests {
                 Material::from_images(&sprite, None, alpha.map(|a| image(1, 1, vec![0, 0, 0, a])));
             assert_eq!(material.emission_maximum(), expected);
         }
+    }
+    #[test]
+    fn vanilla_zero_policy_reuses_whole_sheet_maximum_without_changing_authored_inputs() {
+        let sprite = sprite();
+        let prepare = |green: u8| {
+            Material::from_internal_images(
+                &sprite,
+                None,
+                image(1, 2, vec![0, 0, 80, 0, 0, green, 80, 0]),
+                None,
+                false,
+            )
+        };
+        let internal_zero = prepare(0);
+        assert_eq!(internal_zero.emission_maximum(), Some(0.));
+        assert!(internal_zero.image(&sprite, 0, 0, 0.).authored_emission);
+        let vanilla_zero = internal_zero.inherit_host_emission_when_zero();
+        assert_eq!(vanilla_zero.emission_maximum(), None);
+        assert!(!vanilla_zero.image(&sprite, 0, 0, 0.).authored_emission);
+        let later_frame_emits = prepare(128).inherit_host_emission_when_zero();
+        assert_eq!(later_frame_emits.emission_maximum(), Some(128. / 255.));
+        assert!(later_frame_emits.image(&sprite, 0, 0, 0.).authored_emission);
+        let external_zero =
+            Material::from_images(&sprite, None, Some(image(1, 1, vec![0, 4, 0, 0])));
+        assert_eq!(external_zero.emission_maximum(), Some(0.));
+        assert!(external_zero.image(&sprite, 0, 0, 0.).authored_emission);
     }
     #[test]
     fn all_lab_codes_translate_without_gpu_categories_or_unused_channels() {
