@@ -778,7 +778,34 @@ mod tests {
     }
 
     #[test]
-    fn embedded_lava_zero_emission_preserves_native_fluid_faces_and_light_support() {
+    fn embedded_water_is_artistically_excluded_while_host_color_and_animation_are_preserved() {
+        for version in [262, 263] {
+            for (name, extent) in [
+                ("minecraft:block/water_still", [16, 16]),
+                ("minecraft:block/water_flow", [32, 32]),
+            ] {
+                assert!(find(&PRESETS, name, version).is_none());
+                let mut fixture =
+                    Fixture::new(name, version, [extent[0], extent[1] * 2], extent, false);
+                fixture.animation(&serde_json::json!({"frames":[[0,1],[1,3]],"interpolate":true}));
+                let mut context = TerrainContext::default();
+                let mut source = scene();
+                context
+                    .prepare_resources(&fixture.source(), &mut source)
+                    .unwrap();
+                assert!(context.catalog.sprites[&1].material.is_none());
+                let texture = source.texture(sprite::texture(1)).unwrap();
+                assert!(texture.material.is_none());
+                assert_eq!(&texture.pixels[..4], &[111, 93, 64, 71]);
+                assert_eq!(context.catalog.sprites[&1].frames, [(0, 1), (1, 3)]);
+                assert!(texture.sampling.is_some());
+                assert!(source.texture(1).unwrap().material.is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn embedded_and_external_lava_zero_emission_preserve_native_fluid_and_light_support() {
         use crate::{
             Job, SectionData,
             contact::{Cache, Context},
@@ -830,14 +857,14 @@ mod tests {
                         .prepare_resources(&fixture.source(), &mut scene)
                         .unwrap();
                     let prepared = &context.catalog.sprites[&1];
-                    assert_eq!(prepared.emission_maximum(), external_zero.then_some(0.));
+                    assert_eq!(prepared.emission_maximum(), None);
                     let view = scene
                         .texture(sprite::texture(1))
                         .unwrap()
                         .material
                         .as_ref()
                         .unwrap();
-                    assert_eq!(view.authored_emission, external_zero);
+                    assert!(!view.authored_emission);
                     assert!(view.specular.is_some());
                     if !external_zero {
                         assert_eq!(&*view.specular.as_ref().unwrap().pixels, &*data.mers.pixels);
@@ -916,13 +943,10 @@ mod tests {
                         6,
                         "{name} version{version} external={external_zero}"
                     );
-                    let expected = if external_zero { [0.; 3] } else { [1.5; 3] };
+                    let expected = [1.5; 3];
                     assert!(faces.iter().all(|face| face.emission.radiance == expected));
                     let mesh = prime_scene::surface::SurfaceMesh::from_resolved(1, faces).unwrap();
-                    assert_eq!(
-                        mesh.lights.emitters.len(),
-                        if external_zero { 0 } else { 6 }
-                    );
+                    assert_eq!(mesh.lights.emitters.len(), 6);
                     assert!(mesh.lights.emitters.iter().all(|e| e.power > 0.));
                 }
             }

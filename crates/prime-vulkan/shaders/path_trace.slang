@@ -23,7 +23,12 @@ import "display/prime_drt.slang";
     if (any(id.xy >= frame.dimensions.xy))
         return;
     PrimeFullTransmissionGgxEnergy energy = {transmissionEnergy};
-    TraceScene resources = {scene, textures, texels, instanceMaterials, staticTrianglePages};
+    TraceScene resources = {scene,
+                            textures,
+                            texels,
+                            instanceMaterials,
+                            staticTrianglePages,
+                            renderLightingControls.emission.xy};
     // The host selects this profile only for dimensions.w == 1. Both profiles
     // share one trace body; the single-sample profile removes the outer loop.
     uint samples = singleOfflineSample != 0 ? 1 : frame.dimensions.w;

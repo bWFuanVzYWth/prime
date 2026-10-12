@@ -7,7 +7,7 @@ import static java.lang.foreign.ValueLayout.*;
 
 public final class PrimeAbi {
     private PrimeAbi() {}
-    public static final int PRIME_ABI_VERSION = 19;
+    public static final int PRIME_ABI_VERSION = 20;
     public static final int PRIME_MAX_BATCH_BYTES = 268435456;
     public static final int PRIME_DIAGNOSTICS_ENABLED = 1;
     public static final int PRIME_DIAGNOSTICS_CAPTURE = 2;
@@ -335,7 +335,7 @@ public final class PrimeAbi {
     }
     public static final class PrimeSettings {
         private PrimeSettings() {}
-        public static final long SIZE = 224, ALIGN = 4;
+        public static final long SIZE = 232, ALIGN = 4;
         public static final MemoryLayout LAYOUT =
                 MemoryLayout
                         .structLayout(
@@ -386,7 +386,9 @@ public final class PrimeAbi {
                                 JAVA_FLOAT.withName("restir_rr_multiply_bound"),
                                 JAVA_INT.withName("restir_rr_bias_reduction"),
                                 JAVA_INT.withName("restir_rr_firefly"),
-                                JAVA_INT.withName("atmosphere_altitude_offset_meters"))
+                                JAVA_INT.withName("atmosphere_altitude_offset_meters"),
+                                JAVA_FLOAT.withName("emission_power_mix"),
+                                JAVA_FLOAT.withName("block_emission_ev"))
                         .withName("PrimeSettings");
         static {
             if (LAYOUT.byteSize() != SIZE || LAYOUT.byteAlignment() != ALIGN)
@@ -555,6 +557,12 @@ public final class PrimeAbi {
                         "atmosphere_altitude_offset_meters")) != 220)
                 throw new ExceptionInInitializerError(
                         "PrimeSettings.atmosphere_altitude_offset_meters offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("emission_power_mix")) !=
+                224)
+                throw new ExceptionInInitializerError("PrimeSettings.emission_power_mix offset");
+            if (LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("block_emission_ev")) !=
+                228)
+                throw new ExceptionInInitializerError("PrimeSettings.block_emission_ev offset");
         }
         public static MemorySegment header(MemorySegment value) {
             return value.asSlice(0L, 8);
@@ -882,6 +890,18 @@ public final class PrimeAbi {
         }
         public static void atmosphere_altitude_offset_meters(MemorySegment value, int field) {
             value.set(JAVA_INT, 220L, field);
+        }
+        public static float emission_power_mix(MemorySegment value) {
+            return value.get(JAVA_FLOAT, 224L);
+        }
+        public static void emission_power_mix(MemorySegment value, float field) {
+            value.set(JAVA_FLOAT, 224L, field);
+        }
+        public static float block_emission_ev(MemorySegment value) {
+            return value.get(JAVA_FLOAT, 228L);
+        }
+        public static void block_emission_ev(MemorySegment value, float field) {
+            value.set(JAVA_FLOAT, 228L, field);
         }
     }
     public static final class PrimeVulkanHost {

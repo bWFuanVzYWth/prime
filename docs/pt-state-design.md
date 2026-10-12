@@ -171,4 +171,8 @@ Color/MERS/Aux在资源准备时固定，GPU不解释外部分类码。必要值
 
 独立item atlas的真实quad新增一次sprite身份读取和O(1)发布目录查询；只对已知绑定检查四角UV，原packed值读取一次并保留。典型单sprite物品仍为一个实例组，多sprite来源可以分组增加；inverse UV affine只在组准备时计算，沿用既有instance记录与GPU变换。资源代额外保存item Color各帧/mip，原dynamic atlas仍可供raw回退，因此须计入CPU源与GPU真实唯一backing，不能声称全链零复制。没有新增pass、队列、跨查询状态或ABI结构尺寸。
 
-材质空间采样与Color共用层内nearest、跨mip线性：每页每层1个texel，分数LOD最多2个，避免近景为无消费者的四邻居插值和人为混合金属/发光边界。CPU mip/动画与法线moment继续保持。发光命中、NEE/ReSTIR统一mip0 point域，高LOD命中为authored G及确需Color的分支补采，零G不重取Color；没有新增query活跃字段或pass。逻辑读数减少不证明实际事务、寄存器或帧率提升，正式性能仍需固定1080p场景测量。
+材质空间采样与Color共用层内nearest、跨mip线性：每页每层1个texel，分数LOD最多2个，避免近景为无消费者的四邻居插值和人为混合金属/发光边界。CPU mip/动画与法线moment继续保持。发光命中、NEE/ReSTIR统一mip0 point域，高LOD命中为authored G及确需Color的分支补采，零G不重取Color。逻辑读数减少不证明实际事务、寄存器或帧率提升，正式性能仍需固定1080p场景测量。
+
+发光或规则与可调功率混合在Minecraft翻译边界建立完整源参考：只对正G材质扫描Color/G/coverage与声明帧时长，最多4096texel保存6个f64矩的前缀积分，大图只保存全source参考。常见矩形面O(1)求幅值比，一般UV域按实际面积裁切；固定动画端点和未染色Color是简单艺术定义，复杂UV采用全sprite参考。GPU复用emission.w保存主/次层独立比值，stride不变；既有star uniform由16B扩为32B保存mix与EVscale，传入TraceScene。发光增加插值与乘法，两float可能跨查询活跃；不扩张BSDF、ONB、closure或持久路径记录，驱动寄存器成本尚未测量。
+
+稀疏发光的CPU全帧包络与GPU每面alias独立于上述幅值参考。包络最多65536texel、5B/texel，共享不可变owner；高分/全正低对比/复杂UV保留均匀采样。精确裁切patch和24bit可表示质量保证前后向面积PDF一致；alias复用选面两维随机数，实际半面/重心直接交给ReSTIR，SurfaceHit临时保存反向面积密度而不扩大持久记录。表附在local nodes尾部，现有padding保存偏移，避免额外BDA、pass或descriptor。暗动画样本先保留PDF，再省去零Le阴影查询；真实源更换撤销并预算重建受影响格，descriptor-only动画不重建。新增表、patch/density读数、源扫描和一般UV裁切都是真实成本，不由方差测试推断整帧帧数提升。

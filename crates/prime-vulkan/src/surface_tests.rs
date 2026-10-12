@@ -1134,6 +1134,7 @@ fn gpu_closest_material_thin_proof_selects_real_primary_secondary_and_physical_o
             face.emission = Emission {
                 radiance: [1., 0., 0.],
                 two_sided: true,
+                texture_gain: 0.0,
                 textured: false,
             };
         }
@@ -1464,6 +1465,7 @@ fn gpu_finite_light_combines_emission_and_beer_in_working_color() {
     });
     emitter.emission = Emission {
         radiance: [1., 0., 0.],
+        texture_gain: 0.0,
         textured: false,
         two_sided: true,
     };
@@ -1831,6 +1833,8 @@ fn gpu_surface_emitters_preserve_half_area_sampling_and_scene_replacement() {
                 source: i,
             },
             emission: Emission {
+                texture_gain: 0.0,
+
                 textured: false,
                 radiance: [(1 << i) as f32; 3],
                 two_sided: true,
@@ -1951,6 +1955,8 @@ fn lit_scene(revision: u64, emission: f32) -> Scene {
             source: if radiance == 0. { 0 } else { 1 },
         },
         emission: Emission {
+            texture_gain: 0.0,
+
             textured: false,
             radiance: [radiance; 3],
             two_sided: false,
@@ -2256,6 +2262,7 @@ fn compound_emitters_sample_the_visible_layer_without_leaking_hidden_emission() 
             emission: Emission {
                 radiance: [2., 0., 0.],
                 two_sided: true,
+                texture_gain: 0.0,
                 textured: false,
             },
             media: [0; 2],
@@ -2274,6 +2281,7 @@ fn compound_emitters_sample_the_visible_layer_without_leaking_hidden_emission() 
                     emission: Emission {
                         radiance: [3.; 3],
                         two_sided: true,
+                        texture_gain: 0.0,
                         textured: true,
                     },
                 },

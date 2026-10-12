@@ -114,7 +114,8 @@ public struct TestGuides : IPrimaryGuides {
     parameters.opticalAddress = parameters.commonAddress + config.count * 11u;
     parameters.prefixAddress = parameters.opticalAddress + config.count * 2u;
     parameters.diagnosticAddress = config.scratchAddress; // config.z disables this consumer.
-    TraceScene resources = {acceleration, textures, texels, instanceMaterials, staticTrianglePages};
+    TraceScene resources = {acceleration,        textures,        texels, instanceMaterials,
+                            staticTrianglePages, float2(0.0, 1.0)};
     TestEnvironment environment;
     TestGuides guides;
     primeTracePrimary(resources, environment, parameters, uint2(index, 0), guides);

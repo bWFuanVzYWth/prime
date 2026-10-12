@@ -451,7 +451,7 @@ pub(crate) fn encode(
                 face.emission.radiance[0],
                 face.emission.radiance[1],
                 face.emission.radiance[2],
-                face.emitter_area_weight,
+                face.emission.texture_gain,
             ]
             .map(f32::to_le_bytes)
             .as_flattened(),
@@ -510,6 +510,7 @@ pub(crate) fn encode(
             )?;
         }
         floats(384, &layer.emission.radiance)?;
+        floats(396, &[layer.emission.texture_gain])?;
         let tex = textures
             .get(&layer.texture_id)
             .ok_or("Layer texture has not been captured")?;

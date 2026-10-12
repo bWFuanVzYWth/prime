@@ -5,6 +5,7 @@ import "math/ray_offset.slang";
 import "math/transport.slang";
 import "math/z_sobol.slang";
 import "tree_sampling.slang";
+import "emission_alias.slang";
 __exported import "trace/visibility.slang";
 
 [[vk::constant_id(1)]] public const uint lightFeatures = 1;
@@ -158,6 +159,8 @@ public struct LightSample {
     public float areaPdf;
     public uint page;
     public uint emitter;
+    public uint half;
+    public float2 bary;
     public bool twoSided;
 };
 
@@ -176,12 +179,12 @@ public LightSample sampleLocalLight(TraceScene resources, float4 selectors, floa
     result.emitter = reference.emitter;
     uint words = page.format == 3 ? 108 : (page.format == 2 ? 68 : 60);
     uint *light = page.emitters + result.emitter * words;
-    float firstFraction = asfloat(light[3]);
-    bool first = firstFraction == 1.0 || sample.x < firstFraction;
-    float u = first ? sample.x / firstFraction : (sample.x - firstFraction) / (1.0 - firstFraction);
-    SurfaceRecord emitter = loadQuad(light, page.format, first ? 0 : 1);
-    float root = sqrt(u);
-    float2 bary = float2(root * (1.0 - sample.y), root * sample.y);
+    uint aliasOffset = light[11];
+    EmissionAreaSample area = sampleEmitterArea(page, light, aliasOffset, sample);
+    result.half = area.half;
+    result.bary = area.bary;
+    SurfaceRecord emitter = loadQuad(light, page.format, area.half);
+    float2 bary = area.bary;
     Triangle tri = emitter.triangle;
     // Light pages contain static emitters with the same proven translation as closest hits.
     result.surface =
@@ -190,9 +193,13 @@ public LightSample sampleLocalLight(TraceScene resources, float4 selectors, floa
     emitter =
             selectMaterial(resources, emitter, front, bary, result.surface.position, coverageSeed);
     result.valid = acceptsCoverage(resources, emitter, bary, result.surface.position, coverageSeed);
-    result.radiance =
-            sourceEmission(resources, emitter, sourceSample(resources, emitter, bary, 0.0), front);
-    result.areaPdf = selectionPdf * reference.inverseArea;
+    SourceSample source = sourceSample(resources, emitter, bary, 0.0);
+    result.radiance = sourceEmission(resources, emitter, source, front);
+    // Clipped FP32 samples can land exactly on a texel edge. Point sampling owns that edge
+    // deterministically, so forward and inverse PDFs use the same actual UV lookup.
+    float density = aliasOffset == 0u ? reference.inverseArea
+                                      : emitterAliasDensity(page, aliasOffset, source.material.uv);
+    result.areaPdf = selectionPdf * density;
     result.twoSided = (emitter.identity.w & 2) != 0;
     return result;
 }
@@ -213,7 +220,7 @@ public float emissiveHitPdf(TraceScene resources, SurfaceHit hit, float3 previou
     float distanceSquared = dot(delta, delta);
     float cosine = distanceSquared > 0 ? abs(dot(hit.surface.normal, normalize(delta))) : 0;
     LightTree tree = *((LightTree *)resources.staticTrianglePages[0].lightGrid);
-    float areaPdf = treeLightPdf(tree, hit.light, previous) * tree.emitters[hit.light].inverseArea;
+    float areaPdf = treeLightPdf(tree, hit.light, previous) * hit.emitterAreaPdf;
     return primeAreaSolidAnglePdfValue(areaPdf, distanceSquared, cosine);
 }
 
@@ -236,6 +243,10 @@ public float3 evaluateLocalLight(TraceScene resources, SurfacePoint receiver, Li
     if (cosine == 0 || lightCosine <= 0)
         return float3(0);
     pdf = primeAreaSolidAnglePdfValue(light.areaPdf, distanceSquared, lightCosine);
+    // A fixed all-animation proposal can select a currently dark cell. Its PDF remains
+    // valid, but visibility cannot contribute and needs no shadow traversal.
+    if (all(light.radiance == float3(0)))
+        return float3(0);
     float3 begin = spawnRay(receiver, direction);
     float3 end = spawnRay(light.surface, -direction);
     float3 segment = end - begin;

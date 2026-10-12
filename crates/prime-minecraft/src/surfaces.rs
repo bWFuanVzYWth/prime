@@ -279,28 +279,34 @@ pub(crate) fn closed(state: &State, q: &Quad, offset: [f32; 3]) -> CompiledQuad 
     }
 }
 pub(crate) fn emission(catalog: &Catalog, state: &State, q: &Quad, two_sided: bool) -> Emission {
+    let level = state.emission.max(q.emission);
+    let native = (level as f32 / 15.).powi(2);
     if let Some(maximum) = catalog
         .sprites
         .get(&q.sprite)
         .and_then(crate::sprite::Sprite::emission_maximum)
     {
-        if maximum == 0.0 {
-            return Emission::default();
-        }
+        let gain = catalog.sprites[&q.sprite]
+            .material
+            .as_ref()
+            .map_or(0., |m| {
+                m.texture_power_gain(q.uvs, q.positions, flags(state, q) as u32, native)
+            });
         return Emission {
-            radiance: [1.5 * maximum; 3],
+            radiance: [1.5 * maximum * gain.max(1.); 3],
             two_sided: two_sided || flags(state, q) == 1,
+            texture_gain: gain,
             textured: true,
         };
     }
-    let level = state.emission.max(q.emission);
     if level == 0 {
         return Emission::default();
     }
     // Prime's calibrated fallback, matching the previous translator; MC light level is ordinal.
     Emission {
-        radiance: [1.5 * (level as f32 / 15.).powi(2); 3],
+        radiance: [1.5 * native; 3],
         two_sided: two_sided || flags(state, q) == 1,
+        texture_gain: 0.0,
         textured: true,
     }
 }

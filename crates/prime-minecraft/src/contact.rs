@@ -123,6 +123,7 @@ impl Context<'_> {
                 b.face.emission = prime_scene::surface::Emission {
                     radiance: [1.5; 3],
                     two_sided: false,
+                    texture_gain: 0.0,
                     textured: true,
                 };
             }
@@ -405,19 +406,25 @@ impl Context<'_> {
 }
 
 fn authored_emission(catalog: &Catalog, face: &mut SurfaceFace) {
-    let apply = |texture: u32, flags: u32, emission: &mut prime_scene::surface::Emission| {
+    let positions = face.geometry.positions;
+    let apply = |texture: u32,
+                 flags: u32,
+                 uvs: [[f32; 2]; 4],
+                 emission: &mut prime_scene::surface::Emission| {
         if let Some(sprite) = texture
             .checked_sub(0x4000_0000)
             .and_then(|id| catalog.sprites.get(&id))
             && let Some(maximum) = sprite.emission_maximum()
         {
-            if maximum == 0.0 {
-                *emission = Default::default();
-                return;
-            }
-            // The proposal bounds all animation frames. Shading consumes the actual filtered
-            // alpha at the sampled point; authored zero also replaces ordinal block light.
-            emission.radiance = [1.5 * maximum; 3];
+            // The proposal bounds all animation frames. Shading consumes the actual mip0
+            // G at the sampled point, with a setting-independent calibration envelope.
+            let native = emission.radiance[0] / 1.5;
+            let gain = sprite
+                .material
+                .as_ref()
+                .map_or(0., |m| m.texture_power_gain(uvs, positions, flags, native));
+            emission.texture_gain = gain;
+            emission.radiance = [1.5 * maximum * gain.max(1.); 3];
             emission.textured = true;
             emission.two_sided |= flags == 1;
         }
@@ -425,11 +432,17 @@ fn authored_emission(catalog: &Catalog, face: &mut SurfaceFace) {
     apply(
         face.geometry.texture_id,
         face.geometry.flags,
+        face.geometry.uvs,
         &mut face.emission,
     );
     if let Some(detail) = &mut face.detail {
         let layer = &mut Arc::make_mut(detail).layer;
-        apply(layer.texture_id, layer.flags, &mut layer.emission);
+        apply(
+            layer.texture_id,
+            layer.flags,
+            layer.uvs,
+            &mut layer.emission,
+        );
     }
 }
 /// Partition against the two actual fluid triangles, not their bounding height. Their

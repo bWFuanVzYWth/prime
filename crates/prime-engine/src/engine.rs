@@ -354,6 +354,8 @@ impl Engine {
                 active.bounces = transport.bounces;
                 active.sun = transport.sun;
                 active.sky = transport.sky;
+                active.emission_power_mix = transport.emission_power_mix;
+                active.block_emission_ev = transport.block_emission_ev;
                 active.stars = transport.stars;
                 active.seed = transport.seed;
                 active.astronomy = transport.astronomy;
@@ -817,6 +819,8 @@ mod tests {
                 atmosphere_altitude_offset_meters: 4200,
                 bounces: 20,
                 sky: 3.0,
+                emission_power_mix: 0.375,
+                block_emission_ev: -3.25,
                 astronomy: prime_scene::environment::Astronomy {
                     latitude_degrees: 80,
                     solar_longitude_degrees: 90,
@@ -826,6 +830,8 @@ mod tests {
             .unwrap();
         assert_eq!(engine.settings.exposure, 2.0);
         assert_eq!(engine.settings.atmosphere_altitude_offset_meters, 4200);
+        assert_eq!(engine.settings.emission_power_mix, 0.375);
+        assert_eq!(engine.settings.block_emission_ev, -3.25);
         assert_eq!(engine.astronomy.direction(0.), frozen_sun);
         assert_eq!(engine.frozen_frame.unwrap().1, RenderSettings::default());
         for integrator in [
@@ -842,6 +848,8 @@ mod tests {
             assert_eq!(pose.camera, frame.camera);
             assert_eq!(transport.integrator, integrator);
             assert_eq!(transport.bounces, RenderSettings::default().bounces);
+            assert_eq!(transport.emission_power_mix, 0.5);
+            assert_eq!(transport.block_emission_ev, 0.0);
             assert!(engine.check_live_source().is_err());
         }
         engine
@@ -855,6 +863,8 @@ mod tests {
             })
             .unwrap();
         assert!(engine.frozen_frame.is_none());
+        assert_eq!(engine.settings.emission_power_mix, 0.375);
+        assert_eq!(engine.settings.block_emission_ev, -3.25);
         assert_eq!(engine.settings.atmosphere_altitude_offset_meters, 4200);
         assert_ne!(engine.astronomy.direction(0.), frozen_sun);
         assert_eq!(

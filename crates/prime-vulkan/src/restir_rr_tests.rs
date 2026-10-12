@@ -622,6 +622,7 @@ fn gpu_restir_rr_production_guides_and_resolve_images() {
     emissive.emission = Emission {
         radiance: [0.8, 0.3, 0.1],
         two_sided: true,
+        texture_gain: 0.0,
         textured: false,
     };
     for (label, scene) in [

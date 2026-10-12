@@ -4,6 +4,13 @@ Generated from the pinned sources and matching policy. Every ID is listed; repea
 
 ## Eligible Java textures without an integrated preset
 
+### policy-excluded: User artistic choice: omit embedded vanilla water roughness and normals; retain host Color/alpha/animation and native water optical IOR with default smooth geometric surface.
+
+| Texture / sprite ID | Java versions |
+| --- | --- |
+| `minecraft:block/water_flow` | 26.2, 26.3 |
+| `minecraft:block/water_still` | 26.2, 26.3 |
+
 ### unmatched: No exact RGB/frame candidate or spatial metric gate accepted
 
 | Texture / sprite ID | Java versions |
@@ -2812,8 +2819,6 @@ Generated from the pinned sources and matching policy. Every ID is listed; repea
 | `textures/blocks/azalea_leaves_flowers_opaque` |  |
 | `textures/blocks/azalea_leaves_opaque` |  |
 | `textures/blocks/carrots_stage_3` |  |
-| `textures/blocks/cauldron_water` |  |
-| `textures/blocks/cauldron_water_placeholder` |  |
 | `textures/blocks/cherry_leaves_opaque` |  |
 | `textures/blocks/conduit_closed` |  |
 | `textures/blocks/double_plant_grass_carried` |  |
@@ -3523,6 +3528,13 @@ Generated from the pinned sources and matching policy. Every ID is listed; repea
 | --- | --- |
 | `textures/entity/wolf/wolf_collar_baby` |  |
 
+### policy-excluded: Accepted RGB correspondence exists only to Java textures explicitly excluded by artistic policy
+
+| Texture / sprite ID | Java versions |
+| --- | --- |
+| `textures/blocks/cauldron_water_placeholder` |  |
+| `textures/blocks/water_still_grey` |  |
+
 ### runtime-deferred: RGB matches only unactivated atlas or standalone targets without trusted source identity
 
 | Texture / sprite ID | Java versions |
@@ -3542,6 +3554,7 @@ Generated from the pinned sources and matching policy. Every ID is listed; repea
 | `textures/blocks/bubble_column_outer_h` |  |
 | `textures/blocks/burn_pottery_pattern` |  |
 | `textures/blocks/carried_waterlily` |  |
+| `textures/blocks/cauldron_water` |  |
 | `textures/blocks/chest_front` |  |
 | `textures/blocks/chest_side` |  |
 | `textures/blocks/chest_top` |  |
@@ -3571,6 +3584,7 @@ Generated from the pinned sources and matching policy. Every ID is listed; repea
 | `textures/blocks/snort_pottery_pattern` |  |
 | `textures/blocks/stonecutter_bottom` |  |
 | `textures/blocks/trapped_chest_front` |  |
+| `textures/blocks/water_flow_grey` |  |
 | `textures/entity/alex` |  |
 | `textures/entity/allay/allay` |  |
 | `textures/entity/armadillo` |  |

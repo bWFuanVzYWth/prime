@@ -26,6 +26,9 @@ pub struct Provenance {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Emission {
     pub radiance: [f32; 3],
+    /// Fixed source-domain native/texture power ratio; zero means only one source is present.
+    /// The renderer blends this amplitude with one, independently of the global emission EV.
+    pub texture_gain: f32,
     pub two_sided: bool,
     /// Multiply the declared radiance by decoded texture × tint at the sampled point.
     pub textured: bool,

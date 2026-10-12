@@ -254,6 +254,7 @@ pub(super) fn fixture(case: Case, revision: u64) -> (Scene, Camera) {
                         face.emission = Emission {
                             radiance: [0.4, 0.6, 0.8],
                             two_sided: false,
+                            texture_gain: 0.0,
                             textured: false,
                         };
                     }
@@ -281,6 +282,7 @@ pub(super) fn fixture(case: Case, revision: u64) -> (Scene, Camera) {
         emitter.emission = Emission {
             radiance: [2., 1., 0.5],
             two_sided: true,
+            texture_gain: 0.0,
             textured: false,
         };
         faces.push(emitter);
@@ -289,6 +291,7 @@ pub(super) fn fixture(case: Case, revision: u64) -> (Scene, Camera) {
             rear.emission = Emission {
                 radiance: [0.5, 1., 2.],
                 two_sided: true,
+                texture_gain: 0.0,
                 textured: false,
             };
             faces.push(rear);

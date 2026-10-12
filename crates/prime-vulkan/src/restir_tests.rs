@@ -48,6 +48,7 @@ pub(super) fn illuminated_scene(revision: u64) -> Scene {
     lamp.emission = Emission {
         radiance: [4., 2., 1.],
         two_sided: true,
+        texture_gain: 0.0,
         textured: false,
     };
     let mut rear = face(6.);
@@ -63,6 +64,7 @@ pub(super) fn multiple_light_scene(revision: u64) -> Scene {
     warm.emission = Emission {
         radiance: [4., 2., 1.],
         two_sided: true,
+        texture_gain: 0.0,
         textured: false,
     };
     let mut cool = face(2.);
@@ -70,6 +72,7 @@ pub(super) fn multiple_light_scene(revision: u64) -> Scene {
     cool.emission = Emission {
         radiance: [0.5, 3., 7.],
         two_sided: true,
+        texture_gain: 0.0,
         textured: false,
     };
     scene(revision, vec![face(0.), rear, warm, cool])

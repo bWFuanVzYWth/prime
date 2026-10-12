@@ -20,6 +20,7 @@ pub(super) struct Textures {
     family_alpha: BTreeMap<u32, history_support::FamilyAlpha>,
     pub(crate) coverage_changed: BTreeSet<u32>,
     pub(crate) history_support_changed: BTreeSet<u32>,
+    pub(crate) emission_proposal_changed: BTreeSet<u32>,
     pub(crate) occlusion_changed: bool,
     cursor: Option<TextureCursor>,
     pub sprites: usize,
@@ -181,7 +182,21 @@ mod history_support_tests {
 }
 
 fn images(texture: &Texture) -> impl Iterator<Item = &Arc<[u8]>> {
-    texture.backings()
+    texture.pixel_backings()
+}
+fn proposal_same(a: &Texture, b: &Texture) -> bool {
+    match (
+        a.material
+            .as_ref()
+            .and_then(|m| m.emission_proposal.as_ref()),
+        b.material
+            .as_ref()
+            .and_then(|m| m.emission_proposal.as_ref()),
+    ) {
+        (None, None) => true,
+        (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+        _ => false,
+    }
 }
 fn keys(texture: &Texture) -> BTreeSet<usize> {
     images(texture).map(|p| p.as_ptr() as usize).collect()
@@ -206,6 +221,7 @@ impl Textures {
             family_alpha: BTreeMap::new(),
             coverage_changed: BTreeSet::new(),
             history_support_changed: BTreeSet::new(),
+            emission_proposal_changed: BTreeSet::new(),
             occlusion_changed: false,
             cursor: None,
             sprites: 0,
@@ -226,6 +242,7 @@ impl Textures {
         if let Some(old) = self.source.remove(&id) {
             self.coverage_changed.insert(id);
             self.history_support_changed.insert(id);
+            self.emission_proposal_changed.insert(id);
             self.sprites -= usize::from(old.region.is_some());
             self.slots.release(self.indices.remove(&id).unwrap(), 1);
             if let Some((start, count)) = self.mip_slots.remove(&id) {
@@ -314,6 +331,7 @@ impl Textures {
         }
         self.coverage_changed.clear();
         self.history_support_changed.clear();
+        self.emission_proposal_changed.clear();
         self.occlusion_changed = false;
         // Do not scan resident identities for a certified incremental input.
         if updates.is_snapshot() {
@@ -353,6 +371,13 @@ impl Textures {
             };
             if self.source.get(id).is_some_and(|old| old.same(texture)) {
                 continue;
+            }
+            if self
+                .source
+                .get(id)
+                .is_none_or(|old| !proposal_same(old, texture))
+            {
+                self.emission_proposal_changed.insert(*id);
             }
             let same_family = self
                 .source

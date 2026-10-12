@@ -141,9 +141,10 @@ impl Sprite {
         let normal = image(value.normal_image)?;
         let specular = image(value.specular_image)?;
         if normal.is_some() || specular.is_some() {
-            sprite.material = Some(crate::labpbr::Material::from_images(
-                &sprite, normal, specular,
-            ));
+            sprite.material = Some(
+                crate::labpbr::Material::from_images(&sprite, normal, specular)
+                    .inherit_host_emission_when_zero(),
+            );
         } else if value.flags & prime_abi::PRIME_MC_SPRITE_VANILLA_COLOR != 0
             && let Some(images) = crate::vanilla_pbr::images_for_version(
                 &sprite.name,

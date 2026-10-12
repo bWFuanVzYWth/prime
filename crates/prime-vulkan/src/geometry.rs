@@ -611,6 +611,18 @@ impl Geometry {
         self.omm_prepare_ns[0] = resources.prepare_ns[0];
         self.omm_prepare_ns[2] = resources.prepare_ns[2];
         self.omm_work_counts[0] = resources.preparations;
+        if !resources.emission_proposal_changed.is_empty() {
+            for (&key, cluster) in &self.clusters {
+                if !cluster
+                    .texture_dependencies
+                    .is_disjoint(&resources.emission_proposal_changed)
+                {
+                    // A deferred rebuild must not combine a new source mask with an old table.
+                    self.static_planner.withdraw_cells([key]);
+                    self.static_planner.invalidate_cells([key]);
+                }
+            }
+        }
         if !resources.coverage_changed.is_empty() {
             for (&key, cluster) in &mut self.clusters {
                 // A source may retire an identity while its replacement is still queued.
@@ -1231,6 +1243,7 @@ impl Geometry {
                             context,
                             mesh,
                             &resources.textures.indices,
+                            &resources.textures.source,
                             preserved_key.unwrap_or(self.next_light_key),
                         )?;
                         if prepared_packing.contains_key(&key)
@@ -1321,6 +1334,7 @@ impl Geometry {
             self.resource_occlusion_revision = resources.occlusion_revision;
             self.omm_revision = resources.omm_revision;
             resources.coverage_changed.clear();
+            resources.emission_proposal_changed.clear();
             self.static_planner.recycle(plan);
             return Ok(false);
         }
@@ -1524,6 +1538,7 @@ impl Geometry {
         self.resource_occlusion_revision = resources.occlusion_revision;
         self.omm_revision = resources.omm_revision;
         resources.coverage_changed.clear();
+        resources.emission_proposal_changed.clear();
         directory_trace.succeed();
         Ok(published_changed)
     }

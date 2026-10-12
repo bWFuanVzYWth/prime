@@ -55,7 +55,8 @@
 - [x] 固定内部Color/MERS/Aux三页RGBA8，Lab源在Rust准备时统一翻译，标准金属预处理共享C并固定F82 tint=1；丢弃AO/porosity/未消费height，保持32B PBR vertex。原版方块/物品以RGB精确及模糊匹配离线生成PNG、帧投影和冻结ID登记；长期保留匹配工具、人工覆盖入口、冲突记录与完整未接入原因。实际获胜原版基色来源限定资格，有效外部Lab整组优先。契约与已接受8bit/匹配边界见[材质](docs/materials.md)。
 - [ ] 手动验收两版内嵌PNG与Lab覆盖、normal-only植物、金属混合、atlas物品、发光、动画/水、资源重载与冻结；模糊匹配的艺术调整依完整清单逐项维护。正式原生1080p稳态/更新成本、寄存器/spill分别测量；旧Lab布局冻结SPIR-V不能直接作为新MERS fixture的同语义性能参照。
 - [x] 检查并调整内嵌静水/流水粗糙度与动画帧映射（[PT-030](FIXME.md#pt-030)），修复全帧零G覆盖岩浆宿主发光（[PT-031](FIXME.md#pt-031)）；完成稀疏发光采样/强度校准可行性评估（[PT-032](FIXME.md#pt-032)）。代码与无窗口验证不关闭实际水面艺术/岩浆照明验收。帧数下降按用户要求延期（[PT-033](FIXME.md#pt-033)）。
-- [ ] 实施PT-032的内嵌宿主发光兼容校准：按实际quad UV/面积、Color/coverage与完整动画域计算旧fallback与预设总通量之比，限定内嵌且宿主发光来源，外部Lab作者强度不自动归一。明确gain在静态与raw/dynamic消费的边界及CPU灯proposal与实际radiance的分工，不能只改树权重或放大8bit G至饱和。先验收总能量，再以静态单材质affine-UV面试点全帧支持域texel alias；保持TREE选灯，统一NEE/BSDF-emitter/ReSTIR的真实marginal PDF、半面/重心终端与null样本质量。复用源owner，避免逐tick重建或每面复制纹理；复杂UV/分层来源保留均匀面积方案，收益不足撤回alias而不影响校准。
+- [x] 实施PT-032：内嵌与外部Lab共用完整源Color/G/coverage及时长参考，按面UV/面积预计算功率比例；或规则保留单来源发光，仅双来源混合，默认50%，独立方块发光EV默认0。静态单材质affine-UV面增加全帧包络texel alias，统一NEE、反向PDF、ReSTIR半面/重心及实际密度；动画复用owner，复杂域保留均匀提议。实际火把/岩浆、0/50/100%与EV、动画/重载及原生1080p收益仍由用户验收，边界见[材质](docs/materials.md#发光与光学)。
+- [ ] 根据[未覆盖材质具体分析](crates/prime-minecraft/assets/vanilla_pbr/unmatched-review.md)决定是否补齐裁片/重排/状态映射及缺TextureSet的素材；当前只保留证据与长期复审工具，不自动加入新的映射。
 - [ ] 后续检查快速变化的动态贴图偶发模糊（火焰等，[PT-035](FIXME.md#pt-035)）与玻璃艺术效果（[PT-036](FIXME.md#pt-036)）；当前仅登记，分别建立连续帧与艺术目标的实际画面验收。
 - [ ] 为独立实体/方块实体/粒子等非方块图集纹理补充可靠的源ResourceLocation、获胜包来源与材质身份/生命周期合同，再扩展内嵌PBR；当前通用动态纹理接口只有数值ID和RGBA，不能把调试label当资源身份。生成的调色板sprite还需保留其实际输入/调色板的获胜来源，不能按不存在的同名PNG伪造原版资格。可匹配但未接入的来源见预设覆盖清单。
 - [ ] 基岩版材质包直接读取（延期）：当前使用稳定内部材质格式、LabPBR源翻译与固定内嵌PNG，不接入目录/MCPACK/ZIP、包栈或宿主虚拟资源包。后续明确Java版本的语义映射、基色/alpha/tint/动画与UV兼容、TextureSet同包引用及整套覆盖、资源代/冻结/完成证明后再实施；先支持明文原版材质子集，不宣称任意实体、模型或加密资产兼容。

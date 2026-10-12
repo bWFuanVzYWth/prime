@@ -121,7 +121,7 @@ def verify_checkout(source):
     head=subprocess.run(command+["rev-parse","HEAD"],capture_output=True,text=True,check=True)
     if head.stdout.strip()!=SOURCE_COMMIT:
         raise ValueError("Expected pinned source commit "+SOURCE_COMMIT)
-    status=subprocess.run(command+["status","--porcelain","--untracked-files=all","--","resource_pack/textures","LICENSE.md","version.json"],capture_output=True,text=True,check=True)
+    status=subprocess.run(command+["status","--porcelain","--untracked-files=all","--","resource_pack/textures","resource_pack/blocks.json","LICENSE.md","version.json"],capture_output=True,text=True,check=True)
     if status.stdout.strip():raise ValueError("Pinned reference inputs have tracked or untracked changes")
 
 
@@ -221,7 +221,7 @@ def sources_inventory(source,policy):
     records,frames=[],[]
     for path in sorted(base.rglob("*.texture_set.json")):
         identifier=path.relative_to(base).as_posix().removesuffix(".texture_set.json")
-        record={"id":identifier,"category":identifier.split("/")[1] if identifier.count("/")>1 else "root","selected_by":[],"alternatives_for":[],"deferred_candidates_for":[]}
+        record={"id":identifier,"category":identifier.split("/")[1] if identifier.count("/")>1 else "root","selected_by":[],"alternatives_for":[],"deferred_candidates_for":[],"policy_excluded_for":[]}
         records.append(record)
         if identifier in policy.get("exclude_bedrock",{}):
             record.update(status="policy-excluded",reason=policy["exclude_bedrock"][identifier]);continue
@@ -323,8 +323,8 @@ def add_generated_sprite_metadata(report,java_jars):
 def review_metadata(report):
     sources={s["id"]:s for s in report["bedrock"]}
     for source in sources.values():
-        for key in ("selected_by","alternatives_for","deferred_candidates_for"):
-            source[key]=sorted(set(source[key]))
+        for key in ("selected_by","alternatives_for","deferred_candidates_for","policy_excluded_for"):
+            source[key]=sorted(set(source.get(key,[])))
     for records in report["java"].values():
         for target in records:
             candidates=target.get("candidates",[])
@@ -391,8 +391,8 @@ def summary_groups(report,status,key):
 def write_summary(output,summary,report):
     text="# Frozen vanilla material matching\n\n"
     text+="Counts below enumerate literal Java PNG textures. Generated palette sprites are inventoried separately and deferred because their winning source and palette origins are unavailable. Eligibility follows the pinned JAR's actual blocks/items atlas declarations.\n\n"
-    text+="| Java | Literal PNGs | Eligible atlas PNGs | Integrated | Eligible unmatched | Other deferred | Generated palette sprites deferred |\n| --- | ---: | ---: | ---: | ---: | ---: | ---: |\n"
-    for version,values in summary["versions"].items():text+="| "+version+" | "+" | ".join(str(values.get(key,0)) for key in ("textures","eligible","integrated","unmatched","runtime_deferred","generated_palette_sprites_deferred"))+" |\n"
+    text+="| Java | Literal PNGs | Eligible atlas PNGs | Integrated | Eligible unmatched | Artist excluded | Other deferred | Generated palette sprites deferred |\n| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n"
+    for version,values in summary["versions"].items():text+="| "+version+" | "+" | ".join(str(values.get(key,0)) for key in ("textures","eligible","integrated","unmatched","policy_excluded","runtime_deferred","generated_palette_sprites_deferred"))+" |\n"
     text+="\n"+str(summary["registry_entries"])+" frozen entries ("+str(summary["common_entries"])+" shared); "+str(summary["png_files"])+" RGBA8 PNGs, "+str(summary.get("referenced_png_bytes",summary["png_bytes"]))+" encoded bytes and "+str(summary["decoded_rgba8_bytes"])+" base-level decoded bytes. These are asset costs, not runtime performance measurements.\n\n"
     text+="Bedrock sets: "+", ".join(str(count)+" "+status for status,count in summary["bedrock_status"].items())+".\n\n"
     text+="## What the long exclusion list contains\n\n"
@@ -401,7 +401,7 @@ def write_summary(output,summary,report):
     text+="### Other literal textures deferred by source boundary\n\n"+summary_groups(report,"runtime-deferred",lambda identifier:identifier.split(":",1)[1].split("/",1)[0])+"\n"
     text+="Entity/particle textures need trustworthy runtime source identity, winning-pack origin and UV/material ownership before activation. GUI/font/map/environment/colormap data also include inputs with no ordinary surface-PBR role; inventory presence alone does not justify attaching a material. Palette-derived armor/item sprites additionally need the winning origins of both source image and palette.\n\n"
     text+="[unintegrated.md](unintegrated.md) lists every excluded ID and reason. Every Java decision, top accepted alternatives, unused Bedrock set and failure reason is in [matching-report.json](matching-report.json). Exact RGB ignores alpha; fuzzy RGB uses Java visible texels and spatial structure. Host color, alpha and tint remain authoritative. Pixel similarity supports an artistic transfer, not model/UV or rendering equivalence.\n\n"
-    text+="Source-frame correspondence and normalized layer rescaling are frozen per entry. Repeated RGB frames can have different materials; deterministic same-index ties and the selected first used frame are recorded. RGB24 MER with S=0 is an importer compatibility approximation. Bedrock metal/subsurface winner selection is applied before encoding. Four DirectX normals preserve green sign for Prime's +V basis.\n\n"
+    text+="Source-frame correspondence and normalized layer rescaling are frozen per entry. Repeated RGB frames can have different materials; deterministic same-index ties and the selected first used frame are recorded. RGB24 MER with S=0 is an importer compatibility approximation. Bedrock metal/subsurface winner selection is applied before encoding. The two retained lava DirectX normals preserve green sign for Prime's +V basis. Vanilla water presets are artist-excluded, retaining native optical defaults, geometric normals and host Color/alpha/animation; external authored water materials keep their own behavior.\n\n"
     text+="Common routed item geometry is covered. Raw, foil/outline, unknown source or cross-sprite UV fallback, standalone dynamic textures and generated palette sprites retain their existing material behavior. Build/runtime consumes only frozen PNGs and registry.rs.\n"
     (output/"matching-summary.md").write_text(text,encoding="utf-8",newline="\n")
 
@@ -533,10 +533,14 @@ def generate(source,java_jars,output,replace=False,policy_path=DEFAULT_POLICY):
         for target_index,target in enumerate(targets):
             if target_index%500==0:print("Java "+version+" scan "+str(target_index)+"/"+str(len(targets)),flush=True)
             if "_image" not in target:continue
-            if target["java_id"] in policy.get("exclude_java",{}):
-                target.update(status="policy-excluded",reason=policy["exclude_java"][target["java_id"]]);continue
+            excluded=target["java_id"] in policy.get("exclude_java",{})
+            if excluded:target.update(status="policy-excluded",reason=policy["exclude_java"][target["java_id"]])
             candidates=matcher.match(target,policy)
             target["candidates"]=[candidate_record(c) for c in candidates[:5]];target["candidate_count"]=len(candidates)
+            if excluded:
+                distinct={c["source"]["id"]:c["source"] for c in candidates}
+                for candidate_source in distinct.values():candidate_source["policy_excluded_for"].append(version+":"+target["java_id"])
+                continue
             if target["status"]=="runtime-deferred":
                 distinct={c["source"]["id"]:c["source"] for c in candidates}
                 for candidate_source in distinct.values():candidate_source["deferred_candidates_for"].append(version+":"+target["java_id"])
@@ -556,6 +560,7 @@ def generate(source,java_jars,output,replace=False,policy_path=DEFAULT_POLICY):
         if s["selected_by"]:s["status"]="integrated"
         elif s["alternatives_for"]:s.update(status="conflict-loser",reason="Accepted RGB correspondence lost deterministic target winner selection")
         elif s["deferred_candidates_for"]:s.update(status="runtime-deferred",reason="RGB matches only unactivated atlas or standalone targets without trusted source identity")
+        elif s["policy_excluded_for"]:s.update(status="policy-excluded",reason="Accepted RGB correspondence exists only to Java textures explicitly excluded by artistic policy")
         else:s.update(status="mapping-low-confidence",reason="No accepted RGB/frame spatial correspondence to any Java texture")
     groups={}
     for e in results:groups.setdefault(e["java_id"],[]).append(e)
@@ -573,12 +578,12 @@ def generate(source,java_jars,output,replace=False,policy_path=DEFAULT_POLICY):
                 if blob:
                     generated[e[role]]=blob;baseline[role+"_png_sha256"]=sha256(blob);baseline[role+"_rgba_sha256"]=sha256(png_rgba8(blob).tobytes())
             e["generated_baseline"]=baseline
-            e["source"]={k:v for k,v in public(e["source"]).items() if k not in ("status","selected_by","alternatives_for","deferred_candidates_for")}
+            e["source"]={k:v for k,v in public(e["source"]).items() if k not in ("status","selected_by","alternatives_for","deferred_candidates_for","policy_excluded_for")}
             entries.append(public(e))
     entries.sort(key=lambda e:(e["java_id"],e["game_version"]))
     summary={"source_sets":len(sources),"registry_entries":len(entries),"common_entries":sum(e["game_version"]==0 for e in entries),"png_files":len(generated),"png_bytes":sum(len(v) for v in generated.values()),
              "decoded_rgba8_bytes":sum(png_rgba8(v).width*png_rgba8(v).height*4 for v in generated.values()),
-             "versions":{v:{"textures":len(ts),"eligible":sum(t["atlas"] in policy["enabled_atlases"] for t in ts),"integrated":sum(t["status"]=="integrated" for t in ts),"unmatched":sum(t["status"]=="unmatched" for t in ts),"runtime_deferred":sum(t["status"]=="runtime-deferred" for t in ts),"by_method":{m:sum(t.get("winner",{}).get("method")==m for t in ts) for m in ("exact-sheet-rgb","exact-frame-rgb","resampled-frame-rgb","fuzzy-spatial-rgb","policy-forced")}} for v,ts in java.items()},
+             "versions":{v:{"textures":len(ts),"eligible":sum(t["atlas"] in policy["enabled_atlases"] for t in ts),"integrated":sum(t["status"]=="integrated" for t in ts),"unmatched":sum(t["status"]=="unmatched" for t in ts),"policy_excluded":sum(t["status"]=="policy-excluded" for t in ts),"runtime_deferred":sum(t["status"]=="runtime-deferred" for t in ts),"by_method":{m:sum(t.get("winner",{}).get("method")==m for t in ts) for m in ("exact-sheet-rgb","exact-frame-rgb","resampled-frame-rgb","fuzzy-spatial-rgb","policy-forced")}} for v,ts in java.items()},
              "bedrock_status":{status:sum(s["status"]==status for s in sources) for status in sorted({s["status"] for s in sources})}}
     report={"schema":1,"settings":SETTINGS,"policy":policy,"summary":summary,"bedrock":[public(s) for s in sources],"java":{v:[public(t) for t in ts] for v,ts in java.items()}}
     add_generated_sprite_metadata(report,java_jars)
@@ -629,11 +634,18 @@ def main():
     parser.add_argument("source",nargs="?",type=Path);parser.add_argument("--java-26-2",type=Path);parser.add_argument("--java-26-3",type=Path)
     parser.add_argument("--output",type=Path,default=DEFAULT_OUTPUT);parser.add_argument("--policy",type=Path,default=DEFAULT_POLICY)
     parser.add_argument("--check",action="store_true");parser.add_argument("--replace-art",action="store_true")
+    parser.add_argument("--review-unmatched",action="store_true",help="Write per-ID source/pixel/model diagnosis only; never add presets")
     args=parser.parse_args()
     if args.check:result=verify_assets(args.output)
     else:
         if args.source is None or args.java_26_2 is None or args.java_26_3 is None:parser.error("Need pinned reference and both Java client jars")
-        result=generate(args.source,{"26.2":args.java_26_2,"26.3":args.java_26_3},args.output,args.replace_art,args.policy)
+        java_jars={"26.2":args.java_26_2,"26.3":args.java_26_3}
+        if args.review_unmatched:
+            verify_checkout(args.source.resolve())
+            from vanilla_pbr_review import write_review
+            result=write_review(__import__(__name__),args.source.resolve(),java_jars,args.output)
+        else:
+            result=generate(args.source,java_jars,args.output,args.replace_art,args.policy)
     print(json.dumps(result,indent=2))
 
 

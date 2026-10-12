@@ -80,6 +80,7 @@ impl SurfaceCompiler {
                         .map(|v| v.to_bits()),
                 );
                 key.extend(d.layer.emission.radiance.map(f32::to_bits));
+                key.push(d.layer.emission.texture_gain.to_bits());
                 key.push(
                     u32::from(d.layer.emission.two_sided)
                         | (u32::from(d.layer.emission.textured) * 2),

@@ -24,7 +24,12 @@ public struct ReflectionDistance : ITransportDistance {
 [shader("compute")][numthreads(8, 8, 1)] void main(uint3 id : SV_DispatchThreadID) {
     if (any(id.xy >= parameters.sampling.xy))
         return;
-    TraceScene resources = {scene, textures, texels, instanceMaterials, staticTrianglePages};
+    TraceScene resources = {scene,
+                            textures,
+                            texels,
+                            instanceMaterials,
+                            staticTrianglePages,
+                            renderLightingControls.emission.xy};
     PrimeFullTransmissionGgxEnergy energy = {transmissionEnergy};
     float3 tail = primeTraceLanding(resources, atmosphereLighting(), energy, parameters, id.xy,
                                     ReflectionDistance());

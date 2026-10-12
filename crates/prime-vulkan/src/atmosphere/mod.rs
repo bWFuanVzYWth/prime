@@ -33,8 +33,8 @@ pub(super) struct Atmosphere {
     _medium: Buffer,
     _physical: Vec<Texture>,
     _frames: Vec<Buffer>,
-    star_controls: Vec<Buffer>,
-    star_keys: [Option<[u32; 4]>; crate::FRAME_SLOTS],
+    lighting_controls: Vec<Buffer>,
+    lighting_keys: [Option<[u32; 8]>; crate::FRAME_SLOTS],
     star_views: [u64; crate::FRAME_SLOTS],
     _sky: Texture,
     _transmittance: Texture,
@@ -53,6 +53,44 @@ pub(super) struct Atmosphere {
     transmittance_key: Option<u32>,
     pub sky_updates: u64,
     pub transmittance_updates: u64,
+}
+
+fn lighting_control_words(stars: [f32; 4], emission: [f32; 2]) -> [u32; 8] {
+    [
+        stars[0],
+        stars[1],
+        stars[2],
+        stars[3],
+        emission[0],
+        emission[1],
+        0.0,
+        0.0,
+    ]
+    .map(f32::to_bits)
+}
+
+#[cfg(test)]
+mod lighting_control_tests {
+    use super::lighting_control_words;
+
+    #[test]
+    fn frame_uniform_preserves_stars_and_independent_emission_floats() {
+        let stars = [-0.125, 1.75, 0.0625, 0.0];
+        for (mix, ev) in [(0.0, -10.0_f32), (0.5, 0.0), (0.375, -3.25), (1.0, 10.0)] {
+            let words = lighting_control_words(stars, [mix, ev.exp2()]);
+            let bytes = words.map(u32::to_le_bytes);
+            let values: Vec<_> = bytes
+                .as_flattened()
+                .chunks_exact(4)
+                .map(|chunk| f32::from_le_bytes(chunk.try_into().unwrap()))
+                .collect();
+            assert_eq!(&values[..4], &stars);
+            assert_eq!(values[4], mix);
+            assert_eq!(values[5], 2.0_f32.powf(ev));
+            assert_eq!(&values[6..], &[0.0, 0.0]);
+            assert_eq!(bytes.as_flattened().len(), 32);
+        }
+    }
 }
 
 impl Atmosphere {
@@ -122,17 +160,17 @@ impl Atmosphere {
             96,
         )?;
         let mut frames = vec![];
-        let mut star_controls = vec![];
+        let mut lighting_controls = vec![];
         for slot in 0..crate::FRAME_SLOTS {
-            star_controls.push(Buffer::new(
+            lighting_controls.push(Buffer::new(
                 context,
-                16,
+                32,
                 vk::BufferUsageFlags::UNIFORM_BUFFER,
                 true,
             )?);
             let info = [vk::DescriptorBufferInfo::default()
-                .buffer(star_controls[slot].buffer)
-                .range(16)];
+                .buffer(lighting_controls[slot].buffer)
+                .range(32)];
             unsafe {
                 context.device.update_descriptor_sets(
                     &[vk::WriteDescriptorSet::default()
@@ -181,8 +219,8 @@ impl Atmosphere {
             _medium: medium,
             _physical: physical,
             _frames: frames,
-            star_controls,
-            star_keys: [None; crate::FRAME_SLOTS],
+            lighting_controls,
+            lighting_keys: [None; crate::FRAME_SLOTS],
             star_views: [0; crate::FRAME_SLOTS],
             _sky: sky,
             _transmittance: transmittance,
@@ -206,17 +244,18 @@ impl Atmosphere {
     pub fn descriptor(&self, slot: usize) -> vk::DescriptorSet {
         self.compute.sets[1][slot]
     }
-    pub fn set_starmap(
+    pub fn set_lighting_controls(
         &mut self,
         slot: usize,
         map: Option<&crate::starmap::Starmap>,
         controls: [f32; 4],
+        emission: [f32; 2],
     ) -> Result<(), String> {
         use ash::vk::Handle;
-        let values = controls.map(f32::to_bits);
-        if self.star_keys[slot] != Some(values) {
-            self.star_controls[slot].write(values.map(u32::to_le_bytes).as_flattened())?;
-            self.star_keys[slot] = Some(values);
+        let values = lighting_control_words(controls, emission);
+        if self.lighting_keys[slot] != Some(values) {
+            self.lighting_controls[slot].write(values.map(u32::to_le_bytes).as_flattened())?;
+            self.lighting_keys[slot] = Some(values);
         }
         let (view, sampler) = map.map_or((self._sky.image.view, self.compute.sampler), |map| {
             (map.view, map.sampler)

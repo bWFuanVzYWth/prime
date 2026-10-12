@@ -135,5 +135,9 @@
   "primept.settings.restir_pt.rr_bias_reduction": "Limit Fresh Sample Weight",
   "primept.settings.restir_pt.rr_bias_reduction.tooltip": "Bound fresh output weights to reduce bright outliers, enabled by default. This approximation does not guarantee unbiased output.",
   "primept.settings.restir_pt.rr_firefly": "Bright Sample Protection",
-  "primept.settings.restir_pt.rr_firefly.tooltip": "Enable the bright-sample test that can force fresh output, enabled by default."
+  "primept.settings.restir_pt.rr_firefly.tooltip": "Enable the bright-sample test that can force fresh output, enabled by default.",
+  "primept.settings.lighting.emission_power_mix_percent": "Emission power calibration",
+  "primept.settings.lighting.emission_power_mix_percent.tooltip": "Blend texture and block emission power when both emit: 0% keeps texture power, 100% matches block power. Default 50%; preserves the texture pattern and also applies to external LabPBR. A single emitting source is retained. Fixed while frozen.",
+  "primept.settings.lighting.block_emission_ev_quarters": "Block emission intensity",
+  "primept.settings.lighting.block_emission_ev_quarters.tooltip": "Exposure adjustment for block and material emission: -10 to +10 EV in 0.25 steps. Default 0; each +1 EV doubles emission. Independent of the Sun, sky and unlit text. Fixed while frozen."
 }

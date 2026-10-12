@@ -432,6 +432,15 @@ public final class SettingsCpuSmoke {
                             check(widget.getMessage().getString().endsWith(settings.value(control) +
                                                                            " m"),
                                   "Atmosphere altitude slider displays metres with one caption");
+                        if (control == RenderSettings.Control.EMISSION_POWER_MIX)
+                            check(widget.getMessage().getString().endsWith(settings.value(control) +
+                                                                           "%"),
+                                  "Emission power mix slider displays percent with one caption");
+                        if (control == RenderSettings.Control.BLOCK_EMISSION_EV)
+                            check(widget.getMessage().getString().endsWith(
+                                          String.format(java.util.Locale.ROOT, "%+.2f EV",
+                                                        settings.value(control) / 4.0)),
+                                  "Block emission slider displays exact quarter EV with one caption");
                     }
                     var qualityButton =
                             (CycleButton<RenderSettings.DlssQuality>)list.findOption(dlssQuality);
@@ -460,6 +469,10 @@ public final class SettingsCpuSmoke {
                           "Frozen terrain scheduling control stays available");
                     check(!list.findOption(controls.get(RenderSettings.Control.STARS)).active,
                           "Frozen star lighting control stays fixed");
+                    for (var control : List.of(RenderSettings.Control.EMISSION_POWER_MIX,
+                                               RenderSettings.Control.BLOCK_EMISSION_EV))
+                        check(!list.findOption(controls.get(control)).active,
+                              "Frozen emission lighting controls stay fixed: " + control);
                     check(!list
                                    .findOption(controls.get(
                                            RenderSettings.Control.ATMOSPHERE_ALTITUDE_OFFSET))
@@ -528,6 +541,7 @@ public final class SettingsCpuSmoke {
                         check(list.findOption(nativeNoisyOutput).active &&
                                       list.findOption(dlssQuality).active,
                               "Realtime reconstruction controls become available");
+                        testEmissionSliders(list, controls, translations);
                         var originalSettings = PrimeClient.settings();
                         PrimeClient.updateSettings(
                                 originalSettings.withRenderer(RenderSettings.Renderer.RESTIR_PT));
@@ -992,6 +1006,52 @@ public final class SettingsCpuSmoke {
                               .equals("https://github.com/bWFuanVzYWth/prime"),
               "Actual GitHub button opens the vanilla confirmation for the repository URL");
         return child;
+    }
+
+    private static void
+    testEmissionSliders(OptionsList list,
+                        java.util.EnumMap<RenderSettings.Control, OptionInstance<Integer>> controls,
+                        HashMap<String, String> translations) throws Exception {
+        var original = PrimeClient.settings();
+        var setValue = AbstractSliderButton.class.getDeclaredMethod("setValue", double.class);
+        setValue.setAccessible(true);
+        for (var control : List.of(RenderSettings.Control.EMISSION_POWER_MIX,
+                                   RenderSettings.Control.BLOCK_EMISSION_EV)) {
+            var option = controls.get(control);
+            var slider = (AbstractSliderButton)list.findOption(option);
+            check(slider.active, "Realtime emission slider is enabled: " + control);
+            int[] values = control == RenderSettings.Control.EMISSION_POWER_MIX
+                                   ? new int[] {0, 37, 50, 100}
+                                   : new int[] {-40, -13, 0, 13, 40};
+            for (int value : values) {
+                setValue.invoke(slider, (double)(value - control.minimum) /
+                                                (control.maximum - control.minimum));
+                list.applyUnsavedChanges();
+                check(option.get() == value && PrimeClient.settings().value(control) == value,
+                      "Actual host emission slider applies its persisted callback: " + control);
+                assertSingleCaption(slider, translations.get("primept.settings." + control.key));
+                String suffix =
+                        control == RenderSettings.Control.EMISSION_POWER_MIX
+                                ? value + "%"
+                                : String.format(java.util.Locale.ROOT, "%+.2f EV", value / 4.0);
+                check(slider.getMessage().getString().endsWith(suffix),
+                      "Actual emission slider presents its numeric units: " + suffix);
+                check(PrimeClient.settings().value(RenderSettings.Control.SUN_EV) ==
+                                      original.value(RenderSettings.Control.SUN_EV) &&
+                              PrimeClient.settings().value(RenderSettings.Control.SKY_EV) ==
+                                      original.value(RenderSettings.Control.SKY_EV),
+                      "Emission callbacks preserve the independent Sun and sky controls");
+                check(SettingsFile.decode(SettingsFile.encode(PrimeClient.settings()))
+                              .settings()
+                              .equals(PrimeClient.settings()),
+                      "Emission slider callback persists both independent controls");
+            }
+            setValue.invoke(slider, (double)(original.value(control) - control.minimum) /
+                                            (control.maximum - control.minimum));
+            list.applyUnsavedChanges();
+        }
+        check(PrimeClient.settings().equals(original),
+              "Emission sliders restore the exact settings");
     }
 
     private static void assertRootCaptions(PrimeVideoOptions owner, OptionsList list,

@@ -10,6 +10,8 @@ mod cpu_profile;
 mod display;
 mod display_pipeline;
 mod dynamic;
+#[cfg(all(test, feature = "shader-tests"))]
+mod emission_alias_tests;
 mod exposure;
 mod hdr;
 mod light_distance_cpu;

@@ -543,6 +543,7 @@ fn stable_quad_fixture(endpoint_only: bool) {
         value.emission = Emission {
             radiance: emission,
             two_sided: true,
+            texture_gain: 0.0,
             textured: false,
         };
         value
@@ -775,6 +776,7 @@ fn stable_quad_fixture(endpoint_only: bool) {
                 emission: Emission {
                     radiance: [0., 0., 20.],
                     two_sided: true,
+                    texture_gain: 0.0,
                     textured: false,
                 },
             },

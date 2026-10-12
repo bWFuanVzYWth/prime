@@ -16,7 +16,8 @@ import "ray_query.slang";
     uint i = id.x;
     if (i >= config.y)
         return;
-    TraceScene resources = {acceleration, textures, texels, instanceMaterials, staticTrianglePages};
+    TraceScene resources = {acceleration,        textures,        texels, instanceMaterials,
+                            staticTrianglePages, float2(0.0, 1.0)};
     float3 origin = asfloat(inputs[3 * i]).xyz;
     float3 incoming = asfloat(inputs[3 * i + 1]).xyz;
     float3 outgoing = asfloat(inputs[3 * i + 2]).xyz;

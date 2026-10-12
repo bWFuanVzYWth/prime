@@ -296,6 +296,7 @@ fn fixture() -> (Scene, InstanceScene, Camera) {
         lamp.emission = Emission {
             radiance: color,
             two_sided: true,
+            texture_gain: 0.0,
             textured: false,
         };
         mesh(&mut scene, key, origin, vec![lamp]);

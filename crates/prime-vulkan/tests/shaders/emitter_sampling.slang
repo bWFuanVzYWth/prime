@@ -15,7 +15,8 @@ import "ray_query.slang";
     uint i = id.x;
     if (i >= config.y)
         return;
-    TraceScene resources = {acceleration, textures, texels, instanceMaterials, staticTrianglePages};
+    TraceScene resources = {acceleration,        textures,        texels, instanceMaterials,
+                            staticTrianglePages, float2(0.0, 1.0)};
     float3 sample = asfloat(inputs[i]).xyz;
     float3 receiver = float3(0, 0, config.x == 1 ? -1000 : 1000);
     LightSample light = sampleLocalLight(resources, float4(sample.x), sample.yz, 17, receiver);

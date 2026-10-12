@@ -231,7 +231,7 @@ pub(super) fn mapping(g: &CompiledQuad) -> Option<RepeatUv> {
         .or_else(|| strip(g, 0, 0).map(|(_, c)| c.cell.mapping))
 }
 
-fn label(q: &SurfaceQuad, mapping: RepeatUv) -> [u32; 18] {
+fn label(q: &SurfaceQuad, mapping: RepeatUv) -> [u32; 19] {
     let [r, g, b, a] = q.geometry.color.map(f32::to_bits);
     let [u, v] = mapping.origin.map(f32::to_bits);
     let [du, dv] = mapping.du.map(f32::to_bits);
@@ -254,6 +254,7 @@ fn label(q: &SurfaceQuad, mapping: RepeatUv) -> [u32; 18] {
         er,
         eg,
         eb,
+        q.emission.texture_gain.to_bits(),
         (u32::from(q.emission.two_sided) | (u32::from(q.emission.textured) * 2)),
         negative,
         positive,
@@ -276,7 +277,7 @@ pub(super) fn append(out: &mut Vec<SurfaceFace>, q: &SurfaceQuad, repeat: Option
 
 // Include the actual two source triangles in the proof. Merely sorting four vertices would
 // incorrectly remove a nonplanar quad with a different diagonal or a bow-tie ordering.
-fn duplicate_key(q: &SurfaceQuad) -> ([[[u32; 5]; 3]; 2], [u32; 10]) {
+fn duplicate_key(q: &SurfaceQuad) -> ([[[u32; 5]; 3]; 2], [u32; 11]) {
     let mut triangles = [[0, 1, 2], [2, 3, 0]].map(|indices| {
         let mut vertices = indices.map(|i| {
             let [x, y, z] = q.geometry.positions[i].map(f32::to_bits);
@@ -301,6 +302,7 @@ fn duplicate_key(q: &SurfaceQuad) -> ([[[u32; 5]; 3]; 2], [u32; 10]) {
             er,
             eg,
             eb,
+            q.emission.texture_gain.to_bits(),
             (u32::from(q.emission.two_sided) | (u32::from(q.emission.textured) * 2)),
         ],
     )

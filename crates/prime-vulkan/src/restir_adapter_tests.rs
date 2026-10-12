@@ -468,6 +468,7 @@ pub(super) fn lamp() -> prime_scene::surface::SurfaceFace {
     lamp.emission = Emission {
         radiance: [4., 2., 1.],
         two_sided: true,
+        texture_gain: 0.0,
         textured: false,
     };
     lamp

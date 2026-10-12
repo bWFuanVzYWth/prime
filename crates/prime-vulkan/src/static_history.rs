@@ -67,9 +67,8 @@ fn key(
 ) -> Result<[u8; 432], String> {
     let mut bytes = packing::encode(face, format, None, None, textures)?;
     if format != 0 {
-        // Canonical light IDs and represented area weight are reconstructed from
-        // the stable row. They do not change its geometry or selected leaf.
-        bytes[220..224].fill(0);
+        // The canonical light ID is reconstructed from the stable row. The emission gain
+        // at byte 220 is shading data and must participate in its exact content identity.
         bytes[232..236].fill(0);
     }
     Ok(bytes)
@@ -814,15 +813,28 @@ mod tests {
         a.emission.radiance = [2.; 3];
         a.emitter = Some(7);
         a.emitter_area_weight = 13.;
+        a.emission.texture_gain = 11.;
         let textures = BTreeMap::from([(0, 0)]);
         let bytes = packing::encode(&a, 1, None, None, &textures).unwrap();
-        assert_eq!(f32::from_le_bytes(bytes[220..224].try_into().unwrap()), 13.);
+        assert_eq!(f32::from_le_bytes(bytes[220..224].try_into().unwrap()), 11.);
         assert_eq!(u32::from_le_bytes(bytes[232..236].try_into().unwrap()), 7);
         let original = key(&a, 1, &textures).unwrap();
         a.emitter = Some(99);
         a.emitter_area_weight = 21.;
         assert_eq!(key(&a, 1, &textures).unwrap(), original);
+        a.emission.texture_gain = 12.;
+        assert_ne!(key(&a, 1, &textures).unwrap(), original);
+        a.emission.texture_gain = 11.;
         a.emission.radiance[0] = 3.;
         assert_ne!(key(&a, 1, &textures).unwrap(), original);
+        let mut source = update(vec![a.clone()]);
+        let old = StaticPacking::prepare(&mut source, None, 1).unwrap();
+        a.emission.texture_gain = 0.5;
+        let mut source = update(vec![a]);
+        let current = StaticPacking::prepare(&mut source, Some(&old), 2).unwrap();
+        assert!(
+            current.pages[0].states[0].changed,
+            "changed power gain must invalidate the actual terrain shading row/history"
+        );
     }
 }

@@ -40,9 +40,9 @@ LabPBR只接受`minecraft:optifine/texture.properties`中的`format=lab-pbr/1.3`
 
 PNG是最终可编辑资产，构建读取当前文件并嵌入，不从样例自动覆盖。离线工具生成候选、记录schema/来源/生成参数与许可；已发布材质进入现有资源所有权和512 MiB唯一backing预算。标准金属转换的原始sprite图仍由资源catalog保留，用于原基色参考及同代定义比较；这部分CPU存储和转换峰值不等同于GPU纹理预算，须另计。
 
-内嵌原版预设的全帧MERS G全零时继承宿主发光，保留MERS的其他通道；任意帧存在非零G则仍按authored发光处理，当前暗texel保持暗。该规则在资源准备使用已有完整源最大值决定，不增加GPU源格式分支。外部Lab和通用内部材质的显式零发光仍覆盖宿主，不由内嵌预设策略改变作者语义。
+Minecraft翻译层统一采用发光的或规则，覆盖内嵌预设与外部Lab：完整源及全部动画帧的MERS G全零时继承宿主block/quad发光，保留其他材质通道；任意帧存在正G则保留纹理的亮暗图案，当前暗texel保持暗。此规则是用户明确接受的翻译层修复，避免零G清除岩浆等方块的固有发光；通用Scene接口仍由authored标志声明源语义。
 
-内嵌静水/流水预设按相同帧索引投影波纹，避免颜色最近匹配导致normal帧重复或跳序；最终PNG将感知粗糙度B艺术调整为0，保留normal方向。远处mip与动画的normal分布仍可增加有效粗糙度，不声明所有距离均为镜面。外部Lab水材质继续消费作者粗糙度。
+静水/流水从内嵌PBR登记中排除，忽略原版预设的粗糙度和法线，使用几何法线与既有光滑水边界。原版Color/alpha/tint与动画保持，物理IOR及消光不变。这是用户主动选择的艺术调整；有效外部Lab水材质仍沿用作者的整组输入。
 
 ## 过滤、动画与颜色一致性
 
@@ -82,7 +82,15 @@ evaluate要求response/PDF有限非负，非法时整组清零；sample要求有
 
 ## 发光与介质
 
-Lab整sheet所有帧A均为255时保留宿主block/quad emission；任意A小于255即授权覆盖，包括0明确关闭。内部真实强度为当前MERS G/255，满强度保持1.5校准并乘共享Color×tint。命中、NEE与ReSTIR emitter的实际发光统一当前帧mip0最近点域，包括Color及G；散射Color和M/R/S仍按ray-cone LOD采样。高LOD命中按需要重取mip0发光，LOD0复用已有值，背面/常量回退/零强度不重取无消费者的Color。CPU静态灯proposal使用完整帧最大强度，动画不会使发光支持域不可达；proposal不替代真实辐亮度。动态发光尚未注册静态灯目录。
+Lab全源A=255与翻译后全源G=0均保留宿主发光。只有纹理发光时，真实强度为当前G/255乘1.5；只有方块发光时，沿用`1.5*(lightLevel/15)^2`与共享Color。两者都发光时，对纹理幅度应用`lerp(1, texture_gain, emissionMix)`。功率混合默认50%，0%服从纹理，100%服从方块提议的功率；独立的方块发光EV默认0，以`2^EV`统一缩放物理局部发光，不影响太阳、天空与unlit文字。改变设置只更新renderer lighting controls及输运历史，不重新编译来源或灯表。
+
+`texture_gain`在资源代准备时根据sRGB解码后的共享Color亮度、G、coverage与完整声明动画时长建立固定参考。两轴均不超过64的源，面编译按实际两半三角形的UV及世界面积求`native*integral(Color)/integral(Color*G)`：常见矩形域以积分表O(1)求值，一般域裁切texel面积；高分辨率、越界/repeat与非定点的rank-one UV使用全sprite参考，避免大图积分缓存和逐面裁切成本。校准保留纹理亮暗图案，没有逐帧消除闪烁，也不截断亮像素。固定动画端点/时长与未染色Color是简单艺术参考，并不宣称任意插值相位、顶点tint或后续几何裁切下精确保持通量。没有方块提议、参考积分为零及动态raw只有纹理来源时不混合。
+
+命中、NEE与ReSTIR的实际发光统一当前帧mip0最近点域，包括Color及G；散射Color和M/R/S仍按ray-cone LOD采样。高LOD命中按需重取mip0发光，LOD0复用已有值，背面/常量回退/零强度不重取无消费者的Color。CPU灯权重使用覆盖整个混合范围的最大幅度参考，不替代当前真实辐亮度；动态发光尚未注册静态灯目录。
+
+静态单材质、非repeat、平面affine-UV发光面可使用全动画支持域的texel alias。CPU将支持texel精确裁到两半三角形，按面积和白tint亮度包络建立提议；GPU直接采样裁切patch，保留实际半面与重心，不做拒绝重采样。NEE、BSDF命中反向PDF和ReSTIR重连共用实际面积密度；当前动画暗点仍保留提议PDF。支持包络按RGB、G和alpha的独立全帧最大值建立，确保动画插值支持可达。高于65536texel、分层、退化/非affine/越界UV、未知来源及全正低对比来源保留均匀面积提议。
+
+源包络每texel为5B CPU数据，共享不可变owner；每面表附在既有local light-tree nodes尾部，使用发光记录padding中的偏移，不扩张GPU纹理descriptor或176/240/272/432B表面stride。动画descriptor-only更新复用包络与灯表；真实源变化先撤销受影响格，按既有预算重建，旧资源依GPU完成证明退休。alias降低采样方差，功率校准改变实际总能量，两者独立，整帧成本仍待原生1080p测量。
 
 水保持物理IOR1.333与既有消光。玻璃吸收仍由原始首帧中心基色建立homogeneous参考，不随颜色预转换或法线改变。均匀Aux A可在CPU初始化介质，变化场保留资源身份；当前表面负侧按命中UV、邻接正侧按固定sprite midpoint读取当前帧mip0 Aux A，CPU/GPU使用同一仿射解码。光学引用继续复用既有记录，介质身份与量化数值独立。
 

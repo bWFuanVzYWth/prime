@@ -413,6 +413,7 @@ fn gpu_budget_changes_reuse_light_geometry_and_restart_offline_history() {
                     emission: Emission {
                         radiance: [1000.0; 3],
                         two_sided: false,
+                        texture_gain: 0.0,
                         textured: false,
                     },
                     rule: SurfaceRule::Preserve,

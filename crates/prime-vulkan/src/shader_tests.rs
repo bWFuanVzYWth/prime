@@ -59,15 +59,17 @@ fn tree_integer_support_forward_reverse_and_geometry_boundaries(extreme_power: b
                         1.0
                     }; 3],
                     two_sided: key != 1,
+                    texture_gain: 0.0,
                     textured: false,
                 };
                 face
             })
             .collect();
         let mesh = SurfaceMesh::from_resolved(key, faces).unwrap();
-        let page = crate::surface::upload_lights(&context, &mesh, &textures, key)
-            .unwrap()
-            .unwrap();
+        let page =
+            crate::surface::upload_lights(&context, &mesh, &textures, &Default::default(), key)
+                .unwrap()
+                .unwrap();
         pages.push(page);
     }
     let sources: std::collections::BTreeMap<_, _> = pages

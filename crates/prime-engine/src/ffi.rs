@@ -1178,6 +1178,8 @@ mod abi_tests {
             restir_rr_bias_reduction: 1,
             restir_rr_firefly: 1,
             atmosphere_altitude_offset_meters: 300,
+            emission_power_mix: 0.5,
+            block_emission_ev: 0.0,
         };
         assert_eq!(unsafe { prime_configure(handle, &valid) }, 0);
         assert_eq!(unsafe { prime_configure(handle, std::ptr::null()) }, -1);
@@ -1196,6 +1198,16 @@ mod abi_tests {
         invalid = valid;
         invalid.atmosphere_altitude_offset_meters = 10001;
         assert_eq!(unsafe { prime_configure(handle, &invalid) }, -1);
+        for value in [-0.01, 1.01, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            invalid = valid;
+            invalid.emission_power_mix = value;
+            assert_eq!(unsafe { prime_configure(handle, &invalid) }, -1);
+        }
+        for value in [-10.01, 10.01, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            invalid = valid;
+            invalid.block_emission_ev = value;
+            assert_eq!(unsafe { prime_configure(handle, &invalid) }, -1);
+        }
         assert_eq!(
             std::thread::spawn(move || unsafe { prime_configure(handle, &valid) })
                 .join()

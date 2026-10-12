@@ -17,6 +17,46 @@ fn quad() -> CompiledQuad {
 }
 
 #[test]
+fn emission_gain_is_independent_for_primary_and_secondary_without_stride_growth() {
+    use prime_scene::surface::{LayerMode, SurfaceDetail, SurfaceLayer};
+    let mut face = SurfaceFace::from_quad(quad());
+    face.emission = Emission {
+        radiance: [2., 3., 4.],
+        texture_gain: 7.,
+        textured: true,
+        two_sided: false,
+    };
+    face.emitter_area_weight = 123.;
+    face.detail = Some(Arc::new(SurfaceDetail {
+        mode: LayerMode::Bilateral,
+        layer: SurfaceLayer {
+            colors: face.geometry.colors,
+            uvs: face.geometry.uvs,
+            texture_id: 7,
+            flags: 0,
+            material_thin: false,
+            repeat: None,
+            emission: Emission {
+                radiance: [5., 6., 8.],
+                texture_gain: 11.,
+                ..face.emission
+            },
+        },
+    }));
+    let bytes = encode(&face, 3, None, None, &BTreeMap::from([(7, 1)])).unwrap();
+    let read = |at: usize| f32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
+    assert_eq!(stride(3), 432);
+    assert_eq!(
+        [read(208), read(212), read(216), read(220)],
+        [2., 3., 4., 7.]
+    );
+    assert_eq!(
+        [read(384), read(388), read(392), read(396)],
+        [5., 6., 8., 11.]
+    );
+}
+
+#[test]
 fn material_thin_controls_use_reserved_word_without_changing_coverage_or_record_stride() {
     use prime_scene::surface::{LayerMode, Medium, Optics, SurfaceDetail, SurfaceLayer};
     for record_format in 0..FORMATS {

@@ -16,7 +16,8 @@ import "pbr/vertex.slang";
     uint i = id.x;
     if (i >= config.y)
         return;
-    TraceScene resources = {acceleration, textures, texels, instanceMaterials, staticTrianglePages};
+    TraceScene resources = {acceleration,        textures,        texels, instanceMaterials,
+                            staticTrianglePages, float2(0.0, 1.0)};
     float4 origin = inputs[i * 3], direction = inputs[i * 3 + 1];
     float4 medium = float4(direction.w, inputs[i * 3 + 2].xyz);
     if (config.x == 5) {

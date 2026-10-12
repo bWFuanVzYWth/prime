@@ -14,6 +14,8 @@ pub(crate) struct Material {
     color_source: Option<Source>,
     has_normal: bool,
     emission: Option<f32>,
+    emission_moments: Option<crate::emission::Moments>,
+    emission_proposal: Option<Arc<prime_scene::EmissionProposal>>,
     ior: Option<u8>,
     ior_identity: Option<u32>,
     subsurface: bool,
@@ -250,6 +252,8 @@ impl Material {
             color_source: standard_metal.then_some(specular).flatten(),
             has_normal,
             emission,
+            emission_moments: None,
+            emission_proposal: None,
             ior,
             ior_identity,
             subsurface,
@@ -290,6 +294,8 @@ impl Material {
             color_source: None,
             has_normal,
             emission: Some(f32::from(emission) / 255.),
+            emission_moments: None,
+            emission_proposal: None,
             ior,
             ior_identity: ior.map(|v| material::decode_ior(v).to_bits()),
             subsurface,
@@ -391,10 +397,126 @@ impl Material {
             .map(|p| p.image(sprite, frame, next, blend, Kind::Color))
     }
     pub fn emission_maximum(&self) -> Option<f32> {
-        self.emission
+        self.emission.filter(|&maximum| maximum > 0.0)
     }
-    /// Embedded vanilla layers borrow native emission when the complete sheet has no authored E.
-    /// Generic internal and external authored zero retain their suppress-host semantics.
+    pub fn texture_power_gain(
+        &self,
+        uvs: [[f32; 2]; 4],
+        positions: [[f32; 3]; 4],
+        flags: u32,
+        native: f32,
+    ) -> f32 {
+        self.emission_moments
+            .as_ref()
+            .map_or(0., |m| m.gain(uvs, positions, flags, native))
+    }
+    /// Source-cycle calibration and a fixed animation support envelope share the prepared owner.
+    pub fn prepare_emission(&mut self, sprite: &Sprite, scene: &SourceScene) -> Result<(), String> {
+        if self.emission.is_none_or(|e| e == 0.) {
+            return Ok(());
+        }
+        let mers = self.mers.as_ref().unwrap();
+        let [w, h] = sprite.extent;
+        let host = &sprite.images[0];
+        let effective = self.color.as_ref().map(|p| &p.images[0]);
+        let atlas;
+        let color = if let Some(image) = effective {
+            image
+        } else if host.pixels.is_empty() {
+            let source = scene.texture(1).ok_or("emission color atlas missing")?;
+            atlas = Image {
+                width: source.width,
+                height: source.height,
+                pixels: Arc::clone(&source.pixels),
+            };
+            &atlas
+        } else {
+            host
+        };
+        let mut durations = std::collections::BTreeMap::<u32, u64>::new();
+        if sprite.frames.is_empty() {
+            durations.insert(0, 1);
+        }
+        for &(frame, duration) in &sprite.frames {
+            *durations.entry(frame).or_default() += u64::from(duration);
+        }
+        let total = durations.values().sum::<u64>() as f64;
+        // Keep pixel-art crops exact. High-resolution packs use a whole-source power reference
+        // instead of retaining a large prefix grid for a loading-time artistic adjustment.
+        let reference_extent = if w <= 64 && h <= 64 { [w, h] } else { [1, 1] };
+        let mut cells = vec![[0.; 6]; (reference_extent[0] * reference_extent[1]) as usize];
+        let mut windows = Vec::with_capacity(durations.len());
+        let srgb = |v: u8| {
+            let x = f64::from(v) / 255.;
+            if x <= 0.04045 {
+                x / 12.92
+            } else {
+                ((x + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        for (frame, duration) in durations {
+            let color_origin = if let Some(p) = &self.color {
+                let f = frame.min(p.frames - 1);
+                [(f % p.columns) * w, (f / p.columns) * h]
+            } else if host.pixels.is_empty() {
+                [
+                    (sprite.bounds[0] * color.width as f32).round() as u32,
+                    (sprite.bounds[1] * color.height as f32).round() as u32,
+                ]
+            } else {
+                let columns = color.width / w;
+                [(frame % columns) * w, (frame / columns) * h]
+            };
+            let f = frame.min(mers.frames - 1);
+            let mers_origin = [(f % mers.columns) * w, (f / mers.columns) * h];
+            windows.push([
+                color_origin[0],
+                color_origin[1],
+                mers_origin[0],
+                mers_origin[1],
+            ]);
+            let weight = duration as f64 / total;
+            for y in 0..h {
+                for x in 0..w {
+                    let c_at =
+                        (((color_origin[1] + y) * color.width + color_origin[0] + x) * 4) as usize;
+                    let m_at = (((mers_origin[1] + y) * mers.images[0].width + mers_origin[0] + x)
+                        * 4
+                        + 1) as usize;
+                    let c = &color.pixels[c_at..c_at + 4];
+                    let lum = 0.2126 * srgb(c[0]) + 0.7152 * srgb(c[1]) + 0.0722 * srgb(c[2]);
+                    let g = f64::from(mers.images[0].pixels[m_at]) / 255.;
+                    let alpha = f64::from(c[3]) / 255.;
+                    for (mode, a) in [1., if alpha >= 0.1 { 1. } else { 0. }, alpha]
+                        .into_iter()
+                        .enumerate()
+                    {
+                        let cell = if cells.len() == 1 {
+                            0
+                        } else {
+                            (y * w + x) as usize
+                        };
+                        cells[cell][mode * 2] += lum * a * weight;
+                        cells[cell][mode * 2 + 1] += lum * g * a * weight;
+                    }
+                }
+            }
+        }
+        windows.sort_unstable();
+        windows.dedup();
+        self.emission_proposal = prime_scene::EmissionProposal::from_frames(
+            sprite.extent,
+            [color.width, color.height],
+            &color.pixels,
+            [mers.images[0].width, mers.images[0].height],
+            &mers.images[0].pixels,
+            &windows,
+        )?;
+        self.emission_moments = Some(crate::emission::Moments::new(reference_extent, cells));
+        Ok(())
+    }
+    /// Minecraft translation treats complete zero texture emission as the host-only source.
+    /// Any positive frame keeps the texture mask, including its individual dark texels.
     pub fn inherit_host_emission_when_zero(mut self) -> Self {
         self.emission = self.emission.filter(|&maximum| maximum != 0.0);
         self
@@ -450,7 +572,8 @@ impl Material {
                 .map(|p| p.image(sprite, frame, next, blend, Kind::Mers)),
             has_normal: self.has_normal,
             coverage: None,
-            authored_emission: self.emission.is_some(),
+            authored_emission: self.emission.is_some_and(|maximum| maximum > 0.0),
+            emission_proposal: self.emission_proposal.clone(),
             atlas_lookup: false,
             bounds: Some(sprite.bounds),
         })
@@ -704,6 +827,7 @@ pub(crate) fn atlas(
         has_normal: false,
         coverage: Some(coverage),
         authored_emission: false,
+        emission_proposal: None,
         atlas_lookup: true,
         bounds: None,
     }));
@@ -794,16 +918,16 @@ mod tests {
         assert_eq!(&page.pixels[16..20], &[255, 255, 1, 255]);
     }
     #[test]
-    fn missing_and_sentinel_emission_preserve_host_while_zero_authors_off() {
+    fn missing_sentinel_and_complete_zero_emission_preserve_host() {
         let sprite = sprite();
-        for (alpha, expected) in [(None, None), (Some(255), None), (Some(0), Some(0.))] {
+        for (alpha, expected) in [(None, None), (Some(255), None), (Some(0), None)] {
             let material =
                 Material::from_images(&sprite, None, alpha.map(|a| image(1, 1, vec![0, 0, 0, a])));
             assert_eq!(material.emission_maximum(), expected);
         }
     }
     #[test]
-    fn vanilla_zero_policy_reuses_whole_sheet_maximum_without_changing_authored_inputs() {
+    fn complete_zero_inherits_host_but_a_positive_later_frame_retains_texture_mask() {
         let sprite = sprite();
         let prepare = |green: u8| {
             Material::from_internal_images(
@@ -815,8 +939,8 @@ mod tests {
             )
         };
         let internal_zero = prepare(0);
-        assert_eq!(internal_zero.emission_maximum(), Some(0.));
-        assert!(internal_zero.image(&sprite, 0, 0, 0.).authored_emission);
+        assert_eq!(internal_zero.emission_maximum(), None);
+        assert!(!internal_zero.image(&sprite, 0, 0, 0.).authored_emission);
         let vanilla_zero = internal_zero.inherit_host_emission_when_zero();
         assert_eq!(vanilla_zero.emission_maximum(), None);
         assert!(!vanilla_zero.image(&sprite, 0, 0, 0.).authored_emission);
@@ -825,9 +949,67 @@ mod tests {
         assert!(later_frame_emits.image(&sprite, 0, 0, 0.).authored_emission);
         let external_zero =
             Material::from_images(&sprite, None, Some(image(1, 1, vec![0, 4, 0, 0])));
-        assert_eq!(external_zero.emission_maximum(), Some(0.));
-        assert!(external_zero.image(&sprite, 0, 0, 0.).authored_emission);
+        assert_eq!(external_zero.emission_maximum(), None);
+        assert!(!external_zero.image(&sprite, 0, 0, 0.).authored_emission);
     }
+    #[test]
+    fn emission_power_uses_declared_durations_and_actual_uv_area_with_shared_proposal() {
+        let mut sprite = sprite();
+        sprite.frames = vec![(0, 1), (1, 3)];
+        let mut pixels = [0, 0, 80, 0].repeat(8);
+        pixels[1] = 64;
+        pixels[17] = 192;
+        let mut material =
+            Material::from_internal_images(&sprite, None, image(2, 4, pixels), None, false);
+        material
+            .prepare_emission(&sprite, &SourceScene::default())
+            .unwrap();
+        let positions = [[0., 0., 0.], [1., 0., 0.], [1., 1., 0.], [0., 1., 0.]];
+        let full_uv = [[0., 0.], [1., 0.], [1., 1.], [0., 1.]];
+        let crop_uv = full_uv.map(|uv| uv.map(|v| v * 0.5));
+        // Duration-weighted bright G = 160/255, with a quarter of the face emitting.
+        assert_eq!(
+            material.texture_power_gain(full_uv, positions, 0, 0.5),
+            3.1875
+        );
+        assert_eq!(
+            material.texture_power_gain(crop_uv, positions, 0, 0.5),
+            0.796875
+        );
+        assert_eq!(material.texture_power_gain(full_uv, positions, 0, 0.), 0.);
+        let a = material.image(&sprite, 0, 1, 0.);
+        let b = material.image(&sprite, 1, 0, 0.5);
+        assert!(Arc::ptr_eq(
+            a.emission_proposal.as_ref().unwrap(),
+            b.emission_proposal.as_ref().unwrap()
+        ));
+        assert_eq!(a.specular.as_ref().unwrap().pixels[5], 0);
+    }
+    #[test]
+    fn high_resolution_emission_keeps_a_constant_size_whole_source_power_reference() {
+        let mut sprite = sprite();
+        sprite.extent = [65, 65];
+        sprite.images = vec![image(65, 65, vec![255; 65 * 65 * 4])];
+        sprite.frames.clear();
+        let mut pixels = [0, 0, 80, 0].repeat(65 * 65);
+        for y in 0..65 {
+            pixels[y * 65 * 4 + 1] = 255;
+        }
+        let mut material =
+            Material::from_internal_images(&sprite, None, image(65, 65, pixels), None, false);
+        material
+            .prepare_emission(&sprite, &SourceScene::default())
+            .unwrap();
+        assert_eq!(material.emission_moments.as_ref().unwrap().extent, [1, 1]);
+        let positions = [[0., 0., 0.], [1., 0., 0.], [1., 1., 0.], [0., 1., 0.]];
+        let uv = [[0., 0.], [1., 0.], [1., 1.], [0., 1.]];
+        assert_eq!(material.texture_power_gain(uv, positions, 0, 0.5), 32.5);
+        assert_eq!(
+            material.texture_power_gain(uv.map(|p| p.map(|v| v / 65.)), positions, 0, 0.5),
+            32.5
+        );
+    }
+
     #[test]
     fn all_lab_codes_translate_without_gpu_categories_or_unused_channels() {
         for value in 0..=255 {

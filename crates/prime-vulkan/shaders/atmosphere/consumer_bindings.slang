@@ -1,12 +1,13 @@
 // Included only by shader entries. Library functions receive AtmEnvironment explicitly.
 import "atmosphere/view.slang";
+import "render_lighting_controls.slang";
 [[vk::binding(0, 1)]] StructuredBuffer<AtmFrame> atmosphereFrames;
 [[vk::binding(1, 1)]] Sampler2D<float4> atmosphereSky;
 [[vk::binding(2, 1)]] Sampler2D<float4> atmosphereTransmittance;
 [[vk::binding(3, 1)]] Sampler3D<float4> atmosphereAerialRadiance;
 [[vk::binding(4, 1)]] Sampler3D<float4> atmosphereAerialTransmittance;
 [[vk::binding(5, 1)]] Sampler2D<float4> atmosphereStars;
-[[vk::binding(6, 1)]] ConstantBuffer<float4> atmosphereStarControls;
+[[vk::binding(6, 1)]] ConstantBuffer<RenderLightingControls> renderLightingControls;
 AtmEnvironment atmosphereEnvironment() {
     return {atmosphereFrames,
             atmosphereSky,
@@ -14,5 +15,5 @@ AtmEnvironment atmosphereEnvironment() {
             atmosphereAerialRadiance,
             atmosphereAerialTransmittance,
             atmosphereStars,
-            atmosphereStarControls};
+            renderLightingControls.stars};
 }

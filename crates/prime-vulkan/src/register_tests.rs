@@ -102,6 +102,7 @@ fn distribution_fixture(details: &mut File) -> Option<(Scene, Camera)> {
             Emission {
                 radiance: [row[11] as f32; 3],
                 two_sided: row[13] == 1.,
+                texture_gain: 0.0,
                 textured: false,
             },
         );

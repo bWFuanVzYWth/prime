@@ -2,18 +2,6 @@
   "schema": 1,
   "enabled_atlases": ["blocks", "items"],
   "forced_matches": {
-    "minecraft:block/water_still": {
-      "source": "textures/blocks/water_still_grey",
-      "frame": 0,
-      "projection": "frame-index",
-      "reason": "Both pinned water sheets have 32 matching-layout frames. Preserve sequential normal-wave motion instead of nearest-RGB repeated/skipped frames; water roughness is independently artist-calibrated in the final MERS PNG."
-    },
-    "minecraft:block/water_flow": {
-      "source": "textures/blocks/water_flow_grey",
-      "frame": 0,
-      "projection": "frame-index",
-      "reason": "Both pinned water sheets have 32 matching-layout frames. Preserve sequential normal-wave motion instead of nearest-RGB repeated/skipped frames; water roughness is independently artist-calibrated in the final MERS PNG."
-    },
     "minecraft:block/lightning_rod_on": {
       "source": "textures/blocks/lightning_rod_powered",
       "frame": 0,
@@ -32,7 +20,10 @@
       "reason": "RGB hidden texels/normalized small-feature collision; real conduit wind source visible RGB is equal. Align 64x32 source frames with the Java 22-frame layout."
     }
   },
-  "exclude_java": {},
+  "exclude_java": {
+    "minecraft:block/water_still": "User artistic choice: omit embedded vanilla water roughness and normals; retain host Color/alpha/animation and native water optical IOR with default smooth geometric surface.",
+    "minecraft:block/water_flow": "User artistic choice: omit embedded vanilla water roughness and normals; retain host Color/alpha/animation and native water optical IOR with default smooth geometric surface."
+  },
   "exclude_bedrock": {},
   "source_frame_extent": {
     "textures/blocks/conduit_wind_horizontal": {"extent": [64, 32], "reason": "Pinned source 64x704 and Java height32 metadata; all 22 same-index source/Java frames have identical visible RGB"},

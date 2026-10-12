@@ -6,6 +6,7 @@ import "math/rigid_motion.slang";
 __exported import "model/material/canonical.slang";
 import "model/material/medium.slang";
 import "service/material/normal_mapping.slang";
+import "emission_alias.slang";
 
 // Vulkan pipeline specialization removes unused record/light paths before GPU execution.
 // Test entry points use the complete semantics by default.
@@ -75,6 +76,7 @@ public struct TraceScene {
     public StructuredBuffer<uint> texels;
     public StructuredBuffer<InstanceMaterial> instanceMaterials;
     public StructuredBuffer<TrianglePage> staticTrianglePages;
+    public float2 emissionSettings; // Native/texture power mix, global 2^EV amplitude.
 };
 public struct SurfaceHit {
     public bool found;
@@ -85,6 +87,7 @@ public struct SurfaceHit {
     public float4 sourceColor;
     public float3 emission;
     public uint light;
+    public float emitterAreaPdf;
     public float4 incident;
     public float4 transmitted;
     public bool optical;
@@ -261,17 +264,21 @@ float3 mappedNormal(SurfaceRecord record, SourceSample source, float3 geometric,
     float3 normal = primeDecodeCanonicalNormal(sample).tangentNormal;
     return normalize(tangent * normal.x + bitangent * normal.y + geometric * normal.z);
 }
-float3 sourceEmissionResolved(SurfaceRecord record, SourceSample source, bool front,
-                              uint materialFlags, float emissionSample) {
+float3 sourceEmissionResolved(TraceScene resources, SurfaceRecord record, SourceSample source,
+                              bool front, uint materialFlags, float emissionSample) {
     if ((record.triangle.flags & 4u) != 0u)
         return decodeSrgb(saturate(source.color.rgb));
     if (!front && (record.identity.w & 2) == 0)
         return float3(0);
     if ((materialFlags & 4) != 0) {
         float value = saturate(emissionSample);
-        return decodeSrgb(saturate(source.color.rgb)) * (1.5 * value);
+        float gain = record.emission.a > 0.0
+                             ? lerp(1.0, record.emission.a, resources.emissionSettings.x)
+                             : 1.0;
+        return decodeSrgb(saturate(source.color.rgb)) *
+               (1.5 * value * gain * resources.emissionSettings.y);
     }
-    return record.emission.rgb *
+    return record.emission.rgb * resources.emissionSettings.y *
            ((record.identity.w & 16) != 0 ? decodeSrgb(saturate(source.color.rgb)) : float3(1));
 }
 public float3 sourceEmission(TraceScene resources, SurfaceRecord record, SourceSample source,
@@ -285,7 +292,8 @@ public float3 sourceEmission(TraceScene resources, SurfaceRecord record, SourceS
     float emissionSample = (material.maps.z & 4) != 0
                                    ? sampleMaterial(resources, material.maps.y, material.uv, 0.0).g
                                    : 0.0;
-    return sourceEmissionResolved(record, source, front, material.maps.z, emissionSample);
+    return sourceEmissionResolved(resources, record, source, front, material.maps.z,
+                                  emissionSample);
 }
 public float3 sourceEmissionAtHit(TraceScene resources, SurfaceRecord record, SourceSample source,
                                   float2 bary, bool front, float emissionSample) {
@@ -306,7 +314,7 @@ public float3 sourceEmissionAtHit(TraceScene resources, SurfaceRecord record, So
         if (usesColor)
             source.color = sourceSample(resources, record, bary, 0.0).color;
     }
-    return sourceEmissionResolved(record, source, front, flags, emissionSample);
+    return sourceEmissionResolved(resources, record, source, front, flags, emissionSample);
 }
 public SurfaceRecord loadQuad(uint *base, uint format, uint primitive) {
     uint words = surfaceFeatures < 2 ? 44 + format * 16
@@ -418,7 +426,7 @@ public SurfaceRecord secondary(SurfaceRecord base) {
     base.identity.w = data[26] | (base.identity.w & 224);
     base.uvU = ((float4 *)data)[7];
     base.uvV = ((float4 *)data)[8];
-    base.emission.rgb = ((float4 *)data)[9].rgb;
+    base.emission = ((float4 *)data)[9];
     return base;
 }
 public SurfaceRecord boundaryIors(TraceScene resources, SurfaceRecord record, float2 bary,
@@ -552,6 +560,10 @@ public SurfaceHit resolveSurfaceHit(TraceScene resources, SurfaceRecord record, 
                         ? resources.staticTrianglePages[instance + geometry].firstEmitter +
                                   record.identity.z
                         : 0xffffffffu;
+    if (hit.light != 0xffffffffu) {
+        LightTree tree = *((LightTree *)resources.staticTrianglePages[0].lightGrid);
+        hit.emitterAreaPdf = emitterAreaDensity(tree, hit.light, material.uv);
+    }
     hit.incident = front ? record.positive : record.negative;
     hit.transmitted = front ? record.negative : record.positive;
     hit.physicalFront = front;

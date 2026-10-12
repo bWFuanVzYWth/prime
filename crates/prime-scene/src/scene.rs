@@ -32,6 +32,8 @@ pub struct Texture {
 }
 #[derive(Clone, Debug, Default)]
 pub struct TextureMaterial {
+    /// CPU-only fixed all-animation emission support, shared by descriptor-only ticks.
+    pub emission_proposal: Option<Arc<crate::EmissionProposal>>,
     /// Internal RGBA8 Aux: biased tangent XY, distribution perceptual roughness, IOR.
     pub normal: Option<Texture>,
     /// Internal RGBA8 MERS: metalness, emission, perceptual roughness, thin SSS weight.
@@ -75,7 +77,7 @@ impl Texture {
                 .flat_map(|s| s.levels.iter().map(|m| &m.pixels)),
         )
     }
-    pub fn backings(&self) -> impl Iterator<Item = &Arc<[u8]>> {
+    pub fn pixel_backings(&self) -> impl Iterator<Item = &Arc<[u8]>> {
         self.color_backings()
             .chain(self.material.iter().flat_map(|m| {
                 m.normal
@@ -84,6 +86,15 @@ impl Texture {
                     .chain(&m.coverage)
                     .flat_map(Self::color_backings)
             }))
+    }
+    /// All retained source bytes, including CPU-only emission support. GPU upload consumers
+    /// use pixel_backings so the envelope is never uploaded as an image.
+    pub fn backings(&self) -> impl Iterator<Item = &Arc<[u8]>> {
+        self.pixel_backings().chain(
+            self.material
+                .iter()
+                .filter_map(|m| m.emission_proposal.as_ref().map(|p| p.backing())),
+        )
     }
     /// Same ordered immutable pixel allocations, independent of view/material metadata.
     /// A false result may still contain the same unique allocations in a different order.
@@ -117,6 +128,11 @@ impl Texture {
                             _ => false,
                         };
                         a.has_normal == b.has_normal
+                            && match (&a.emission_proposal, &b.emission_proposal) {
+                                (None, None) => true,
+                                (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+                                _ => false,
+                            }
                             && a.authored_emission == b.authored_emission
                             && a.atlas_lookup == b.atlas_lookup
                             && a.bounds == b.bounds
@@ -207,6 +223,13 @@ impl Texture {
             }
         }
         if let Some(material) = &self.material {
+            if material
+                .emission_proposal
+                .as_ref()
+                .is_some_and(|p| !p.valid_extent([r[2], r[3]]))
+            {
+                return Err("invalid emission proposal extent".into());
+            }
             if material.has_normal && material.normal.is_none()
                 || material.authored_emission && material.specular.is_none()
                 || material.atlas_lookup && material.coverage.is_none()

@@ -21,6 +21,7 @@ import "restir/rng.slang";
 import "restir/identity.slang";
 __exported import "restir/types.slang";
 import "tree_sampling.slang";
+import "emission_alias.slang";
 
 public static const uint RESTIR_LIGHT_SKY = 0;
 public static const uint RESTIR_LIGHT_EMISSIVE = 1;
@@ -117,10 +118,10 @@ public SurfaceHit restirLoadEmitter(RestirScene scene, HitInfo identity, float3 
         record = secondary(record);
         record.identity.w &= ~128u;
     }
-    hit.emission = sourceEmission(scene.resources, record,
-                                  sourceSample(scene.resources, record, identity.barycentrics(), 0),
-                                  front);
+    SourceSample source = sourceSample(scene.resources, record, identity.barycentrics(), 0);
+    hit.emission = sourceEmission(scene.resources, record, source, front);
     hit.light = page.first + (primitive >> 1);
+    hit.emitterAreaPdf = emitterAreaDensity(tree, hit.light, source.material.uv);
     hit.incident = front ? record.positive : record.negative;
     hit.transmitted = front ? record.negative : record.positive;
     hit.physicalFront = front;
@@ -319,6 +320,63 @@ public void restirSkipLightSample(inout SampleGenerator sg) {
     sampleNext4D(sg);
     sampleNext2D(sg);
 }
+// Shared actual local-emitter consumer, independent of the atmosphere/LUT handles.
+// The caller has already consumed the fixed seven random dimensions and the local PMF.
+public RestirLightSample restirSampleLocalLight(TraceScene resources, SurfaceHit receiver,
+                                                float3 view, float4 medium, uint coverageSeed,
+                                                float4 selectors, float2 sample,
+                                                float localProbability) {
+    RestirLightSample result = {};
+    result.hit = HitInfo();
+    LightSample light =
+            sampleLocalLight(resources, selectors, sample, coverageSeed, receiver.surface.position);
+    if (!light.valid)
+        return result;
+    float3 delta = light.surface.position - receiver.surface.position;
+    float distanceSquared = dot(delta, delta);
+    if (!(distanceSquared > 0))
+        return result;
+    result.direction = delta * rsqrt(distanceSquared);
+    float cosine = light.twoSided ? abs(dot(light.surface.normal, -result.direction))
+                                  : max(0.0, dot(light.surface.normal, -result.direction));
+    result.geometry = cosine / distanceSquared;
+    float4 shadowMedium = receiver.optical && !receiver.thin &&
+                                          dot(receiver.surface.normal, result.direction) *
+                                                          dot(receiver.surface.normal, view) <
+                                                  0
+                                  ? receiver.transmitted
+                                  : medium;
+    // RA-009, docs/restir-adaptations.md: preserve the actual sampled half/barycentrics
+    // and stable material quad slot, without reinterpreting a lamp ordinal as geometry.
+    LightTree tree = *((LightTree *)resources.staticTrianglePages[0].lightGrid);
+    TreePage page = tree.pages[light.page];
+    uint words = page.format == 3 ? 108 : (page.format == 2 ? 68 : 60);
+    uint hitPage = page.reserved != 0u ? page.reserved - 1u : RESTIR_EMITTER_PAGE | light.page;
+    uint hitQuad = page.reserved != 0u ? page.emitters[light.emitter * words + 7u] : light.emitter;
+    result.hit = HitInfo(hitPage, 2 * hitQuad + light.half, light.bary);
+    uint selectedMaterial;
+    SurfaceRecord record = loadQuad(page.emitters + light.emitter * words, page.format, light.half);
+    selectMaterial(resources, record, dot(light.surface.normal, -result.direction) >= 0,
+                   result.hit.barycentrics(), light.surface.position, coverageSeed,
+                   selectedMaterial);
+    result.hit.data.x |= selectedMaterial << 24;
+    float pdf;
+    result.Le = linear709ToWorking(light.radiance);
+    SurfacePoint shadowReceiver = receiver.surface;
+    if (dot(shadowReceiver.normal, view) < 0)
+        shadowReceiver.normal = -shadowReceiver.normal;
+    float3 attenuated = evaluateLocalLight(resources, shadowReceiver, light, coverageSeed,
+                                           shadowMedium, receiver.optical, pdf);
+    // RA-013: shared local evaluation now returns working radiance; its RGB
+    // attenuation must not be multiplied in 709 before the color conversion.
+    result.visibility = float3(result.Le.x > 0 ? attenuated.x / result.Le.x : 1,
+                               result.Le.y > 0 ? attenuated.y / result.Le.y : 1,
+                               result.Le.z > 0 ? attenuated.z / result.Le.z : 1);
+    result.pdf = pdf * localProbability;
+    result.type = RESTIR_LIGHT_EMISSIVE;
+    return result;
+}
+
 public RestirLightSample restirSampleLight(RestirScene scene, SurfaceHit receiver, float3 view,
                                            float4 medium, uint coverageSeed,
                                            inout SampleGenerator sg) {
@@ -329,59 +387,8 @@ public RestirLightSample restirSampleLight(RestirScene scene, SurfaceHit receive
     result.hit = HitInfo();
     float localProbability = restirLocalSelectionProbability(scene);
     if (selector < localProbability) {
-        LightSample light = sampleLocalLight(scene.resources, selectors, sample, coverageSeed,
-                                             receiver.surface.position);
-        if (!light.valid)
-            return result;
-        float3 delta = light.surface.position - receiver.surface.position;
-        float distanceSquared = dot(delta, delta);
-        if (!(distanceSquared > 0))
-            return result;
-        result.direction = delta * rsqrt(distanceSquared);
-        float cosine = light.twoSided ? abs(dot(light.surface.normal, -result.direction))
-                                      : max(0.0, dot(light.surface.normal, -result.direction));
-        result.geometry = cosine / distanceSquared;
-        float4 shadowMedium = receiver.optical && !receiver.thin &&
-                                              dot(receiver.surface.normal, result.direction) *
-                                                              dot(receiver.surface.normal, view) <
-                                                      0
-                                      ? receiver.transmitted
-                                      : medium;
-        float pdf;
-        result.Le = linear709ToWorking(light.radiance);
-        SurfacePoint shadowReceiver = receiver.surface;
-        if (dot(shadowReceiver.normal, view) < 0)
-            shadowReceiver.normal = -shadowReceiver.normal;
-        float3 attenuated = evaluateLocalLight(scene.resources, shadowReceiver, light, coverageSeed,
-                                               shadowMedium, receiver.optical, pdf);
-        // RA-013: shared local evaluation now returns working radiance; its RGB
-        // attenuation must not be multiplied in 709 before the color conversion.
-        result.visibility = float3(result.Le.x > 0 ? attenuated.x / result.Le.x : 1,
-                                   result.Le.y > 0 ? attenuated.y / result.Le.y : 1,
-                                   result.Le.z > 0 ? attenuated.z / result.Le.z : 1);
-        result.pdf = pdf * localProbability;
-        result.type = RESTIR_LIGHT_EMISSIVE;
-        // RA-009, docs/restir-adaptations.md: preserve the actual sampled half/barycentrics
-        // and stable material quad slot, without reinterpreting a lamp ordinal as geometry.
-        LightTree tree = *((LightTree *)scene.resources.staticTrianglePages[0].lightGrid);
-        TreePage page = tree.pages[light.page];
-        uint words = page.format == 3 ? 108 : (page.format == 2 ? 68 : 60);
-        float fraction = asfloat(page.emitters[light.emitter * words + 3]);
-        bool first = fraction == 1.0 || sample.x < fraction;
-        float u = first ? sample.x / fraction : (sample.x - fraction) / (1.0 - fraction);
-        float root = sqrt(u);
-        uint hitPage = page.reserved != 0u ? page.reserved - 1u : RESTIR_EMITTER_PAGE | light.page;
-        uint hitQuad =
-                page.reserved != 0u ? page.emitters[light.emitter * words + 7u] : light.emitter;
-        result.hit = HitInfo(hitPage, 2 * hitQuad + uint(!first),
-                             float2(root * (1.0 - sample.y), root * sample.y));
-        uint selectedMaterial;
-        SurfaceRecord record =
-                loadQuad(page.emitters + light.emitter * words, page.format, uint(!first));
-        selectMaterial(scene.resources, record, dot(light.surface.normal, -result.direction) >= 0,
-                       result.hit.barycentrics(), light.surface.position, coverageSeed,
-                       selectedMaterial);
-        result.hit.data.x |= selectedMaterial << 24;
+        return restirSampleLocalLight(scene.resources, receiver, view, medium, coverageSeed,
+                                      selectors, sample, localProbability);
     } else {
         result.direction = atmSampleSun(scene.environment, sample);
         // RA-008/010, docs/restir-adaptations.md: reject unsupported sun NEE before

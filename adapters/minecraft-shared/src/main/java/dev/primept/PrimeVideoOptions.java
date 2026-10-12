@@ -55,11 +55,12 @@ public final class PrimeVideoOptions {
                     if (toggle)
                         return Component.translatable(value == 0 ? "options.off" : "options.on");
                     String formatted = switch (control) {
-                        case SUN_EV, SKY_EV, EXPOSURE_EV ->
+                        case SUN_EV, SKY_EV, BLOCK_EMISSION_EV, EXPOSURE_EV ->
                             String.format(Locale.ROOT, "%+.2f EV", value / 4.0);
                         case LATITUDE, SOLAR_LONGITUDE -> value + "°";
                         case ATMOSPHERE_ALTITUDE_OFFSET -> value + " m";
-                        case HUE, SATURATION, COMPRESSION_START, STARS, AUTO_EXPOSURE ->
+                        case HUE, SATURATION, COMPRESSION_START, STARS, AUTO_EXPOSURE,
+                                EMISSION_POWER_MIX ->
                             value + "%";
                         case HDR_WHITE ->
                             value == 0 ? Component.translatable("primept.settings.automatic")
@@ -147,6 +148,8 @@ public final class PrimeVideoOptions {
         list.addHeader(Component.translatable("primept.settings.lighting"));
         list.addBig(controls.get(Control.SUN_EV));
         list.addBig(controls.get(Control.SKY_EV));
+        list.addBig(controls.get(Control.EMISSION_POWER_MIX));
+        list.addBig(controls.get(Control.BLOCK_EMISSION_EV));
         list.addBig(controls.get(Control.STARS));
         list.addBig(controls.get(Control.LATITUDE));
         list.addBig(controls.get(Control.SOLAR_LONGITUDE));
@@ -246,8 +249,9 @@ public final class PrimeVideoOptions {
         list.findOption(dlssQuality).active = PrimeClient.controlsAvailable() && !frozen &&
                                               !PrimeClient.settings().nativeNoisyOutput();
         for (var control :
-             List.of(Control.BOUNCES, Control.SUN_EV, Control.SKY_EV, Control.STARS,
-                     Control.LATITUDE, Control.SOLAR_LONGITUDE, Control.ATMOSPHERE_ALTITUDE_OFFSET))
+             List.of(Control.BOUNCES, Control.SUN_EV, Control.SKY_EV, Control.EMISSION_POWER_MIX,
+                     Control.BLOCK_EMISSION_EV, Control.STARS, Control.LATITUDE,
+                     Control.SOLAR_LONGITUDE, Control.ATMOSPHERE_ALTITUDE_OFFSET))
             list.findOption(controls.get(control)).active = !frozen;
         list.findOption(view).active = !frozen;
         list.findOption(controls.get(Control.DEPTH_RANGE)).active = !frozen;

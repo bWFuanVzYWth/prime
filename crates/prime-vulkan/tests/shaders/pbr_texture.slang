@@ -16,7 +16,12 @@ import "math/ray_offset.slang";
     uint i = id.x;
     if (i >= config.y)
         return;
-    TraceScene resources = {acceleration, textures, texels, instanceMaterials, staticTrianglePages};
+    TraceScene resources = {acceleration,        textures,        texels, instanceMaterials,
+                            staticTrianglePages, float2(0.0, 1.0)};
+    uint testFlags = inputs[i * 4 + 3].y;
+    uint encodedEV = testFlags >> 16;
+    float ev = encodedEV == 0u ? 0.0 : float(int(encodedEV) - 128);
+    resources.emissionSettings = float2(asfloat(inputs[i * 4 + 3].w), exp2(ev));
     // Exercise the actual fixture AS through ray query. A bare acceleration descriptor would
     // otherwise imply RayTracingKHR instead of this device's enabled RayQueryKHR contract.
     RayDesc ray = {float3(-1.0, -1.0, 1.0), 0.0, float3(0.0, 0.0, -1.0), 2.0};
@@ -43,11 +48,11 @@ import "math/ray_offset.slang";
     record.triangle.uv01 = float4(uv, uv + float2(1.0, 0.0));
     record.triangle.uv2 = uv + float2(0.0, 1.0);
     record.triangle.texture = control.x;
-    record.triangle.flags = 0u;
-    record.identity = uint4(inputs[i * 4 + 2].w, 0u, 0xffffffffu, inputs[i * 4 + 3].y);
+    record.triangle.flags = (testFlags & 256u) != 0u ? 4u : 0u;
+    record.identity = uint4(inputs[i * 4 + 2].w, 0u, 0xffffffffu, testFlags & 255u);
     record.positiveIorTexture = inputs[i * 4 + 3].x;
     record.materialControl = 0u; // Synthetic material query has no CPU source topology proof.
-    record.emission = float4(asfloat(inputs[i * 4 + 2]).xyz, 0.0);
+    record.emission = float4(asfloat(inputs[i * 4 + 2]).xyz, asfloat(inputs[i * 4 + 3].z));
     record.negative = float4(1.5, 0.1, 0.2, 0.3);
     record.positive = float4(1.333, 0.4, 0.5, 0.6);
     SourceSample source = sourceSample(resources, record, float2(0.0), 0.0);

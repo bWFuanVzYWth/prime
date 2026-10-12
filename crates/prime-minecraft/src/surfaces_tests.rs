@@ -2,7 +2,7 @@ use super::*;
 use crate::model::{Catalog, Model};
 
 #[test]
-fn authored_labpbr_emission_enters_the_ordinary_model_light_path_and_replaces_host_levels() {
+fn labpbr_and_host_emission_follow_the_or_rule_in_the_model_light_path() {
     let state = State {
         id: 1,
         model: 1,
@@ -11,7 +11,8 @@ fn authored_labpbr_emission_enters_the_ordinary_model_light_path_and_replaces_ho
     for (alpha, level, expected) in [
         (254, 0, 1.5),
         (127, 15, 1.5 * (128.0f32 / 255.0)),
-        (0, 15, 0.0),
+        (0, 15, 1.5),
+        (0, 0, 0.0),
         (255, 15, 1.5),
     ] {
         let mut q = face();

@@ -26,7 +26,7 @@ import "ray_query.slang";
     float3 origin = normalize(f.sun.xyz) * plane +
                     f.shadowU.xyz * ((float(world.x) + 0.5) * texelSize) +
                     f.shadowV.xyz * ((float(world.y) + 0.5) * texelSize);
-    TraceScene scene = {acceleration, textures, texels, materials, pages};
+    TraceScene scene = {acceleration, textures, texels, materials, pages, float2(0.5, 1.0)};
     float distance = traceBlockerDistance(scene, origin, -normalize(f.sun.xyz), 8192.0);
     float depth = distance < 8192.0 ? plane - distance : -1e20;
     cells[index] = uint4(cell.x, asuint(world.x), asuint(world.y), asuint(depth));

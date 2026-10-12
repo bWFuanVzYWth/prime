@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from zipfile import ZipFile
 
 import numpy as np
 from PIL import Image
@@ -13,6 +14,9 @@ from PIL import Image
 SPEC = importlib.util.spec_from_file_location("vanilla_pbr_import", Path(__file__).with_name("import-vanilla-pbr.py"))
 IMPORTER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(IMPORTER)
+REVIEW_SPEC=importlib.util.spec_from_file_location("vanilla_pbr_review",Path(__file__).with_name("vanilla_pbr_review.py"))
+REVIEW=importlib.util.module_from_spec(REVIEW_SPEC)
+REVIEW_SPEC.loader.exec_module(REVIEW)
 
 
 def pattern():
@@ -214,6 +218,45 @@ class MaterialPngTests(unittest.TestCase):
             report["summary"]["versions"]["26.3"]["textures"]=2
             (output/"matching-report.json").write_text(json.dumps(report),encoding="utf-8")
             with self.assertRaisesRegex(ValueError,"Incomplete Java inventory"):IMPORTER.verify_assets(output)
+
+
+class ReviewEvidenceTests(unittest.TestCase):
+    def test_review_does_not_collapse_version_specific_visible_pixel_difference(self):
+        pair={"rgb_exact":True,"visible_rgb_exact":True,"mers_mode":"RGB","mers_extent":[16,16],
+              "rgb_different_pixels":0,"visible_rgb_different_pixels":0,"rgb_different_pixel_examples":[]}
+        row={"category":"missing-texture-set","logical_candidates":[],"raw_same_name_colors":["source.png"],"raw_pair_evidence":[pair]}
+        exact=REVIEW.review_evidence(row)
+        pair.update(rgb_exact=False,visible_rgb_exact=False,rgb_different_pixels=1,visible_rgb_different_pixels=1,rgb_different_pixel_examples=[[6,0]])
+        differing=REVIEW.review_evidence(row)
+        self.assertNotEqual(exact,differing)
+        self.assertIn("True/可见一致=True",exact)
+        self.assertIn("False/可见一致=False",differing)
+        self.assertIn("[[6, 0]]",differing)
+
+    def test_crop_proof_preserves_explicit_uv_and_ignores_only_invisible_rgb(self):
+        source_image=Image.new("RGBA",(32,32),(0,0,0,255))
+        patch=pattern().crop((0,0,8,8));source_image.paste(patch,(4,4))
+        target_image=Image.new("RGBA",(16,16),(255,0,255,0));target_image.paste(patch,(4,5))
+        proof=REVIEW.crop_proof(target_image,source_image,[[4,5,12,13]])
+        self.assertEqual(proof["target_pixel_rect"],[4,5,12,13])
+        self.assertEqual(proof["source_transformed_pixel_rect"],[4,4,12,12])
+        self.assertEqual(proof["visible_pixel_coverage"],1.)
+        self.assertEqual(proof["rgb_rmse"],0)
+        target_image.putpixel((4,5),(250,240,230,255))
+        self.assertIsNone(REVIEW.crop_proof(target_image,source_image,[[4,5,12,13]]))
+
+    def test_model_evidence_resolves_inherited_dict_sprite_and_item_tint(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/"client.jar"
+            with ZipFile(path,"w") as jar:
+                jar.writestr("assets/minecraft/models/block/root.json",json.dumps({"textures":{"all":{"sprite":"minecraft:block/example","force_translucent":True}},"elements":[{"faces":{"north":{"uv":[4,5,12,13],"texture":"#all"}}}]}))
+                jar.writestr("assets/minecraft/models/block/child.json",json.dumps({"parent":"minecraft:block/root"}))
+                jar.writestr("assets/minecraft/items/example.json",json.dumps({"model":{"type":"minecraft:model","model":"minecraft:block/child","tints":[{"type":"minecraft:constant","value":42}]}}))
+            with ZipFile(path) as jar:
+                evidence=REVIEW.Models(jar).evidence("minecraft:block/example")
+            self.assertEqual(evidence["model_count"],2)
+            self.assertEqual(evidence["uv_regions"],[[4,5,12,13]])
+            self.assertEqual(evidence["item_definitions"][0]["tints"][0]["value"],42)
 
 
 if __name__ == "__main__":

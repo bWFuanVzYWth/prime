@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 pub mod compiled;
+pub mod emission_alias;
 pub mod environment;
 pub mod extent;
 pub mod geometry;
@@ -18,6 +19,7 @@ mod texture_lifetime;
 pub mod translation;
 pub mod workers;
 
+pub use emission_alias::EmissionProposal;
 pub use scene::{
     Camera, Instance, InstanceScene, Prototype, Scene, SceneMesh, SourceScene, Texture,
     TextureLevel, TextureMaterial, TextureSampling, Triangle,

@@ -11,6 +11,7 @@ fn main() {
         "intersection",
         "display",
         "emitter_sampling",
+        "emission_alias",
         "light_tree",
         "optics",
         "texture",

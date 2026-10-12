@@ -11,6 +11,10 @@ Bedrock set with reasons. [matching-report.json](matching-report.json) retains b
 complete literal PNG inventories, separate generated palette sprite IDs, accepted
 candidates, metric values, conflicts and source decisions. These inventories do
 not claim to enumerate all sprites a mod can generate at runtime.
+[unmatched-review.md](unmatched-review.md) separates the eligible matching gaps by
+actual source declarations, version differences, UV/crop evidence, tint/structure
+differences and rejected metric gates. Its [machine report](unmatched-review.json)
+retains each ID, concrete candidates, model UV regions and exact crop probes.
 
 ## Reachability and matching
 
@@ -74,10 +78,13 @@ All material PNGs are 8-bit RGBA, consumed as linear data bytes without ICC/gamm
 conversion. MERS channels are R metalness, G emission, B perceptual roughness and
 A subsurface. All four filter continuously. MERS alpha is data: retain RGB at A=0,
 never premultiply or clear invisible RGB on export. PNG zero bytes remain zero;
-for this embedded vanilla preset only, a complete sheet with G=0 inherits native
-block/fluid emission rather than disabling it. Any nonzero frame retains authored
-emission and its local dark texels. External Lab and generic internal E=0 still
-explicitly disable native emission; the importer does not invent emission bytes.
+the Minecraft translation layer lets a complete source with G=0 inherit native
+block/fluid emission, for both embedded presets and external Lab materials. Any
+nonzero frame retains authored emission and its local dark texels. When native and
+texture emission coexist, power mixing defaults to 50% while retaining the texture
+pattern; see the [emission contract](../../../../docs/materials.md#发光与介质).
+The generic Scene interface retains its explicit authored-emission semantics.
+The importer does not invent emission bytes.
 
 Generated layers apply Bedrock's
 [metal/subsurface winner rule](https://learn.microsoft.com/en-us/minecraft/creator/reference/content/texturesetsreference/texturesetsconcepts/texturesetsintroduction?view=minecraft-bedrock-stable):
@@ -89,7 +96,7 @@ four-channel MERS contract. Original files, modes and hashes remain recorded.
 Auxiliary channels are R/G tangent normal XY, B GGX distribution roughness and
 A IOR encoded as `1 + 1.5*A/255`. XY uses biased signed bytes, with 128 as zero.
 Absent auxiliary uses `[128,128,0,85]` (IOR 1.5). The authored-normal flag is separate:
-without it, geometric normals remain authoritative. The four authored source
+without it, geometric normals remain authoritative. The two retained lava source
 normals are [DirectX normals](https://www.nvidia.com/en-us/geforce/guides/minecraft-rtx-texturing-guide/).
 Their XYZ vectors are normalized and green sign retained: Prime's bitangent follows
 positive texture V/image-down, confirmed with the production normal-mapping shader.
@@ -104,11 +111,12 @@ frame is fixed, later frames use nearest visible RGB with equal-index duplicate
 ties, and a static source repeats. This projection is an explicit approximation;
 the host controls animation timing and visibility.
 
-Water still/flow use explicit same-index frame projection to keep their normal
-waves continuous. Their final MERS PNG B is artist-edited to zero for a clear near
-mirror boundary, with normal directions and distant normal-mip variance retained.
-Regeneration preserves and reports these edits; `--replace-art` restores the
-official roughness baseline, so it also reverses this water calibration.
+Vanilla water still/flow are explicitly excluded in the import policy as an
+artistic choice. They have no embedded MERS/Aux pages: the native smooth optical
+surface uses geometric normals and water IOR, retaining actual host Color, alpha
+and animation. External authored LabPBR water remains independent and takes
+precedence. Regeneration retains this exclusion; `--replace-art` does not re-enable
+it. This choice does not claim to reproduce Bedrock's original water appearance.
 
 ## Reproduce and edit
 
@@ -122,6 +130,12 @@ python scripts/import-vanilla-pbr.py C:\WorkSpace\_ref\bedrock-samples `
 python scripts/import-vanilla-pbr.py --check
 python -m unittest scripts/test_import_vanilla_pbr.py
 ```
+
+With the same source/JAR arguments, add `--review-unmatched` to regenerate the
+diagnostic review only. It does not add matches or change registry/PNG data.
+Logical aliases are investigation candidates, and exact RGB crop proof applies
+only to the specified visible pixels/UV region. Accepting a new material proxy,
+or building and validating a complete UV repack, is a separate explicit decision.
 
 Use `--output artifacts/vanilla-pbr-generated` for a separate review baseline and
 `--policy <file>` for correction policies. Generation verifies the pinned reference

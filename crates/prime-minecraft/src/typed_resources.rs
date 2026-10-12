@@ -215,6 +215,7 @@ impl TerrainContext {
         for sprite in sprites.values_mut() {
             if let Some(mut material) = sprite.material.take() {
                 material.prepare_color(sprite, &staging)?;
+                material.prepare_emission(sprite, &staging)?;
                 sprite.material = Some(material);
             }
         }

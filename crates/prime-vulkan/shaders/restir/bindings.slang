@@ -17,9 +17,15 @@ import "restir/scene.slang";
 RestirScene restirScene(bool previous = false) {
     RestirScene result;
 #if defined(PRIME_RESTIR_MATERIAL_ONLY)
-    result.resources = {textures, texels, instanceMaterials, staticTrianglePages};
+    result.resources = {textures, texels, instanceMaterials, staticTrianglePages,
+                        renderLightingControls.emission.xy};
 #else
-    result.resources = {scene, textures, texels, instanceMaterials, staticTrianglePages};
+    result.resources = {scene,
+                        textures,
+                        texels,
+                        instanceMaterials,
+                        staticTrianglePages,
+                        renderLightingControls.emission.xy};
 #endif
     result.environment = atmosphereEnvironment();
     result.energy = {transmissionEnergy};

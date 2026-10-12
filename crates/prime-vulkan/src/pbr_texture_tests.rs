@@ -359,6 +359,96 @@ fn gpu_canonical_atlas_shared_color_override_keeps_original_coverage() {
 }
 
 #[test]
+#[ignore = "requires Vulkan; actual hit/source emission OR, power mix and independent EV"]
+fn gpu_canonical_emission_power_mix_and_ev_preserve_masks_and_single_source_rules() {
+    let context = Context::new().unwrap();
+    let scene = fixture();
+    let geometry = geometry(&context, &scene);
+    let check = |id: u32,
+                 uv: [f32; 2],
+                 host: [f32; 3],
+                 gain: f32,
+                 mix: f32,
+                 ev: i32,
+                 unlit: bool,
+                 expected: [f32; 3]| {
+        for lod in [0.0f32, 3.0] {
+            let input = [
+                [
+                    geometry.textures().index(id).unwrap(),
+                    uv[0].to_bits(),
+                    uv[1].to_bits(),
+                    lod.to_bits(),
+                ],
+                [0.2f32, 0.4, 0.6, 1.0].map(f32::to_bits),
+                [host[0].to_bits(), host[1].to_bits(), host[2].to_bits(), 0],
+                [
+                    0,
+                    16 | (u32::from(unlit) << 8) | (((ev + 128) as u32) << 16),
+                    gain.to_bits(),
+                    mix.to_bits(),
+                ],
+            ]
+            .concat();
+            let actual = run(
+                &context,
+                prime_shader_tests::pbr_texture(),
+                &input,
+                48,
+                [0, 1],
+                Some(&geometry),
+            );
+            for channel in 0..3 {
+                close(
+                    f32::from_bits(actual[16 + channel]),
+                    expected[channel],
+                    "source emission mix/EV",
+                );
+                close(
+                    f32::from_bits(actual[40 + channel]),
+                    expected[channel],
+                    "actual hit emission mix/EV",
+                );
+            }
+        }
+    };
+    let color = [0.2f32, 0.4, 0.6].map(decode);
+    for mix in [0.0f32, 0.5, 1.0] {
+        for ev in [-1, 0, 1] {
+            let scale = 2.0f32.powi(ev);
+            let both = color.map(|c| c * 1.5 * (1.0 + 3.0 * mix) * scale);
+            check(20, [0.75, 0.25], [8., 9., 10.], 4., mix, ev, false, both);
+            check(1, [0.375, 0.25], [8., 9., 10.], 4., mix, ev, false, both);
+            check(
+                20,
+                [0.75, 0.25],
+                [0.; 3],
+                0.,
+                mix,
+                ev,
+                false,
+                color.map(|c| c * 1.5 * scale),
+            );
+            check(
+                90,
+                [0.75, 0.25],
+                [8., 9., 10.],
+                0.,
+                mix,
+                ev,
+                false,
+                std::array::from_fn(|i| color[i] * [8., 9., 10.][i] * scale),
+            );
+            check(90, [0.75, 0.25], [0.; 3], 0., mix, ev, false, [0.; 3]);
+            // A source with some positive G retains its individual dark texels at every mix.
+            check(20, [0.25, 0.25], [8., 9., 10.], 4., mix, ev, false, [0.; 3]);
+            // World text/unlit color is independent of physical emitter controls.
+            check(20, [0.75, 0.25], [8., 9., 10.], 4., mix, ev, true, color);
+        }
+    }
+}
+
+#[test]
 #[ignore = "requires Vulkan; zero embedded emission inherits textured host radiance with MERS retained"]
 fn gpu_canonical_zero_emission_page_can_inherit_host_emission_at_all_lods() {
     let context = Context::new().unwrap();

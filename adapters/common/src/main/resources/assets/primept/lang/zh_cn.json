@@ -135,5 +135,9 @@
   "primept.settings.restir_pt.rr_bias_reduction": "限制新样本权重",
   "primept.settings.restir_pt.rr_bias_reduction.tooltip": "限制新样本输出权重，减少异常亮点，默认开启。该近似不保证输出无偏。",
   "primept.settings.restir_pt.rr_firefly": "高亮样本保护",
-  "primept.settings.restir_pt.rr_firefly.tooltip": "启用可能强制使用新样本输出的高亮判定，默认开启。"
+  "primept.settings.restir_pt.rr_firefly.tooltip": "启用可能强制使用新样本输出的高亮判定，默认开启。",
+  "primept.settings.lighting.emission_power_mix_percent": "发光功率校准",
+  "primept.settings.lighting.emission_power_mix_percent.tooltip": "纹理与方块两路都发光时混合功率：0% 保留纹理功率，100% 按方块发光校准。默认 50%，保留纹理图案，也适用于外部 LabPBR；仅一路发光时保留该来源。冻结期间固定。",
+  "primept.settings.lighting.block_emission_ev_quarters": "方块发光强度",
+  "primept.settings.lighting.block_emission_ev_quarters.tooltip": "方块与材质发光的曝光调整：-10 至 +10 EV，步长 0.25，默认 0；每增加 1 EV 强度翻倍。独立于太阳、天空和未照明文字。冻结期间固定。"
 }

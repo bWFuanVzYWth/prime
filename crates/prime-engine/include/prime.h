@@ -1,7 +1,7 @@
 #ifndef PRIME_PT_H
 #define PRIME_PT_H
 #include <stdint.h>
-#define PRIME_ABI_VERSION 19
+#define PRIME_ABI_VERSION 20
 #define PRIME_MAX_BATCH_BYTES 268435456
 #define PRIME_DIAGNOSTICS_ENABLED 1
 #define PRIME_DIAGNOSTICS_CAPTURE 2
@@ -141,6 +141,12 @@ typedef struct PrimeSettings {
     /* Physical atmosphere altitude at world Y=-64, in metres; default 500, range 0..10000.
        Changes atmospheric density and scattering only, independent of water/fog semantics. */
     uint32_t atmosphere_altitude_offset_meters;
+    /* Blend texture-authored and host block emission power only when both emit.
+       0 preserves texture power, 1 matches block power; default 0.5, range 0..1. */
+    float emission_power_mix;
+    /* Independent block/material emission exposure, in EV; default 0, range -10..10.
+       Scales emission by 2^EV; excludes sun, sky and unlit text. */
+    float block_emission_ev;
 } PrimeSettings;
 
 typedef struct PrimeVulkanHost {

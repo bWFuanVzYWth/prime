@@ -663,6 +663,8 @@ impl Renderer {
         let lighting_changed = settings.astronomy != self.settings.astronomy
             || settings.sun != self.settings.sun
             || settings.sky != self.settings.sky
+            || settings.emission_power_mix != self.settings.emission_power_mix
+            || settings.block_emission_ev != self.settings.block_emission_ev
             || settings.stars != self.settings.stars;
         if self.failed || self.pending_temporal_serial != 0 {
             return Err("Cannot configure a failed renderer".into());
@@ -1259,10 +1261,14 @@ impl Renderer {
             0.025 * self.settings.stars,
             0.0,
         ];
-        self.atmosphere.as_mut().unwrap().set_starmap(
+        self.atmosphere.as_mut().unwrap().set_lighting_controls(
             slot,
             self.starmap.as_ref(),
             star_controls,
+            [
+                self.settings.emission_power_mix,
+                self.settings.block_emission_ev.exp2(),
+            ],
         )?;
         self.atmosphere.as_mut().unwrap().prepare(
             self.environment,

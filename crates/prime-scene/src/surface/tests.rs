@@ -190,6 +190,7 @@ fn disconnected_resolved_rectangle_edits_preserve_optics_and_all_layer_maps() {
                         face.emission = Emission {
                             radiance: [2., 1., 0.5],
                             two_sided: true,
+                            texture_gain: 0.0,
                             textured: true,
                         };
                         face.detail = Some(Arc::new(SurfaceDetail {
@@ -204,6 +205,7 @@ fn disconnected_resolved_rectangle_edits_preserve_optics_and_all_layer_maps() {
                                 emission: Emission {
                                     radiance: [0.125, 0.25, 0.5],
                                     two_sided: false,
+                                    texture_gain: 0.0,
                                     textured: true,
                                 },
                             },
@@ -722,10 +724,121 @@ fn only_explicit_relationships_remove_interfaces_or_duplicate_triangles() {
 }
 
 #[test]
+fn primary_emission_gain_distinguishes_adjacent_merge_labels() {
+    let mut a = quad(0., 0.);
+    a.emission = Emission {
+        radiance: [1.5; 3],
+        texture_gain: 0.25,
+        textured: true,
+        two_sided: true,
+    };
+    let mut b = quad(1., 0.);
+    b.emission = a.emission;
+    assert_eq!(
+        SurfaceCompiler::new()
+            .compile(1, &[a.clone(), b.clone()])
+            .unwrap()
+            .quads
+            .len(),
+        1
+    );
+    b.emission.texture_gain = 0.5;
+    let output = SurfaceCompiler::new().compile(2, &[a, b]).unwrap();
+    assert_eq!(
+        output.quads.len(),
+        2,
+        "same proposal RGB must not merge different actual emission gains"
+    );
+    let mut gains: Vec<_> = output
+        .quads
+        .iter()
+        .map(|f| f.emission.texture_gain)
+        .collect();
+    gains.sort_by(f32::total_cmp);
+    assert_eq!(gains, [0.25, 0.5]);
+}
+
+#[test]
+fn emission_gain_distinguishes_producer_declared_duplicates() {
+    let mut a = quad(0., 0.);
+    a.rule = SurfaceRule::Duplicate(9);
+    a.emission = Emission {
+        radiance: [1.5; 3],
+        texture_gain: 0.25,
+        textured: true,
+        two_sided: true,
+    };
+    let mut b = a.clone();
+    b.provenance.source += 1;
+    let same = SurfaceCompiler::new()
+        .compile(1, &[a.clone(), b.clone()])
+        .unwrap();
+    assert_eq!((same.quads.len(), same.stats.removed_duplicates), (1, 1));
+    b.emission.texture_gain = 0.5;
+    let different = SurfaceCompiler::new().compile(2, &[a, b]).unwrap();
+    assert_eq!(
+        (different.quads.len(), different.stats.removed_duplicates),
+        (2, 0),
+        "a declared duplicate group cannot replace a distinct actual emitted gain"
+    );
+}
+
+#[test]
+fn secondary_emission_gain_distinguishes_resolved_merge_labels() {
+    let mut a = SurfaceFace::from_quad(quad(0., 0.).geometry);
+    a.detail = Some(Arc::new(SurfaceDetail {
+        mode: LayerMode::Bilateral,
+        layer: SurfaceLayer {
+            colors: a.geometry.colors,
+            uvs: a.geometry.uvs,
+            texture_id: 77,
+            flags: 0,
+            material_thin: false,
+            repeat: None,
+            emission: Emission {
+                radiance: [1.5; 3],
+                texture_gain: 0.25,
+                textured: true,
+                two_sided: true,
+            },
+        },
+    }));
+    let mut b = a.clone();
+    for p in &mut b.geometry.positions {
+        p[0] += 1.;
+    }
+    assert_eq!(
+        SurfaceCompiler::new()
+            .merge_resolved(vec![a.clone(), b.clone()])
+            .unwrap()
+            .len(),
+        1
+    );
+    Arc::make_mut(b.detail.as_mut().unwrap())
+        .layer
+        .emission
+        .texture_gain = 0.5;
+    let output = SurfaceCompiler::new().merge_resolved(vec![a, b]).unwrap();
+    assert_eq!(
+        output.len(),
+        2,
+        "secondary coating gain is part of its actual shading identity"
+    );
+    let mut gains: Vec<_> = output
+        .iter()
+        .map(|f| f.detail.as_ref().unwrap().layer.emission.texture_gain)
+        .collect();
+    gains.sort_by(f32::total_cmp);
+    assert_eq!(gains, [0.25, 0.5]);
+}
+
+#[test]
 fn lights_are_built_from_final_geometry_and_forward_reverse_pdfs_agree() {
     let mut input: Vec<_> = (0..8).map(|x| quad(x as f32, 0.0)).collect();
     for q in &mut input {
         q.emission = Emission {
+            texture_gain: 0.0,
+
             textured: false,
             radiance: [2.0; 3],
             two_sided: true,

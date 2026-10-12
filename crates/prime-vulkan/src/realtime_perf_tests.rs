@@ -30,6 +30,7 @@ fn fixtures() -> Vec<(&'static str, Scene)> {
     receiver.emission = Emission {
         radiance: [0.1, 0.2, 0.3],
         two_sided: true,
+        texture_gain: 0.0,
         textured: false,
     };
     let glass = Medium {

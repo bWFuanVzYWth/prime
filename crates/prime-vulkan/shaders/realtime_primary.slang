@@ -17,7 +17,12 @@ import "realtime/primary_environment.slang";
 [shader("compute")][numthreads(8, 8, 1)] void main(uint3 id : SV_DispatchThreadID) {
     if (any(id.xy >= parameters.sampling.xy))
         return;
-    TraceScene resources = {scene, textures, texels, instanceMaterials, staticTrianglePages};
+    TraceScene resources = {scene,
+                            textures,
+                            texels,
+                            instanceMaterials,
+                            staticTrianglePages,
+                            renderLightingControls.emission.xy};
     PrimaryEnvironment environment = {atmosphereLighting(), parameters.right.w, parameters.up.w,
                                       false};
     primeTracePrimary(resources, environment, parameters, id.xy, NoPrimaryGuides());

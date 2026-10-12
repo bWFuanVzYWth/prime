@@ -8,6 +8,7 @@ mod column_cache;
 mod compile;
 mod compile_queue;
 mod contact;
+mod emission;
 pub mod environment;
 mod fluid;
 mod labpbr;

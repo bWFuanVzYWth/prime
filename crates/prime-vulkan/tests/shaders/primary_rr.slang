@@ -43,7 +43,8 @@ public struct TestEnvironment : IPrimaryEnvironment {
     // Complete test readback initialization also when this specialization has FG disabled.
     visibleDepth[id.xy] = 0.0;
     visibleMotion[id.xy] = float2(0.0);
-    TraceScene resources = {scene, textures, texels, instanceMaterials, staticTrianglePages};
+    TraceScene resources = {
+            scene, textures, texels, instanceMaterials, staticTrianglePages, float2(0.0, 1.0)};
     PrimaryRrGuides guides = {linearDepth,
                               motionVectors,
                               normalRoughness,

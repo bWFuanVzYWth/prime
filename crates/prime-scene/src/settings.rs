@@ -64,6 +64,10 @@ pub struct RenderSettings {
     pub view: DiagnosticView,
     pub sun: f32,
     pub sky: f32,
+    /// Host/texture emission power blend, only used when both sources emit.
+    pub emission_power_mix: f32,
+    /// Independent block/material emissive exposure in EV; excludes environment and unlit text.
+    pub block_emission_ev: f32,
     pub depth_range: f32,
     pub seed: u32,
     pub opacity_micromap: bool,
@@ -98,6 +102,8 @@ impl Default for RenderSettings {
             view: DiagnosticView::Output,
             sun: 1.0,
             sky: 1.0,
+            emission_power_mix: 0.5,
+            block_emission_ev: 0.0,
             depth_range: 128.0,
             seed: 0x1357_2468,
             opacity_micromap: true,
@@ -153,6 +159,8 @@ impl RenderSettings {
             },
             sun: f32::from_bits(word(32)),
             sky: f32::from_bits(word(36)),
+            emission_power_mix: 0.5,
+            block_emission_ev: 0.0,
             depth_range: f32::from_bits(word(40)),
             seed: word(44),
             opacity_micromap: match word(56) {
@@ -238,6 +246,8 @@ impl RenderSettings {
             },
             sun: s.sun,
             sky: s.sky,
+            emission_power_mix: s.emission_power_mix,
+            block_emission_ev: s.block_emission_ev,
             depth_range: s.depth_range,
             seed: s.seed,
             opacity_micromap: match s.opacity_micromap {
@@ -309,6 +319,8 @@ impl RenderSettings {
             || !(0.0..=0.99).contains(&self.compression_start)
             || !(1.0 / 256.0..=256.0).contains(&self.sun)
             || !(1.0 / 256.0..=256.0).contains(&self.sky)
+            || !(0.0..=1.0).contains(&self.emission_power_mix)
+            || !(-10.0..=10.0).contains(&self.block_emission_ev)
             || !(1.0..=4096.0).contains(&self.depth_range)
             || !(0.0..=4.0).contains(&self.stars)
             || !(0.0..=1.0).contains(&self.auto_exposure_compensation)
@@ -326,6 +338,8 @@ impl RenderSettings {
             && self.atmosphere_altitude_offset_meters == other.atmosphere_altitude_offset_meters
             && self.sun == other.sun
             && self.sky == other.sky
+            && self.emission_power_mix == other.emission_power_mix
+            && self.block_emission_ev == other.block_emission_ev
             && self.stars == other.stars
             && self.seed == other.seed
             && self.light_sampling == other.light_sampling
@@ -335,6 +349,50 @@ impl RenderSettings {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn emission_controls_have_independent_ranges_and_transport_invalidation() {
+        let defaults = RenderSettings::default();
+        assert_eq!(defaults.emission_power_mix, 0.5);
+        assert_eq!(defaults.block_emission_ev, 0.0);
+        for mix in [0.0, 0.375, 0.5, 1.0] {
+            let changed = RenderSettings {
+                emission_power_mix: mix,
+                ..defaults
+            };
+            assert!(changed.validate().is_ok());
+            assert_eq!(changed.transport_matches(defaults), mix == 0.5);
+            assert_eq!((changed.sun, changed.sky), (defaults.sun, defaults.sky));
+        }
+        for ev in [-10.0, -3.25, 0.0, 10.0] {
+            let changed = RenderSettings {
+                block_emission_ev: ev,
+                ..defaults
+            };
+            assert!(changed.validate().is_ok());
+            assert_eq!(changed.transport_matches(defaults), ev == 0.0);
+            assert_eq!(changed.emission_power_mix, 0.5);
+        }
+        for invalid in [-0.01, 1.01, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            assert!(
+                RenderSettings {
+                    emission_power_mix: invalid,
+                    ..defaults
+                }
+                .validate()
+                .is_err()
+            );
+        }
+        for invalid in [-10.01, 10.01, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            assert!(
+                RenderSettings {
+                    block_emission_ev: invalid,
+                    ..defaults
+                }
+                .validate()
+                .is_err()
+            );
+        }
+    }
     fn golden() -> Vec<u8> {
         [
             12_u32,
@@ -584,6 +642,8 @@ mod tests {
             restir_rr_bias_reduction: 1,
             restir_rr_firefly: 1,
             atmosphere_altitude_offset_meters: defaults.atmosphere_altitude_offset_meters,
+            emission_power_mix: defaults.emission_power_mix,
+            block_emission_ev: defaults.block_emission_ev,
         };
         for (word, method) in [
             (0, LightSampling::Tree),

@@ -71,6 +71,8 @@ fn typed_settings_distinct_fields_and_boolean_basis_detect_misrouting() {
         restir_rr_bias_reduction: 1,
         restir_rr_firefly: 0,
         atmosphere_altitude_offset_meters: 5317,
+        emission_power_mix: 0.375,
+        block_emission_ev: -3.25,
     };
     // Expected semantics are specified separately from the decoder. Unequal values expose
     // swapped/dropped float and count fields; boolean basis cases distinguish equal bit values.
@@ -80,6 +82,8 @@ fn typed_settings_distinct_fields_and_boolean_basis_detect_misrouting() {
             solar_longitude_degrees: 121,
         },
         atmosphere_altitude_offset_meters: 5317,
+        emission_power_mix: 0.375,
+        block_emission_ev: -3.25,
         mode: RenderMode::Offline,
         integrator: Integrator::RestirPt,
         bounces: 7,
@@ -558,6 +562,8 @@ fn named_frame_and_settings_validate_semantics_without_a_wire_roundtrip() {
         restir_rr_bias_reduction: 1,
         restir_rr_firefly: 1,
         atmosphere_altitude_offset_meters: 500,
+        emission_power_mix: 0.5,
+        block_emission_ev: 0.0,
     };
     assert_eq!(
         RenderSettings::from_abi(&settings).unwrap(),

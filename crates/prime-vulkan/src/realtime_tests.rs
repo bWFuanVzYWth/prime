@@ -71,6 +71,7 @@ pub(super) fn scene(revision: u64, faces: Vec<SurfaceFace>) -> Scene {
 fn emission(radiance: [f32; 3]) -> Emission {
     Emission {
         radiance,
+        texture_gain: 0.0,
         two_sided: true,
         textured: false,
     }

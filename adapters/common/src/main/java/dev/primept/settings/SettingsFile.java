@@ -9,7 +9,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Properties;
 
-/** Schema 15 restores the physical atmosphere altitude offset without changing saved controls. */
+/** Schema 16 adds independent emission power blending and exposure controls. */
 public final class SettingsFile {
     public record Loaded(RenderSettings settings, String resetReason) {}
     private SettingsFile() {}
@@ -40,6 +40,7 @@ public final class SettingsFile {
             boolean legacyReconstruction = version <= 9;
             boolean beforeSpatialDiagnostic = version <= 10;
             boolean legacyAltitude = version <= 14;
+            boolean legacyEmission = version <= 15;
             var renderer = RenderSettings.Renderer.fromKey(
                     properties.getProperty(legacyRenderer ? "renderer" : "realtime_renderer"));
             if (!legacyRenderer && renderer == RenderSettings.Renderer.VANILLA)
@@ -97,6 +98,12 @@ public final class SettingsFile {
                                 : legacyAltitude && control == RenderSettings.Control
                                                                        .ATMOSPHERE_ALTITUDE_OFFSET
                                         ? "500"
+                                : legacyEmission &&
+                                                control == RenderSettings.Control.EMISSION_POWER_MIX
+                                        ? "50"
+                                : legacyEmission &&
+                                                control == RenderSettings.Control.BLOCK_EMISSION_EV
+                                        ? "0"
                                         : null)));
             return new Loaded(result, "");
         } catch (IOException | IllegalArgumentException | NullPointerException failure) {

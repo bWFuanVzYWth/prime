@@ -52,6 +52,7 @@ pub(crate) fn upload_lights(
     context: &Arc<Context>,
     mesh: &SurfaceMesh,
     textures: &BTreeMap<u32, u32>,
+    source_textures: &BTreeMap<u32, prime_scene::Texture>,
     key: u64,
 ) -> Result<Option<LightPage>, String> {
     if mesh.lights.emitters.is_empty() {
@@ -71,7 +72,12 @@ pub(crate) fn upload_lights(
         .unwrap_or(1)
         .max(1);
     let stride = crate::packing::stride(format);
+    let distance =
+        crate::light_distance_cpu::Tree::local(&mesh.lights.nodes, &mesh.lights.emitters)?;
+    let mut node_bytes = crate::light_distance_cpu::node_bytes(&distance.nodes);
     let mut bytes = Vec::with_capacity(mesh.lights.emitters.len() * stride);
+    let mut alias_count = 0u64;
+    let mut alias_bytes = 0u64;
     for emitter in &mesh.lights.emitters {
         let face = &mesh.quads[emitter.quad as usize];
         let mut record = crate::packing::encode(face, format, None, None, textures)?;
@@ -79,15 +85,38 @@ pub(crate) fn upload_lights(
         record[12..16].copy_from_slice(&emitter.first_fraction.to_le_bytes());
         // The second corner's unused w lane carries the physical quad mapping.
         record[28..32].copy_from_slice(&emitter.quad.to_le_bytes());
+        // Emitter-only p2.w holds a relative word offset in the existing local node owner.
+        // Geometry and packed material records retain their existing interpretation.
+        if let Some(proposal) = source_textures
+            .get(&face.geometry.texture_id)
+            .and_then(|t| t.material.as_ref())
+            .filter(|m| !m.atlas_lookup)
+            .and_then(|m| m.emission_proposal.as_ref())
+            && let Some(table) = prime_scene::emission_alias::EmitterAlias::build(face, proposal)
+        {
+            let offset = u32::try_from(node_bytes.len() / 4)
+                .map_err(|_| "Emission alias offset overflow")?;
+            record[44..48].copy_from_slice(&offset.to_le_bytes());
+            alias_count += 1;
+            alias_bytes += table.words.len() as u64 * 4;
+            node_bytes.extend(table.words.into_iter().flat_map(u32::to_le_bytes));
+        }
         bytes.extend_from_slice(&record[..stride]);
     }
     encode_trace.count("bytes", bytes.len() as u64);
     encode_trace.count("fmt", format as u64);
+    encode_trace.count("alias", alias_count);
+    encode_trace.count("alias_bytes", alias_bytes);
     encode_trace.succeed();
     drop(encode_trace);
     let usage = vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS;
     let emitters = Arc::new(Buffer::upload_device(context, &bytes, usage)?);
-    let (inverse_areas, tree) = sampler(context, &mesh.lights)?;
+    let inverse_areas = mesh.lights.emitters.iter().map(|e| 1. / e.area).collect();
+    let tree = TreePage {
+        nodes: Buffer::upload_device(context, &node_bytes, usage)?,
+        root: mesh.lights.nodes[0],
+        paths: distance.paths,
+    };
     page_trace.succeed();
     Ok(Some(LightPage {
         key,
@@ -99,31 +128,4 @@ pub(crate) fn upload_lights(
         tree,
         format: format as u32,
     }))
-}
-
-fn sampler(
-    context: &Arc<Context>,
-    source: &prime_scene::surface::LightTree,
-) -> Result<(Vec<f32>, TreePage), String> {
-    let inverse_areas = {
-        let _area_trace = prime_diagnostics::scope("light.areas");
-        source
-            .emitters
-            .iter()
-            .map(|emitter| 1.0 / emitter.area)
-            .collect()
-    };
-    let mut trace = prime_diagnostics::scope("lt.local");
-    trace.fail();
-    let distance = crate::light_distance_cpu::Tree::local(&source.nodes, &source.emitters)?;
-    let bytes = crate::light_distance_cpu::node_bytes(&distance.nodes);
-    trace.count("nodes", distance.nodes.len() as u64);
-    trace.count("bytes", bytes.len() as u64);
-    let tree = TreePage {
-        nodes: Buffer::upload_device(context, &bytes, vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS)?,
-        root: source.nodes[0],
-        paths: distance.paths,
-    };
-    trace.succeed();
-    Ok((inverse_areas, tree))
 }
