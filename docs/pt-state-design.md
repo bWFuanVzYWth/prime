@@ -90,6 +90,10 @@ CPU 证明必须说明生产者、覆盖域、未知情况和失效路径。当�
 
 LabPBR SSS强度在CPU翻译为内部0..255薄壁权重，资源准备对完整确定性源建立薄片证明；所有动画帧的SSS能力复用已有源像素扫描，只有证明薄片且可能含SSS的简单quad转入rich表面。主/第二层证明使用现有word43的两个bit，176/240/272/432B记录stride、上传容量、描述符和GPU退休合同不变；每次实际保留该字段的`loadQuad`新增4B逻辑读取，真实事务及寄存器成本未测。资源更新重算CPU证明，未知/厚体按普通opaque消费；不新增纹理副本、全图状态、pass、队列或GPU等待。CPU rich记录的容量与实际整帧成本另行测量，不由删Lite和厚SSS分支推断加速。
 
+薄SSS反射保持补偿在生产窄适配与guide消费当前线性working RGB时局部推导，复用Full已有的subsurface颜色与anisotropy参数；共享Color和32B顶点不保存derivedSSSColor。仅有效正S分支需要maxRGB规约、标量乘/max/除法及RGB乘法，anisotropy固定为`-1/3`；普通diffuse、零S、厚回退和通用Full直接参数API保持原合同。没有新增纹理采样、CPU源扫描、ABI字段、持久记录、pass、队列或等待，也不把派生颜色的生命周期扩过射线查询。这是用户接受的外观改变，公式与cap边界见[材质合同](materials.md)，接受依据见[H-002](../HACK.md#h-002)。
+
+该补偿增加局部算术；derivedSSSColor与gain可能增加Full准备/guide中的临时活跃值，不能仅因复用参数字段就宣称没有寄存器成本。提高派生albedo和改变事件proposal会改变beta、roulette存活率及实际路径长度/射线数分布；没有新增query类型或pass不表示射线成本不变。是否常量折叠、复用或重算以及peak-live、驱动分配和整帧成本须以实际产物和用户的原生1080p测量确认。行为验收需覆盖零S等价、未cap/近白cap、分数S与M、PT/guide一致、sample/evaluate/PDF/MIS和厚回退；未执行的新增补偿检查不视为已通过。无需为此引入跨查询缓存，若局部重复推导成为实测瓶颈，再比较缓存与重算的完整成本。
+
 ## 必须保持的语义与可复用简化
 
 物理介质端点来自选择着色涂层之前的原边界；selected shading material 决定表面 BSDF。physical thin 与 material thin 的用途不同，不能合并成一个未经证明的分类。有限灯的 BSDF 方向基于原表面位置，阴影 segment 使用两端安全偏移后的点；改变其中一条方向不能顺带改变另一条。

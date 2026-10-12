@@ -954,8 +954,8 @@ fn pbr_spirv_bindings_match_full_production_and_fixtures() {
 }
 
 #[test]
-#[ignore = "requires Vulkan; actual HALF4 LUT plus retained full-model constructor oracle"]
-fn gpu_full_openpbr_narrow_constructors_preserve_legacy_math() {
+#[ignore = "requires Vulkan; actual HALF4 LUT plus independent full-model parameter oracle"]
+fn gpu_full_openpbr_narrow_constructors_match_explicit_generic_parameters() {
     let mut cases = Vec::new();
     for kind in 0..4u32 {
         for roughness in [0.0, 1e-8, 0.009999, 0.01, 0.010001, 0.2, 0.5, 1.0] {
@@ -1190,5 +1190,256 @@ fn gpu_full_thin_sss_lobes_match_colored_two_hemisphere_cosine_oracle() {
     assert!(
         reflection > 40 && transmission > 40,
         "both actual hemispheres sampled"
+    );
+}
+
+#[test]
+#[ignore = "requires Vulkan; production thin SSS reflection, transmission, hue cap, complete PDF and RR guide energy"]
+fn gpu_pt_thin_sss_preserves_front_response_and_capped_energy_with_complete_pdf() {
+    let colors = [
+        [0.0f32, 0.0, 0.0],
+        [0.12, 0.36, 0.06],
+        [0.4, 0.6, 0.2],
+        [2.0 / 3.0, 0.25, 0.05],
+        [0.9, 0.3, 0.1],
+        [0.999, 0.75, 0.3],
+        [0.0, 0.8, 0.0],
+        [1.0, 1.0, 1.0],
+    ];
+    let mut cases = Vec::new();
+    for color in colors {
+        for s in [0, 128, 255] {
+            for ior in [0, 85, 255] {
+                for cosine in [1.0, 0.6, 0.05] {
+                    for sample in 0..128 {
+                        let mut case = source_case([0; 4], 2 | 4, false);
+                        case[0] = rgba([128, 128, 0, ior]);
+                        case[1] = rgba([0, 0, 128, s]);
+                        case[4..8].copy_from_slice(&bits([color[0], color[1], color[2], 0.0]));
+                        case[8..12].copy_from_slice(&bits(direction(cosine, 0.7)));
+                        case[12..16].copy_from_slice(&bits(random(sample)));
+                        case[24..28].copy_from_slice(&bits(direction(0.7, 1.2)));
+                        cases.push(case);
+                    }
+                }
+            }
+        }
+    }
+    let results = execute(16, &cases);
+    let mut reflected = 0;
+    let mut transmitted = 0;
+    let mut capped = 0;
+    let mut maximum_energy = 0.0f64;
+    let mut maximum_sample_eval_error = 0.0f32;
+    for (case, words) in cases.iter().zip(results) {
+        let v = words.map(f32::from_bits);
+        let color: [f32; 3] = std::array::from_fn(|channel| f32::from_bits(case[4 + channel]));
+        let peak = color.iter().copied().fold(0.0f32, f32::max);
+        let weight = f64::from(case[1].to_le_bytes()[3]) / 255.0;
+        // Independent reference: no production derived-color helper is called by the oracle.
+        let gain = if f64::from(peak) > 2.0 / 3.0 {
+            1.0 / f64::from(peak)
+        } else {
+            1.5
+        };
+        let front_weight = 1.0 - weight + weight * gain * (2.0 / 3.0);
+        let back_weight = weight * gain / 3.0;
+        let total_weight = 1.0 - weight + weight * gain;
+        let scatter_cosine = f64::from(f32::from_bits(case[26]));
+        let uncapped = peak <= 2.0f32 / 3.0;
+        if !uncapped && weight > 0.0 {
+            capped += 1;
+        }
+        close(v[35], weight as f32, 2e-7, "canonical 8-bit SSS weight");
+        for channel in 0..3 {
+            let c = f64::from(color[channel]);
+            let tr = f64::from(v[60 + channel]);
+            let expected_color = c * if weight > 0.0 { gain } else { 1.0 };
+            close(
+                v[40 + channel],
+                expected_color as f32,
+                3e-6,
+                "preserved-hue SSS color",
+            );
+            assert!(v[40 + channel] <= 1.0 + 2e-6);
+            close(
+                v[channel],
+                (f64::from(v[8 + channel]) + (front_weight - 1.0) * f64::from(v[44 + channel]))
+                    as f32,
+                4e-6,
+                "front response including unchanged specular layer",
+            );
+            close(
+                v[4 + channel],
+                (c * tr * back_weight * scatter_cosine / std::f64::consts::PI) as f32,
+                3e-6,
+                "back diffuse transmission response",
+            );
+            if uncapped {
+                close(
+                    v[channel],
+                    v[8 + channel],
+                    3e-6,
+                    "uncapped front equals SSS zero",
+                );
+                close(
+                    v[4 + channel],
+                    (c * tr * weight * 0.5 * scatter_cosine / std::f64::consts::PI) as f32,
+                    3e-6,
+                    "uncapped back preserves the former half-color transmission",
+                );
+            }
+            if weight > 0.0 {
+                close(
+                    v[48 + channel],
+                    (c * gain * (2.0 / 3.0) * scatter_cosine / std::f64::consts::PI) as f32,
+                    3e-6,
+                    "isolated parameterized SSS reflection",
+                );
+                close(
+                    v[52 + channel],
+                    (c * gain / 3.0 * scatter_cosine / std::f64::consts::PI) as f32,
+                    3e-6,
+                    "isolated parameterized SSS transmission",
+                );
+            }
+            close(
+                v[32 + channel],
+                (c * total_weight * tr) as f32,
+                4e-6,
+                "ALL directional diffuse energy",
+            );
+            close(
+                v[24 + channel],
+                v[32 + channel],
+                4e-6,
+                "RR diffuse guide matches ALL energy",
+            );
+            close(
+                v[28 + channel],
+                v[36 + channel],
+                4e-6,
+                "RR specular guide matches ALL energy",
+            );
+            let energy = f64::from(v[32 + channel]) + f64::from(v[36 + channel]);
+            assert!(
+                energy >= 0.0 && energy <= 1.0 + 3e-6,
+                "non-passive energy {energy}"
+            );
+            maximum_energy = maximum_energy.max(energy);
+        }
+        if weight > 0.0 {
+            close(v[43], -1.0 / 3.0, 2e-7, "source SSS anisotropy");
+            close(
+                v[51],
+                2.0 / 3.0,
+                2e-7,
+                "SSS reflection proposal probability",
+            );
+            close(
+                v[55],
+                1.0 / 3.0,
+                2e-7,
+                "SSS transmission proposal probability",
+            );
+        }
+        let q = if weight == 1.0 {
+            1.0
+        } else if peak == 0.0 {
+            0.0
+        } else {
+            weight * gain / total_weight
+        };
+        close(
+            v[39],
+            q as f32,
+            3e-6,
+            "energy-weighted diffuse/SSS proposal",
+        );
+        let diffuse_weight = color
+            .iter()
+            .enumerate()
+            .map(|(channel, c)| f64::from(*c) * total_weight * f64::from(v[60 + channel]))
+            .sum::<f64>()
+            / 3.0;
+        let specular_weight = v[36..39].iter().copied().map(f64::from).sum::<f64>() / 3.0;
+        let proposal_total = diffuse_weight + specular_weight;
+        let base_probability = if proposal_total > 0.0 {
+            diffuse_weight / proposal_total
+        } else {
+            0.0
+        };
+        let specular_probability = if proposal_total > 0.0 {
+            specular_weight / proposal_total
+        } else {
+            0.0
+        };
+        close(
+            v[27],
+            base_probability as f32,
+            3e-6,
+            "base layer proposal energy",
+        );
+        close(
+            v[31],
+            specular_probability as f32,
+            3e-6,
+            "specular layer proposal energy",
+        );
+        let flags = words[15];
+        if flags == 0 {
+            continue;
+        }
+        assert_eq!(
+            flags & 16,
+            0,
+            "this broad-roughness fixture has no discrete measure"
+        );
+        if flags & 2 != 0 {
+            transmitted += 1;
+            assert!(weight > 0.0 && v[14] < 0.0);
+        } else {
+            reflected += 1;
+            assert!(v[14] > 0.0);
+        }
+        for channel in 0..4 {
+            let sample = v[16 + channel];
+            let evaluated = v[20 + channel];
+            maximum_sample_eval_error =
+                maximum_sample_eval_error.max((sample - evaluated).abs() / sample.abs().max(1e-6));
+            close(
+                sample,
+                evaluated,
+                4e-5,
+                "complete sample/evaluate response and marginal PDF",
+            );
+        }
+        let cosine = f64::from(v[57]).abs();
+        let hemisphere_probability = if v[57] > 0.0 {
+            (1.0 - q) + q * (2.0 / 3.0)
+        } else {
+            q / 3.0
+        };
+        let marginal_pdf = base_probability * cosine / std::f64::consts::PI
+            * hemisphere_probability
+            + specular_probability * f64::from(v[56]);
+        close(
+            v[19],
+            marginal_pdf as f32,
+            4e-5,
+            "independent full marginal PDF composition",
+        );
+        let roulette = v[16..19].iter().copied().fold(0.0f32, f32::max) / v[19];
+        close(
+            v[58],
+            roulette.min(1.0),
+            3e-6,
+            "roulette consumes the actual new response/PDF",
+        );
+    }
+    assert!(reflected > 1_000 && transmitted > 1_000 && capped > 1_000);
+    eprintln!(
+        "PT thin SSS cases={}; S8=0/128/255; black/dark/2over3/capped/white; R samples={reflected}; T samples={transmitted}; capped cases={capped}; maximum ALL energy={maximum_energy}; maximum sample/eval relative error={maximum_sample_eval_error}",
+        cases.len(),
     );
 }

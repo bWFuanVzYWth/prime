@@ -8,6 +8,7 @@ import "bsdf/full/contract/sample.slang";
 import "bsdf/full/math/microfacet_energy.slang";
 import "bsdf/full/math/microfacet_measure.slang";
 import "bsdf/full/math/spectrum.slang";
+import "bsdf/full/pt_subsurface.slang";
 import "service/bsdf/contract/albedo.slang";
 import "service/bsdf/support/sanitization.slang";
 
@@ -41,10 +42,13 @@ public PrimeDenoiseAlbedos primePbrGuideAlbedos<Energy>(Energy energy, PrimePbrV
                     primeFullOpenPbrMicrofacetDielectricMsCompensation(
                             energy, microfacet, cosine, primeFullOpenPbrIorAdjustment(ior, 1.0))
                             .z;
-            float3 baseEnergy =
-                    weight > 0.0 && weight != 1.0
-                            ? vertex.baseColor * (1.0 - weight) + vertex.baseColor * weight
-                            : (weight > 0.0 || cosine >= 0.0 ? vertex.baseColor : float3(0.0));
+            float3 baseEnergy = cosine >= 0.0 ? vertex.baseColor : float3(0.0);
+            if (weight > 0.0) {
+                float3 subsurfaceColor = primeFullPtSubsurfaceColor(vertex.baseColor);
+                baseEnergy = weight == 1.0
+                                     ? subsurfaceColor
+                                     : vertex.baseColor * (1.0 - weight) + subsurfaceColor * weight;
+            }
             result.diffuse = (1.0 - m) * baseEnergy * (1.0 - reflected);
             result.specular = (1.0 - m) * float3(cosine < 0.0 ? 0.0 : reflected);
         }

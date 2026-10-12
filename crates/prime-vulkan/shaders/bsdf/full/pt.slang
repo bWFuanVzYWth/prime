@@ -21,6 +21,7 @@ import "bsdf/full/dielectric/refract.slang";
 import "bsdf/full/dielectric/state.slang";
 import "bsdf/full/math/microfacet_energy.slang";
 import "bsdf/full/math/microfacet_measure.slang";
+import "bsdf/full/pt_subsurface.slang";
 
 // The legacy exact OpenPBR supported-domain kernels remain unchanged. PT supplies
 // only their source-reachable parameters, after a visibility query; no generic
@@ -52,7 +53,10 @@ primeFullPtOpaqueState<Energy>(Energy energy, float3 baseColor, float roughness,
     state.baseColor = baseColor;
     state.subsurfaceWeight = subsurfaceWeight;
     state.subsurfaceColor = baseColor;
-    state.subsurfaceAnisotropy = 0.0;
+    if (subsurfaceWeight > 0.0) {
+        state.subsurfaceColor = primeFullPtSubsurfaceColor(baseColor);
+    }
+    state.subsurfaceAnisotropy = PRIME_FULL_PT_SUBSURFACE_ANISOTROPY;
     state.dielectricFresnel.ior = interfaceIor;
     state.dielectricFresnel.energyIor = primeFullOpenPbrIorAdjustment(interfaceIor, 1.0);
     state.dielectricFresnel.color = float3(1.0);

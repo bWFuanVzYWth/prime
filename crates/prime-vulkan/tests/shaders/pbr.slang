@@ -18,6 +18,7 @@ import "bsdf/full/model/material.slang";
 import "bsdf/full/math/frame.slang";
 import "bsdf/full/pt.slang";
 import "bsdf/full/opaque/evaluate.slang";
+import "bsdf/full/opaque/energy.slang";
 import "math/transport.slang";
 import "service/material/normal_mapping.slang";
 [[vk::binding(0, 0)]] StructuredBuffer<uint4> inputs;
@@ -69,6 +70,80 @@ void writeSample(uint offset, BsdfSample sampleValue) {
     for (uint index = 0u; index < 16u; ++index)
         outputs[outputOffset + index] = uint4(0u);
     PrimeFullTransmissionGgxEnergy energy = {transmissionEnergy};
+    if (config.x == 16u) {
+        PbrTestSource source = loadSource(inputOffset);
+        float3 view = asfloat(inputs[inputOffset + 2]).xyz;
+        float3 randomValue = asfloat(inputs[inputOffset + 3]).xyz;
+        float4 incident = asfloat(inputs[inputOffset + 4]);
+        float4 transmitted = asfloat(inputs[inputOffset + 5]);
+        float3 front = asfloat(inputs[inputOffset + 6]).xyz;
+        float3 back = float3(front.xy, -front.z);
+        PrimePbrVertex vertex = testVertex(source, view, false);
+        PrimePbrVertex ordinary = vertex;
+        ordinary.control &= ~(255u << 8u);
+        BsdfEvaluation reflected =
+                primeEvaluatePbrVertex(energy, vertex, view, front, incident, transmitted);
+        BsdfEvaluation transmittedEval =
+                primeEvaluatePbrVertex(energy, vertex, view, back, incident, transmitted);
+        BsdfEvaluation baseline =
+                primeEvaluatePbrVertex(energy, ordinary, view, front, incident, transmitted);
+        PrimePbrSample sampled =
+                primeSamplePbrVertex(energy, vertex, view, randomValue, incident, transmitted);
+        BsdfEvaluation evaluated = primeEvaluatePbrVertex(
+                energy, vertex, view, sampled.bsdfSample.direction, incident, transmitted);
+        PrimeFullOpenPbrOnb onb = primePbrVertexFrame(vertex, view, incident, transmitted);
+        float3 wi = primeFullOpenPbrOnbToLocal(onb, view);
+        float3 wo = primeFullOpenPbrOnbToLocal(onb, sampled.bsdfSample.direction);
+        PrimeFullCompactOpaqueState state = primeFullPtOpaqueState(
+                energy, vertex.baseColor, vertex.roughness, primePbrVertexIor(vertex) / incident.x,
+                primePbrVertexSubsurface(vertex), false, float3(0), float3(0), wi);
+        PrimeFullCompactOpaqueEnergy albedo = primeFullCompactOpaqueEnergy(wi, state);
+        PrimeDenoiseAlbedos guide =
+                primePbrGuideAlbedos(energy, vertex, view, incident, transmitted);
+        float3 localFront = primeFullOpenPbrOnbToLocal(onb, front);
+        float3 localBack = primeFullOpenPbrOnbToLocal(onb, back);
+        float3 baselineDiffuse =
+                primeFullCompactLambertEval(wi, localFront, state, PRIME_FULL_OPENPBR_FLAG_ALL)
+                        .value *
+                state.layer.transmittanceIn;
+        float roulette = sampled.bsdfSample.eventFlags != 0u
+                                 ? primeRussianRouletteSurvival(
+                                           sampled.bsdfSample.response / sampled.bsdfSample.pdf, 1)
+                                 : 0.0;
+        outputs[outputOffset] = asuint(float4(reflected.response, reflected.pdf));
+        outputs[outputOffset + 1] = asuint(float4(transmittedEval.response, transmittedEval.pdf));
+        outputs[outputOffset + 2] = asuint(float4(baseline.response, baseline.pdf));
+        outputs[outputOffset + 3] =
+                uint4(asuint(sampled.bsdfSample.direction), sampled.bsdfSample.eventFlags);
+        outputs[outputOffset + 4] =
+                asuint(float4(sampled.bsdfSample.response, sampled.bsdfSample.pdf));
+        outputs[outputOffset + 5] = asuint(float4(evaluated.response, evaluated.pdf));
+        outputs[outputOffset + 6] = asuint(float4(guide.diffuse, state.layer.baseSampleWeight));
+        outputs[outputOffset + 7] =
+                asuint(float4(guide.specular, state.layer.specularSampleWeight));
+        outputs[outputOffset + 8] =
+                asuint(float4(albedo.diffuse, primePbrVertexSubsurface(vertex)));
+        outputs[outputOffset + 9] =
+                asuint(float4(albedo.specular, state.diffuseMix.secondSampleWeight));
+        outputs[outputOffset + 10] =
+                asuint(float4(state.subsurfaceColor, state.subsurfaceAnisotropy));
+        outputs[outputOffset + 11] = asuint(float4(baselineDiffuse, 0));
+        outputs[outputOffset + 12] = asuint(float4(
+                primeFullCompactSubsurfaceEval(wi, localFront, state, PRIME_FULL_OPENPBR_FLAG_ALL)
+                        .value,
+                primeFullCompactSubsurfaceReflectionProbability(state,
+                                                                PRIME_FULL_OPENPBR_FLAG_ALL)));
+        outputs[outputOffset + 13] = asuint(float4(
+                primeFullCompactSubsurfaceEval(wi, localBack, state, PRIME_FULL_OPENPBR_FLAG_ALL)
+                        .value,
+                primeFullCompactSubsurfaceTransmissionProbability(state,
+                                                                  PRIME_FULL_OPENPBR_FLAG_ALL)));
+        outputs[outputOffset + 14] = asuint(
+                float4(primeFullCompactDielectricPdf(wi, wo, state, PRIME_FULL_OPENPBR_FLAG_ALL),
+                       wo.z, roulette, 0));
+        outputs[outputOffset + 15] = asuint(float4(state.layer.transmittanceIn, 0));
+        return;
+    }
     if (config.x == 0u) {
         PbrTestSource source = loadSource(inputOffset);
         float roughness = source.specularSample.b;

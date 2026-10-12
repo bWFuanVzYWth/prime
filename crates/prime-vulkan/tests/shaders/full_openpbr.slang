@@ -49,7 +49,11 @@ void fullCase(uint3 id, PrimeFullTransmissionGgxEnergy energy, bool narrow) {
             material.specular.ior = ior;
             material.weight.subsurface = sss;
             material.geometry.thinWalled = 1;
-            material.subsurface.color = color;
+            // Independent source-to-OpenPBR parameter oracle; do not call the PT helper.
+            float peak = max(color.x, max(color.y, color.z));
+            float gain = peak > (2.0 / 3.0) ? 1.0 / peak : 1.5;
+            material.subsurface.color = sss > 0.0 ? color * gain : color;
+            material.subsurface.scatterAnisotropy = -1.0 / 3.0;
             if (kind == 1) {
                 material.base.color = f0;
                 material.specular.color = f82;

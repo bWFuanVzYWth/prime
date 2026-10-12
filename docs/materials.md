@@ -78,6 +78,10 @@ CPU在资源准备时检查完整确定性model source：全部quad须有限、�
 
 薄SSS使用Full有色余弦双半球反射/透射及其精确零/一/分数混合，介质身份不变、relative eta=1；连续sample与NEE使用同一完整response和总方向PDF，不能把分量joint PDF当完整PDF。opaque缺图参考roughness为0.9，已证明dielectric缺图为光滑边界，normal分布仍参与。
 
+内部薄SSS统一采用用户明确接受的反射保持补偿，适用于植物缺图回退、内嵌预设和有效外部Lab材质。令`C`为当前采样、tint及颜色解码后的线性working RGB，`s`为有效薄SSS权重；仅薄SSS分支使用`gain=1.5/max(1,1.5*maxRGB(C))`、`derivedSSSColor=gain*C`及`anisotropy=-1/3`。共享Color与普通diffuse颜色不改，金属F0、发光及物理介质参数也不借此改写；`s=0`保持原响应，厚/未知来源仍按既有支持gate回退。通用Full直接参数API仍消费调用者提供的颜色与anisotropy，不隐式套用此补偿。
+
+在漫反射与薄SSS的颜色权重上，令`k=gain/1.5`，反射为`R=((1-s)+k*s)*C`，透射为`T=0.5*k*s*C`；这些不是包含Fresnel、高光及方向能量因子的总表面反射率。`maxRGB(C)<=2/3`时没有cap，`R=C`、`T=0.5*s*C`；较亮颜色按最大通道限制derivedSSSColor，反射与透射的SSS份额一起降低，普通diffuse的`(1-s)*C`不变，因此近白颜色只有部分补偿。它是有界的艺术响应定义，不是新的厚SSS或真实植物光谱模型；接受依据、支持边界及撤销条件见[H-002](../HACK.md#h-002)。PT与guide必须采用同一推导，sample/evaluate、完整PDF/MIS和零S行为由实际产物验证。
+
 evaluate要求response/PDF有限非负，非法时整组清零；sample要求有效事件、有限单位方向（长度平方误差≤0.001）、正PDF和正relative eta，非法结果是零贡献/无事件。guide albedo逐通道清洗至[0,1]。实际MIS、稳定乘除、eta-aware roulette和medium交接继续共用数学核；删Lite不改变这些结果边界。真实Full LUT、独立双半球oracle、厚回退逐位等价、CPU共享sprite/动画/几何负例及ReSTIR薄SSS行为分别验证，源码删除不替代行为证据。
 
 ## 发光与介质

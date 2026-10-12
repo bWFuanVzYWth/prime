@@ -16,6 +16,8 @@ import "bsdf/full/dielectric/refract.slang";
 import "bsdf/full/dielectric/energy.slang";
 import "bsdf/full/opaque/state.slang";
 import "bsdf/full/opaque/energy.slang";
+import "bsdf/full/opaque/traits.slang";
+import "bsdf/full/model/material.slang";
 import "bsdf/full/math/microfacet_measure.slang";
 import "bsdf/full/math/microfacet_energy.slang";
 import "service/bsdf/contract/sample.slang";
@@ -83,10 +85,35 @@ PrimePbrSample referenceFrame(PrimeFullOpenPbrSample fullSample, PrimeFullOpenPb
 }
 
 PrimeFullCompactOpaqueState referenceOpaque(PrimePbrVertex vertex, float3 wi, float4 incident) {
-    return primeFullPtMetallicState(DeltaTestEnergy(), vertex.baseColor, vertex.roughness,
-                                    primePbrVertexIor(vertex) / incident.x,
-                                    primePbrVertexSubsurface(vertex),
-                                    primePbrVertexMetalness(vertex), wi);
+    float metalness = primePbrVertexMetalness(vertex);
+    float subsurface = primePbrVertexSubsurface(vertex);
+    bool conductor = metalness == 1.0;
+    PrimeFullOpenPbrMaterial material = primeFullCompactMaterialFromMetallic(
+            conductor ? saturate(vertex.baseColor) : vertex.baseColor, vertex.roughness,
+            conductor ? 1.0 : 0.0, float3(0.0, 0.0, 1.0));
+    material.specular.ior = primePbrVertexIor(vertex) / incident.x;
+    material.weight.subsurface = subsurface;
+    material.geometry.thinWalled = 1u;
+    // Independent source-to-Full parameters, rather than the production narrow helper.
+    float maximum = max(vertex.baseColor.x, max(vertex.baseColor.y, vertex.baseColor.z));
+    material.subsurface.color = subsurface > 0.0
+                                        ? vertex.baseColor * (1.5 / max(1.0, 1.5 * maximum))
+                                        : vertex.baseColor;
+    material.subsurface.scatterAnisotropy = -1.0 / 3.0;
+    PrimeFullCompactOpaqueState state =
+            primeFullCompactOpaqueStateInit(DeltaTestEnergy(), material, wi, 1.0);
+    if (metalness > 0.0 && !conductor) {
+        // Generic Full accepts endpoints. Assemble their canonical continuous mixture
+        // from an independently initialized conductor, without another narrow constructor.
+        PrimeFullOpenPbrMaterial metallic = primeFullCompactMaterialFromMetallic(
+                saturate(vertex.baseColor), vertex.roughness, 1.0, float3(0.0, 0.0, 1.0));
+        PrimeFullCompactOpaqueState metallicState =
+                primeFullCompactOpaqueStateInit(DeltaTestEnergy(), metallic, wi, 1.0);
+        state.metalness = metalness;
+        state.conductorFresnel = metallicState.conductorFresnel;
+        state.conductorEss = metallicState.conductorEss;
+    }
+    return state;
 }
 
 PrimeDenoiseAlbedos referenceAlbedo(PrimePbrVertex vertex, float3 view, float4 incident,
@@ -120,7 +147,7 @@ float3 contribution(PrimePbrSample sample) {
 }
 
 // 74,088 combinations cover all canonical categories, both delta boundaries, IOR=1,
-// exiting TIR, thin-wall alpha scaling, black/HDR materials, absorption and mapped normals.
+// exiting TIR, thin-wall alpha scaling, black/low/white/HDR colors, absorption and mapped normals.
 uint4 pbrDeltaCase(uint index, uint mode) {
     uint originalIndex = index;
     uint category = index % 7u;
@@ -148,12 +175,19 @@ uint4 pbrDeltaCase(uint index, uint mode) {
                                         : float3(-0.8, 0.0, 0.6);
     float3 geometric = float3(0.0, 0.0, 1.0);
     float metalness = category == 3u ? 128.0 / 255.0 : category == 4u ? 1.0 : 0.0;
-    float3 base = originalIndex % 5u == 0u ? float3(0.0) : float3(0.2, 0.6, 1.2);
-    PrimePbrVertex vertex = primePbrVertex(
-            base, normal, 0.0,
-            float4(metalness, 0.0, 0.0, category == 1u || category == 2u ? 169.0 / 255.0 : 0.0),
-            85.0 / 255.0, normalIndex != 0u, true, category == 2u || category == 6u, category >= 5u,
-            view);
+    uint colorIndex = originalIndex % 5u;
+    float3 base = colorIndex == 0u   ? float3(0.0)
+                  : colorIndex == 1u ? float3(0.2, 0.4, 0.6)
+                  : colorIndex == 2u ? float3(1.0)
+                                     : float3(0.2, 0.6, 1.2);
+    PrimePbrVertex vertex = primePbrVertex(base, normal, 0.0,
+                                           float4(metalness, 0.0, 0.0,
+                                                  category == 1u   ? 169.0 / 255.0
+                                                  : category == 2u ? 1.0
+                                                                   : 0.0),
+                                           85.0 / 255.0, normalIndex != 0u, true,
+                                           category == 1u || category == 2u || category == 6u,
+                                           category >= 5u, view);
     vertex.roughness = roughnesses[roughnessIndex];
     float4 incident = float4(iors[iorIndex].x, 0.01, 0.03, 0.02);
     float4 transmitted =
