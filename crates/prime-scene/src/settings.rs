@@ -62,8 +62,8 @@ pub struct RenderSettings {
     pub saturation: f32,
     pub compression_start: f32,
     pub view: DiagnosticView,
+    /// Shared multiplier for direct solar light and its physically prepared scattered sky.
     pub sun: f32,
-    pub sky: f32,
     /// Host/texture emission power blend, only used when both sources emit.
     pub emission_power_mix: f32,
     /// Independent block/material emissive exposure in EV; excludes environment and unlit text.
@@ -97,11 +97,10 @@ impl Default for RenderSettings {
             terrain_batches_per_frame: 1,
             exposure: 1.0,
             hue: 0.75,
-            saturation: 0.10,
+            saturation: 0.04,
             compression_start: 0.5,
             view: DiagnosticView::Output,
             sun: 1.0,
-            sky: 1.0,
             emission_power_mix: 0.5,
             block_emission_ev: 0.0,
             depth_range: 128.0,
@@ -157,8 +156,8 @@ impl RenderSettings {
                 3 => DiagnosticView::Normal,
                 _ => return Err("Unknown diagnostic view".into()),
             },
+            // Legacy slot36 contained independent sky intensity and is intentionally ignored.
             sun: f32::from_bits(word(32)),
-            sky: f32::from_bits(word(36)),
             emission_power_mix: 0.5,
             block_emission_ev: 0.0,
             depth_range: f32::from_bits(word(40)),
@@ -245,7 +244,6 @@ impl RenderSettings {
                 _ => return Err("Unknown diagnostic view".into()),
             },
             sun: s.sun,
-            sky: s.sky,
             emission_power_mix: s.emission_power_mix,
             block_emission_ev: s.block_emission_ev,
             depth_range: s.depth_range,
@@ -318,7 +316,6 @@ impl RenderSettings {
             || !self.compression_start.is_finite()
             || !(0.0..=0.99).contains(&self.compression_start)
             || !(1.0 / 256.0..=256.0).contains(&self.sun)
-            || !(1.0 / 256.0..=256.0).contains(&self.sky)
             || !(0.0..=1.0).contains(&self.emission_power_mix)
             || !(-10.0..=10.0).contains(&self.block_emission_ev)
             || !(1.0..=4096.0).contains(&self.depth_range)
@@ -337,7 +334,6 @@ impl RenderSettings {
             && self.astronomy == other.astronomy
             && self.atmosphere_altitude_offset_meters == other.atmosphere_altitude_offset_meters
             && self.sun == other.sun
-            && self.sky == other.sky
             && self.emission_power_mix == other.emission_power_mix
             && self.block_emission_ev == other.block_emission_ev
             && self.stars == other.stars
@@ -350,6 +346,26 @@ impl RenderSettings {
 mod tests {
     use super::*;
     #[test]
+    fn legacy_sky_slot_is_ignored_and_the_solar_scale_remains_authoritative() {
+        let defaults = RenderSettings::default();
+        assert_eq!(defaults.sun, 1.0);
+        for sun in [1.0 / 256.0, 0.5, 1.0, 256.0] {
+            let changed = RenderSettings { sun, ..defaults };
+            assert!(changed.validate().is_ok());
+            assert_eq!(changed.transport_matches(defaults), sun == 1.0);
+        }
+        for old_sky in [0.0_f32, -1.0, 256.0, f32::NAN, f32::INFINITY] {
+            let mut bytes = golden();
+            bytes[32..36].copy_from_slice(&0.5_f32.to_le_bytes());
+            bytes[36..40].copy_from_slice(&old_sky.to_le_bytes());
+            let parsed = RenderSettings::parse(&bytes).unwrap();
+            assert_eq!(parsed.sun, 0.5);
+            assert_eq!(parsed.stars, 1.0);
+            assert_eq!(parsed.emission_power_mix, 0.5);
+            assert_eq!(parsed.block_emission_ev, 0.0);
+        }
+    }
+    #[test]
     fn emission_controls_have_independent_ranges_and_transport_invalidation() {
         let defaults = RenderSettings::default();
         assert_eq!(defaults.emission_power_mix, 0.5);
@@ -361,7 +377,7 @@ mod tests {
             };
             assert!(changed.validate().is_ok());
             assert_eq!(changed.transport_matches(defaults), mix == 0.5);
-            assert_eq!((changed.sun, changed.sky), (defaults.sun, defaults.sky));
+            assert_eq!(changed.sun, defaults.sun);
         }
         for ev in [-10.0, -3.25, 0.0, 10.0] {
             let changed = RenderSettings {
@@ -468,6 +484,7 @@ mod tests {
                 mode: RenderMode::Offline,
                 exposure: 4.0,
                 sun: 0.5,
+                saturation: 0.10,
                 view: DiagnosticView::Normal,
                 ..Default::default()
             }
@@ -577,6 +594,7 @@ mod tests {
                     mode: RenderMode::Offline,
                     exposure: 4.0,
                     sun: 0.5,
+                    saturation: 0.10,
                     view: DiagnosticView::Normal,
                     ..defaults
                 }
@@ -597,7 +615,6 @@ mod tests {
             compression_start: defaults.compression_start,
             view: defaults.view as u32,
             sun: defaults.sun,
-            sky: defaults.sky,
             depth_range: defaults.depth_range,
             seed: defaults.seed,
             latitude_degrees: defaults.astronomy.latitude_degrees,
@@ -812,7 +829,7 @@ mod tests {
     #[test]
     fn saturation_defaults_and_explicit_legacy_wire_values() {
         let defaults = RenderSettings::default();
-        assert_eq!(defaults.saturation, 0.10);
+        assert_eq!(defaults.saturation, 0.04);
         for value in [0.0_f32, 0.08, 0.20, 0.5] {
             let mut bytes = golden();
             bytes[24..28].copy_from_slice(&value.to_bits().to_le_bytes());
@@ -900,7 +917,7 @@ mod tests {
     }
     #[test]
     fn rejects_nonfinite_or_out_of_range_floats() {
-        for offset in [16, 20, 24, 32, 36, 40, 72, 76] {
+        for offset in [16, 20, 24, 32, 40, 72, 76] {
             for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -1.0, 8192.0] {
                 let mut invalid = golden();
                 invalid[offset..offset + 4].copy_from_slice(&value.to_le_bytes());

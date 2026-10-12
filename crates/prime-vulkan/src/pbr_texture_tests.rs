@@ -352,7 +352,7 @@ fn gpu_canonical_atlas_shared_color_override_keeps_original_coverage() {
     {
         close(
             f32::from_bits(direct[16 + channel]),
-            decode(color / 255.0 * tint) * 1.5,
+            decode(color / 255.0 * tint),
             "converted shared C reaches actual source emission",
         );
     }
@@ -416,7 +416,7 @@ fn gpu_canonical_emission_power_mix_and_ev_preserve_masks_and_single_source_rule
     for mix in [0.0f32, 0.5, 1.0] {
         for ev in [-1, 0, 1] {
             let scale = 2.0f32.powi(ev);
-            let both = color.map(|c| c * 1.5 * (1.0 + 3.0 * mix) * scale);
+            let both = color.map(|c| c * (1.0 + 3.0 * mix) * scale);
             check(20, [0.75, 0.25], [8., 9., 10.], 4., mix, ev, false, both);
             check(1, [0.375, 0.25], [8., 9., 10.], 4., mix, ev, false, both);
             check(
@@ -427,7 +427,7 @@ fn gpu_canonical_emission_power_mix_and_ev_preserve_masks_and_single_source_rule
                 mix,
                 ev,
                 false,
-                color.map(|c| c * 1.5 * scale),
+                color.map(|c| c * scale),
             );
             check(
                 90,
@@ -555,7 +555,7 @@ fn gpu_canonical_material_nearest_detail_and_mip0_emission_match_hit_and_nee() {
                 }
             }
             for (channel, tint) in [0.2, 0.4, 0.6].into_iter().enumerate() {
-                let radiance = decode(base[channel] * tint) * 1.5 * pixel[1];
+                let radiance = decode(base[channel] * tint) * pixel[1];
                 close(
                     f32::from_bits(actual[16 + channel]),
                     radiance,
@@ -664,7 +664,7 @@ fn gpu_canonical_texture_upload_resolves_sprite_and_atlas_channels_and_authored_
             for (channel, color) in [0.2f32, 0.4, 0.6].into_iter().enumerate() {
                 close(
                     f32::from_bits(direct[16 + channel]),
-                    decode(color) * 1.5 * emission,
+                    decode(color) * emission,
                     "authored emission replaces host fallback",
                 );
                 close(

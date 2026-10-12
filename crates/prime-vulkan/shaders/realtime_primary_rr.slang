@@ -49,7 +49,6 @@ import "reconstruct/rr_guides.slang";
                               visibleDepth,
                               visibleMotion,
                               (motionFeatures & 2u) != 0};
-    PrimaryEnvironment environment = {atmosphereLighting(), parameters.right.w, parameters.up.w,
-                                      true};
+    PrimaryEnvironment environment = {atmosphereLighting(), parameters.right.w, true};
     primeTracePrimary(resources, environment, parameters, id.xy, guides);
 }

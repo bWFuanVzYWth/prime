@@ -58,7 +58,7 @@ fn fixture() -> Scene {
         flags: 0,
     });
     face.emission = Emission {
-        radiance: [1.5; 3],
+        radiance: [1.; 3],
         textured: true,
         ..Default::default()
     };
@@ -184,7 +184,7 @@ fn gpu_emission_alias_sparse_support_quantized_pdf_and_actual_halves() {
         let density = masses[cell] as f32 / 16777216. / 0.25;
         close(f(6), density);
         close(f(7), density);
-        close(f(12), 1.5 * f32::from(FIRST[cell]) / 255.);
+        close(f(12), f32::from(FIRST[cell]) / 255.);
         let d2 = (f(8) - 0.4).powi(2) + (f(9) - 0.35).powi(2) + (f(10) - 4.).powi(2);
         close(f(11), density * d2 * d2.sqrt() / 4.);
         integral += f64::from(f(12) / density);
@@ -196,7 +196,7 @@ fn gpu_emission_alias_sparse_support_quantized_pdf_and_actual_halves() {
     assert!(halves.into_iter().all(|n| n > 1024));
     let reference = FIRST
         .into_iter()
-        .map(|e| 1.5 * f64::from(e) / 255. * 0.25)
+        .map(|e| f64::from(e) / 255. * 0.25)
         .sum::<f64>();
     assert!(
         (integral / f64::from(count) / reference - 1.).abs() < 0.004,
@@ -276,7 +276,7 @@ fn gpu_emission_alias_clipped_triangle_uses_real_cells_without_geometry_rejectio
         let expected = f32::from_bits(alias.words[row_offset + 5]);
         close(f32::from_bits(row[6]), expected);
         close(f32::from_bits(row[7]), expected);
-        close(f32::from_bits(row[12]), 1.5 * f32::from(FIRST[cell]) / 255.);
+        close(f32::from_bits(row[12]), f32::from(FIRST[cell]) / 255.);
     }
     assert_eq!(counts[7], 0);
     assert!(counts[0] > 128 && counts[2] > 128 && counts[5] > 128);
@@ -357,7 +357,7 @@ fn gpu_emission_alias_animation_retains_light_owner_and_reload_rebuilds() {
         let cell = (x * 2.).floor().min(3.) as usize + (y * 2.).floor().min(1.) as usize * 4;
         let mixed =
             ((u32::from(FIRST[cell]) + u32::from(SECOND[cell])) as f32 * 0.5).round() / 255.;
-        close(f32::from_bits(row[12]), 1.5 * mixed);
+        close(f32::from_bits(row[12]), mixed);
     }
     let source = scene.textures.get_mut(&1).unwrap();
     let color = source.pixels.clone();

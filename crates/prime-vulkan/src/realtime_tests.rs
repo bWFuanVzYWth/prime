@@ -156,7 +156,6 @@ fn settings(mode: RenderMode) -> RenderSettings {
         auto_exposure_compensation: 0.,
         stars: 0.,
         sun: 1. / 256.,
-        sky: 1. / 256.,
         native_noisy_output: true,
         opacity_micromap: false,
         ..Default::default()

@@ -19,8 +19,8 @@ public AtmLighting atmLighting(AtmEnvironment environment) {
 public float3 atmSky(AtmEnvironment environment, float3 direction) {
     return atmSky(atmLighting(environment), direction);
 }
-public float3 atmSky(AtmEnvironment environment, float3 direction, float skyIntensity) {
-    return atmSky(atmLighting(environment), direction, skyIntensity);
+public float3 atmSky(AtmEnvironment environment, float3 direction, float solarIntensity) {
+    return atmSky(atmLighting(environment), direction, solarIntensity);
 }
 public float3 atmDistantTransmittance(AtmEnvironment environment, float3 direction) {
     return atmDistantTransmittance(atmLighting(environment), direction);

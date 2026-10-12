@@ -5,8 +5,8 @@ module "realtime/primary_parameters.slang";
 public struct PrimaryParameters {
     public float4 position;
     public float4 forward;
-    public float4 right;   // w sun intensity
-    public float4 up;      // w sky intensity
+    public float4 right;   // w solar intensity
+    public float4 up;      // w reserved
     public uint4 sampling; // input width, height, sequence, seed
     public uint4 config;   // Sobol R, maximum vertices, diagnostic enabled, reserved
     public float4 *commonAddress;

@@ -9,7 +9,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Properties;
 
-/** Schema 16 adds independent emission power blending and exposure controls. */
+/** Schema 17 keeps one solar scale; retired independent sky intensity is ignored. */
 public final class SettingsFile {
     public record Loaded(RenderSettings settings, String resetReason) {}
     private SettingsFile() {}

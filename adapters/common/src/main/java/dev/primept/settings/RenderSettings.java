@@ -8,7 +8,7 @@ import java.util.Arrays;
 
 /** Immutable client settings. Version adapters own widgets; native consumes the validated wire. */
 public final class RenderSettings {
-    public static final int VERSION = 16;
+    public static final int VERSION = 17;
     public static final int WIRE_BYTES = (int)PrimeSettings.SIZE;
     public enum Control {
         BOUNCES("render.bounces", 1, 64, 12),
@@ -18,7 +18,6 @@ public final class RenderSettings {
         SOLAR_LONGITUDE("astronomy.solar_longitude_degrees", 0, 359, 0),
         ATMOSPHERE_ALTITUDE_OFFSET("atmosphere.altitude_offset_meters", 0, 10000, 500),
         SUN_EV("lighting.sun_ev_quarters", -32, 32, 0),
-        SKY_EV("lighting.sky_ev_quarters", -32, 32, 0),
         EMISSION_POWER_MIX("lighting.emission_power_mix_percent", 0, 100, 50),
         BLOCK_EMISSION_EV("lighting.block_emission_ev_quarters", -40, 40, 0),
         STARS("lighting.stars_percent", 0, 400, 100),
@@ -28,7 +27,7 @@ public final class RenderSettings {
         FRAME_GENERATION("render.frame_generation", 0, 1, 0),
         EXPOSURE_EV("display.exposure_ev_quarters", -48, 48, 0),
         HUE("display.hue_percent", 0, 100, 75),
-        SATURATION("display.saturation_percent", 0, 50, 10),
+        SATURATION("display.saturation_percent", 0, 50, 4),
         COMPRESSION_START("display.compression_start_percent", 0, 99, 50),
         DEPTH_RANGE("diagnostics.depth_range", 1, 4096, 128);
 
@@ -249,7 +248,6 @@ public final class RenderSettings {
         PrimeSettings.compression_start(s, value(Control.COMPRESSION_START) / 100.0f);
         PrimeSettings.view(s, view.ordinal());
         PrimeSettings.sun(s, multiplier(Control.SUN_EV));
-        PrimeSettings.sky(s, multiplier(Control.SKY_EV));
         PrimeSettings.emission_power_mix(s, value(Control.EMISSION_POWER_MIX) / 100.0f);
         PrimeSettings.block_emission_ev(s, value(Control.BLOCK_EMISSION_EV) / 4.0f);
         PrimeSettings.depth_range(s, value(Control.DEPTH_RANGE));

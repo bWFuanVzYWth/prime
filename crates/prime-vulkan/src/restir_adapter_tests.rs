@@ -28,7 +28,6 @@ fn gpu_restir_inverse_budget_support_rejects_only_unsupported_actual_sources() {
     let config = RenderSettings {
         bounces: 6,
         sun: 1. / 256.,
-        sky: 1. / 256.,
         ..restir_tests::settings(RenderMode::Offline)
     };
     let mut renderer = restir_tests::renderer(config);
@@ -157,7 +156,6 @@ fn medium_crossing_scene(explicit_source_water: bool) -> Scene {
 fn gpu_restir_static_connection_terminal_medium_and_suffix_cache_match_fresh() {
     let mut config = restir_tests::settings(RenderMode::Realtime);
     config.sun = 1. / 256.;
-    config.sky = 1. / 256.;
     config.restir_spatial_only = true;
     config.restir.spatial_reuse = false;
     config.restir.duplicate_map = false;
@@ -560,7 +558,6 @@ fn gpu_restir_generate_replay_self_shift_preserves_mixed_integral_and_media() {
         mode: RenderMode::Offline,
         bounces: 6,
         sun: 1. / 256.,
-        sky: 1. / 256.,
         stars: 0.,
         native_noisy_output: true,
         opacity_micromap: false,
@@ -753,7 +750,6 @@ fn gpu_restir_self_shift_preserves_strong_normal_and_grazing_measures() {
         mode: RenderMode::Offline,
         bounces: 6,
         sun: 1. / 256.,
-        sky: 1. / 256.,
         stars: 0.,
         native_noisy_output: true,
         opacity_micromap: false,
@@ -973,7 +969,6 @@ fn gpu_restir_near_emitter_residual_matches_ray_origin_and_bsdf_measures() {
         mode: RenderMode::Offline,
         bounces: 6,
         sun: 1. / 256.,
-        sky: 1. / 256.,
         stars: 0.,
         native_noisy_output: true,
         opacity_micromap: false,
@@ -1129,7 +1124,6 @@ fn gpu_restir_rc_view_change_preserves_final_emitter_competing_pdf() {
         mode: RenderMode::Offline,
         bounces: 6,
         sun: 1. / 256.,
-        sky: 1. / 256.,
         stars: 0.,
         native_noisy_output: true,
         opacity_micromap: false,
@@ -1308,7 +1302,6 @@ fn gpu_restir_authored_thin_sss_self_shift_preserves_source_measure() {
         // One continuation isolates primary SSS -> emitter, with no later RIS candidates.
         bounces: 2,
         sun: 1. / 256.,
-        sky: 1. / 256.,
         stars: 0.,
         native_noisy_output: true,
         opacity_micromap: false,
@@ -1495,7 +1488,6 @@ fn gpu_restir_authored_thin_sss_rear_sun_has_no_direct_nee_competitor() {
         mode: RenderMode::Offline,
         bounces: 2,
         sun: 256.,
-        sky: 1. / 256.,
         stars: 0.,
         native_noisy_output: true,
         opacity_micromap: false,
@@ -1631,7 +1623,6 @@ fn gpu_restir_stale_rear_sun_nee_is_rejected_by_current_consumer() {
         mode: RenderMode::Offline,
         bounces: 2,
         sun: 256.,
-        sky: 1. / 256.,
         stars: 0.,
         native_noisy_output: true,
         opacity_micromap: false,

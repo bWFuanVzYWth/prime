@@ -293,7 +293,7 @@ pub(crate) fn emission(catalog: &Catalog, state: &State, q: &Quad, two_sided: bo
                 m.texture_power_gain(q.uvs, q.positions, flags(state, q) as u32, native)
             });
         return Emission {
-            radiance: [1.5 * maximum * gain.max(1.); 3],
+            radiance: [maximum * gain.max(1.); 3],
             two_sided: two_sided || flags(state, q) == 1,
             texture_gain: gain,
             textured: true,
@@ -302,9 +302,9 @@ pub(crate) fn emission(catalog: &Catalog, state: &State, q: &Quad, two_sided: bo
     if level == 0 {
         return Emission::default();
     }
-    // Prime's calibrated fallback, matching the previous translator; MC light level is ordinal.
+    // Material emission base is one; MC light level is an ordinal artistic proposal.
     Emission {
-        radiance: [1.5 * native; 3],
+        radiance: [native; 3],
         two_sided: two_sided || flags(state, q) == 1,
         texture_gain: 0.0,
         textured: true,

@@ -73,8 +73,9 @@ do not replace the user's Vulkan loader or GPU driver.
 fixtures adapt legacy Prime's atmosphere (copyright 2026 linlin), incorporating
 Sky Tracer `b66b16342afe38e788a5ece5371d3b3a67c5909a`, GPL-3.0-only.
 See [Sky Tracer notice](licenses/atmosphere-SKY-TRACER-NOTICE.md) and [LICENSE](LICENSE).
-The physical algorithm and default calibration are retained; the container,
-resource ownership, prepared consumers and cache scheduling are changed.
+The physical transport algorithm, fixed medium and precomputed assets are retained.
+The container, resource ownership, prepared consumers and cache scheduling are changed;
+the shared runtime solar baseline is documented in [the atmosphere contract](docs/atmosphere.md).
 
 `crates/prime-scene/src/environment.rs` adapts legacy Prime's `AstronomyState`
 and `AstronomySettings` (copyright 2026 linlin), under the project's

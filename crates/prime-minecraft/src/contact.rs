@@ -121,7 +121,7 @@ impl Context<'_> {
             crate::optics::assign(self.catalog, state, &mut b.face, b.fluid);
             if b.fluid && state.fluid.kind == 2 {
                 b.face.emission = prime_scene::surface::Emission {
-                    radiance: [1.5; 3],
+                    radiance: [1.; 3],
                     two_sided: false,
                     texture_gain: 0.0,
                     textured: true,
@@ -418,13 +418,13 @@ fn authored_emission(catalog: &Catalog, face: &mut SurfaceFace) {
         {
             // The proposal bounds all animation frames. Shading consumes the actual mip0
             // G at the sampled point, with a setting-independent calibration envelope.
-            let native = emission.radiance[0] / 1.5;
+            let native = emission.radiance[0];
             let gain = sprite
                 .material
                 .as_ref()
                 .map_or(0., |m| m.texture_power_gain(uvs, positions, flags, native));
             emission.texture_gain = gain;
-            emission.radiance = [1.5 * maximum * gain.max(1.); 3];
+            emission.radiance = [maximum * gain.max(1.); 3];
             emission.textured = true;
             emission.two_sided |= flags == 1;
         }
@@ -596,6 +596,64 @@ fn emit(job: &mut Job, bound: Bound) {
 mod tests {
     use super::*;
     use crate::model::{Model, Quad};
+    #[test]
+    fn authored_contact_emission_preserves_native_power_ratio_with_unit_base() {
+        use crate::sprite::{Image, Sprite};
+        for (level, g) in [(0, 128), (7, 64), (15, 128)] {
+            let mut sprite = Sprite {
+                name: "test:contact-emission".into(),
+                block_atlas: true,
+                bounds: [0., 0., 1., 1.],
+                extent: [1, 1],
+                images: vec![Image {
+                    width: 1,
+                    height: 1,
+                    pixels: Arc::from([255; 4]),
+                }],
+                frames: vec![],
+                frame_ends: vec![],
+                coverage_frames: Arc::from([]),
+                interpolate: false,
+                material: None,
+            };
+            let mut material = crate::labpbr::Material::from_internal_images(
+                &sprite,
+                None,
+                Image {
+                    width: 1,
+                    height: 1,
+                    pixels: Arc::from([0, g, 80, 0]),
+                },
+                None,
+                false,
+            );
+            material
+                .prepare_emission(&sprite, &prime_scene::SourceScene::default())
+                .unwrap();
+            sprite.material = Some(material);
+            let mut catalog = Catalog::default();
+            catalog.sprites.insert(1, sprite);
+            let mut quad = sheet(2, 1, 1., 0, -1);
+            quad.sprite = 1;
+            let mut face =
+                SurfaceFace::from_quad(crate::surfaces::closed(&State::default(), &quad, [0.; 3]));
+            let native = (level as f32 / 15.).powi(2);
+            face.emission.radiance = [native; 3];
+            authored_emission(&catalog, &mut face);
+            let strength = f32::from(g) / 255.;
+            let expected_gain = native / strength;
+            assert!((face.emission.texture_gain - expected_gain).abs() < 1e-6);
+            let expected_bound = strength.max(native);
+            assert!(
+                face.emission
+                    .radiance
+                    .iter()
+                    .all(|v| (*v - expected_bound).abs() < 1e-6)
+            );
+            assert!(face.emission.textured);
+        }
+    }
+
     fn sheet(axis: usize, side: usize, width: f32, layer: usize, tint: i32) -> Quad {
         let axes = [(axis + 1) % 3, (axis + 2) % 3];
         let positions = [[0., 0.], [width, 0.], [width, 1.], [0., 1.]].map(|uv| {

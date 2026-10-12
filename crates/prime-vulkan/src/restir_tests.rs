@@ -25,7 +25,6 @@ pub(super) fn settings(mode: RenderMode) -> RenderSettings {
         bounces: 6,
         exposure: 0.25,
         sun: 1. / 256.,
-        sky: 1. / 256.,
         auto_exposure_compensation: 0.,
         stars: 0.,
         native_noisy_output: true,
@@ -298,7 +297,6 @@ fn gpu_restir_independent_pipeline_preserves_primary_and_history_boundaries() {
     renderer.render(&dynamic, &camera, 31, 17, 102).unwrap();
     let state = renderer.restir.as_ref().unwrap();
     assert!(state.temporal_this_frame && !state.dynamic_update_this_frame);
-    updated.sky *= 2.;
     updated.sun *= 2.;
     renderer.configure(updated).unwrap();
     renderer.render(&dynamic, &camera, 31, 17, 103).unwrap();

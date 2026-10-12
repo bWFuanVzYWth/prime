@@ -2016,7 +2016,6 @@ fn gpu_surface_lights_illuminate_receivers_and_retire_with_inflight_frames() {
             mode: RenderMode::Offline,
             bounces: 1,
             sun: 1. / 256.,
-            sky: 1. / 256.,
             ..Default::default()
         })
         .unwrap();

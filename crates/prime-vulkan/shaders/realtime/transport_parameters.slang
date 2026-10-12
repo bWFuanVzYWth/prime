@@ -5,7 +5,7 @@ module "realtime/transport_parameters.slang";
 public struct TransportParameters {
     public uint4 sampling;  // input width, height, sequence, seed
     public uint4 config;    // Sobol R, maximum vertices, reserved, reserved
-    public float4 lighting; // sun intensity, sky intensity, cone spread, reserved
+    public float4 lighting; // solar intensity, reserved, cone spread, reserved
     public float4 *commonAddress;
     public float4 *opticalAddress;
     public float4 *tailAddress;

@@ -737,7 +737,7 @@ mod tests {
                 } else {
                     assert!(
                         faces.iter().all(
-                            |face| face.emission.radiance == [1.5; 3] && face.emission.textured
+                            |face| face.emission.radiance == [1.; 3] && face.emission.textured
                         ),
                         "{name}"
                     );

@@ -365,7 +365,6 @@ fn gpu_budget_changes_reuse_light_geometry_and_restart_offline_history() {
         stars: 0.0,
         auto_exposure_compensation: 0.0,
         sun: 1.0 / 256.0,
-        sky: 1.0 / 256.0,
         bounces: 1,
         ..Default::default()
     };

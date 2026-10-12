@@ -1,6 +1,10 @@
 use super::*;
 use crate::float;
 
+// Independent evaluation of the locked four-band solar fit at the selected Y=8 baseline.
+// The old frozen sky fixtures used a per-channel 12.5 normalization.
+const BASE_SOLAR_RGB: [f32; 3] = [7.999351, 8.000100, 8.001729];
+
 fn f32s(bytes: &[u8]) -> Vec<f32> {
     bytes
         .as_chunks::<4>()
@@ -16,26 +20,68 @@ fn fixture(bytes: &[u8], offset: &mut usize) -> f32 {
 }
 fn execute(atmosphere: &Atmosphere, mode: u32, count: u32, input: &[u8]) -> Vec<f32> {
     let context = &atmosphere.context;
+    let benchmarking = mode == 8 || mode == 9;
+    let output_stride = if mode == 12 { 192 } else { 32 };
     let source = Buffer::upload(context, input, vk::BufferUsageFlags::STORAGE_BUFFER).unwrap();
     let output = Buffer::new(
         context,
-        u64::from(count) * 32,
+        u64::from(count) * output_stride,
         vk::BufferUsageFlags::STORAGE_BUFFER,
-        mode < 8,
+        !benchmarking,
     )
     .unwrap();
+    let consumer_fixture = (mode == 12).then(|| {
+        let storage =
+            Buffer::upload(context, &[0; 128], vk::BufferUsageFlags::STORAGE_BUFFER).unwrap();
+        let prefix = Buffer::upload(
+            context,
+            [0.0f32, 0.0, 0.0, 400.0]
+                .map(f32::to_le_bytes)
+                .as_flattened(),
+            vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+        )
+        .unwrap();
+        let tail = Buffer::upload(
+            context,
+            &[0; 16],
+            vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+        )
+        .unwrap();
+        let stars = Texture::new(context, [2, 2, 1], vk::Format::R32G32B32A32_SFLOAT).unwrap();
+        let star_texels = [0.8f32, 0.4, 0.2, 1.0]
+            .repeat(4)
+            .into_iter()
+            .flat_map(f32::to_le_bytes)
+            .collect::<Vec<_>>();
+        stars.upload(context, &star_texels).unwrap();
+        (storage, prefix, tail, stars)
+    });
     let c = vk::DescriptorType::COMBINED_IMAGE_SAMPLER;
     let i = vk::DescriptorType::SAMPLED_IMAGE;
     let b = vk::DescriptorType::STORAGE_BUFFER;
     let compute = Compute::new(
         context,
         &[
-            &[c, c, i, i, i, b, b, b, vk::DescriptorType::STORAGE_IMAGE],
+            &[
+                c,
+                c,
+                i,
+                i,
+                i,
+                b,
+                b,
+                b,
+                vk::DescriptorType::STORAGE_IMAGE,
+                b,
+                b,
+                b,
+                b,
+            ],
             CONSUMER_TYPES,
         ],
         1,
         &[prime_shader_tests::atmosphere_test()],
-        16,
+        32,
     )
     .unwrap();
     for (binding, image) in atmosphere._physical.iter().enumerate() {
@@ -45,6 +91,14 @@ fn execute(atmosphere: &Atmosphere, mode: u32, count: u32, input: &[u8]) -> Vec<
     compute.buffer(0, 0, 6, &source);
     compute.buffer(0, 0, 7, &output);
     compute.image(0, 0, 8, vk::DescriptorType::STORAGE_IMAGE, &atmosphere._sky);
+    for binding in 9..=12 {
+        compute.buffer(
+            0,
+            0,
+            binding,
+            consumer_fixture.as_ref().map_or(&source, |f| &f.0),
+        );
+    }
     compute.buffer(1, 0, 0, &atmosphere._frames[0]);
     for (binding, image) in [
         &atmosphere._sky,
@@ -57,17 +111,47 @@ fn execute(atmosphere: &Atmosphere, mode: u32, count: u32, input: &[u8]) -> Vec<
     {
         compute.image(1, 0, binding as u32 + 1, c, image);
     }
-    let push = [mode, count, 0, 0].map(u32::to_le_bytes);
+    // Old fixtures disable stars. Only the actual consumer test needs its tiny uploaded star map.
+    compute.image(
+        1,
+        0,
+        5,
+        c,
+        consumer_fixture.as_ref().map_or(&atmosphere._sky, |f| &f.3),
+    );
+    let control_info = [vk::DescriptorBufferInfo::default()
+        .buffer(atmosphere.lighting_controls[0].buffer)
+        .range(32)];
+    unsafe {
+        context.device.update_descriptor_sets(
+            &[vk::WriteDescriptorSet::default()
+                .dst_set(compute.sets[1][0])
+                .dst_binding(6)
+                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                .buffer_info(&control_info)],
+            &[],
+        );
+    }
+    let mut push = [mode, count, 0, 0]
+        .into_iter()
+        .flat_map(u32::to_le_bytes)
+        .collect::<Vec<_>>();
+    push.extend_from_slice(
+        &consumer_fixture
+            .as_ref()
+            .map_or(0, |f| f.1.address())
+            .to_le_bytes(),
+    );
+    push.extend_from_slice(
+        &consumer_fixture
+            .as_ref()
+            .map_or(0, |f| f.2.address())
+            .to_le_bytes(),
+    );
     context
         .submit_named("atmosphere_contract", |command| unsafe {
             barrier(context, command);
-            compute.dispatch(
-                command,
-                0,
-                0,
-                push.as_flattened(),
-                [count.div_ceil(64), 1, 1],
-            );
+            compute.dispatch(command, 0, 0, &push, [count.div_ceil(64), 1, 1]);
             let memory = [vk::MemoryBarrier::default()
                 .src_access_mask(vk::AccessFlags::SHADER_WRITE)
                 .dst_access_mask(vk::AccessFlags::HOST_READ)];
@@ -82,10 +166,14 @@ fn execute(atmosphere: &Atmosphere, mode: u32, count: u32, input: &[u8]) -> Vec<
             );
         })
         .unwrap();
-    if mode >= 8 {
+    if benchmarking {
         return vec![];
     }
-    f32s(&output.read(count as usize * 32).unwrap())
+    f32s(
+        &output
+            .read(count as usize * output_stride as usize)
+            .unwrap(),
+    )
 }
 fn camera() -> Camera {
     Camera {
@@ -175,7 +263,7 @@ fn gpu_atmosphere_matches_frozen_spectral_and_sky_reference() {
             let y = u32::from_le_bytes(sky[offset + 4..offset + 8].try_into().unwrap()) as usize;
             offset += 8;
             for lane in 0..3 {
-                let target = fixture(sky, &mut offset);
+                let target = fixture(sky, &mut offset) * (BASE_SOLAR_RGB[lane] / 12.5);
                 let value = (pixels[(y * 256 + x) * 4 + lane].exp() - 1e-30).max(0.);
                 assert!(
                     (value - target).abs() <= 2e-6f32.max(target * 0.012),
@@ -207,7 +295,7 @@ fn gpu_atmosphere_matches_frozen_spectral_and_sky_reference() {
         {
             for lane in 0..3 {
                 let value = actual[lane];
-                let target = expected[lane];
+                let target = expected[lane] * (BASE_SOLAR_RGB[lane] / 12.5);
                 assert!(
                     value.is_finite() && (value - target).abs() <= 2e-6f32.max(target * 0.004),
                     "lookup case {case} ray {ray} lane {lane}: {value} vs {target}"
@@ -439,7 +527,10 @@ fn gpu_solar_sampled_radiance_preserves_day_night_and_partial_limb() {
             assert_eq!(supported, t[4..7].iter().any(|&v| v > 0.));
             visible += usize::from(supported);
             for channel in 4..7 {
-                let expected = t[channel] * (12.5 * t[3]);
+                let radius = 0.00471_f64;
+                let projected = std::f64::consts::PI * radius.sin().powi(2);
+                let expected =
+                    t[channel] * (f64::from(BASE_SOLAR_RGB[channel - 4]) / projected) as f32;
                 assert!(
                     l[channel].is_finite()
                         && (l[channel] - expected).abs() <= 1e-6_f32.max(expected * 3e-6),
@@ -947,4 +1038,230 @@ fn atmosphere_cost_matrix() {
             gpu[12], gpu[23], cpu[23]
         );
     }
+}
+
+// These coefficients and samples are an independent CPU oracle for the frozen spectral fit.
+// Neither the raw tristimulus conversion nor the source normalization reads a GPU result.
+fn spectral_rgb_reference(spectrum: [f32; 4]) -> [f64; 3] {
+    let columns = [
+        [5.8809709548950195, -7.0044331550598145, 90.48178100585938],
+        [-14.151336669921875, 54.43069839477539, 8.974457740783691],
+        [87.37126159667969, 58.01542282104492, -1.4691294431686401],
+        [31.710432052612305, -1.2180235385894775, 0.05091293156147003],
+    ];
+    std::array::from_fn(|channel| {
+        (0..4)
+            .map(|band| f64::from(spectrum[band]) * columns[band][channel])
+            .sum()
+    })
+}
+
+fn solar_source_reference() -> ([f64; 3], f64) {
+    let raw = spectral_rgb_reference([2.0108538, 1.9255825, 1.856787, 1.5677555]);
+    let luminance = raw[0] * 0.262700212 + raw[1] * 0.677998072 + raw[2] * 0.059301716;
+    let scale = 8.0 / luminance;
+    (raw.map(|value| value * scale), scale)
+}
+
+fn assert_radiance_close(actual: f32, expected: f64, context: &str) {
+    let tolerance = 2e-6f64.max(expected.abs() * 3e-5);
+    assert!(
+        actual.is_finite() && (f64::from(actual) - expected).abs() <= tolerance,
+        "{context}: {actual} vs {expected} (tolerance {tolerance})"
+    );
+}
+
+#[test]
+#[ignore = "requires Vulkan ray-query device"]
+fn gpu_atmosphere_solar_source_matches_raw_spectrum_and_projected_disk_integral() {
+    let context = Context::new().unwrap();
+    let mut atmosphere = Atmosphere::new(&context).unwrap();
+    atmosphere
+        .prepare(
+            Environment {
+                sun_direction: [0.0, 1.0, 0.0],
+                altitude_offset_meters: 300,
+                ..Default::default()
+            },
+            &camera(),
+            16.0 / 9.0,
+            0,
+            None,
+        )
+        .unwrap();
+    let spectra = [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+        [2.0108538, 1.9255825, 1.856787, 1.5677555],
+        [0.2, 0.5, 0.7, 0.9],
+    ];
+    let input = spectra
+        .iter()
+        .flatten()
+        .flat_map(|value| f32::to_le_bytes(*value))
+        .collect::<Vec<_>>();
+    let actual = execute(&atmosphere, 10, spectra.len() as u32, &input);
+    let (source_rgb, scale) = solar_source_reference();
+    for (index, spectrum) in spectra.into_iter().enumerate() {
+        let raw = spectral_rgb_reference(spectrum);
+        for channel in 0..3 {
+            assert_radiance_close(actual[index * 8 + channel], raw[channel], "raw spectrum");
+            assert_radiance_close(
+                actual[index * 8 + 4 + channel],
+                (raw[channel] * scale).max(0.0),
+                "normalized spectrum",
+            );
+        }
+    }
+    let samples = 4096u32;
+    let input = (0..samples)
+        .flat_map(|index| {
+            let azimuth = index.reverse_bits() as f64 / 4_294_967_296.0;
+            [
+                (index as f32 + 0.5) / samples as f32,
+                azimuth as f32,
+                0.0,
+                0.0,
+            ]
+            .map(f32::to_le_bytes)
+            .into_iter()
+            .flatten()
+        })
+        .collect::<Vec<_>>();
+    let actual = execute(&atmosphere, 11, samples, &input);
+    let mut integral = [0.0f64; 3];
+    let projected_angle = std::f64::consts::PI * 0.00471f64.sin().powi(2);
+    let solid_angle = 4.0 * std::f64::consts::PI * (0.00471f64 * 0.5).sin().powi(2);
+    for row in actual.as_chunks::<8>().0 {
+        assert_eq!(
+            row[3], 1.0,
+            "sampled Sun direction failed the actual disk gate"
+        );
+        for channel in 0..3 {
+            assert!(row[channel].is_finite());
+            assert!(row[4 + channel] > 0.0 && row[4 + channel] <= 1.0);
+            integral[channel] += f64::from(row[channel]) / f64::from(samples);
+        }
+        assert_radiance_close(row[7], 1.0 / solid_angle, "Sun sampling PDF");
+    }
+    for channel in 0..3 {
+        let relative_error = (integral[channel] / source_rgb[channel] - 1.0).abs();
+        assert!(
+            relative_error < 3e-5,
+            "disk integral: {integral:?} vs {source_rgb:?}"
+        );
+    }
+    let source_y =
+        source_rgb[0] * 0.262700212 + source_rgb[1] * 0.677998072 + source_rgb[2] * 0.059301716;
+    assert!((source_y - 8.0).abs() < 1e-12);
+    eprintln!(
+        "solar disk samples={samples}; projectedAngle={projected_angle}; rawRGB={:?}; sourceRGB={source_rgb:?}; integralRGB={integral:?}; sourceY={source_y}",
+        spectral_rgb_reference(spectra[4]),
+    );
+}
+
+#[test]
+#[ignore = "requires Vulkan ray-query device"]
+fn gpu_atmosphere_solar_scale_drives_actual_consumers_without_scaling_stars_or_transmittance() {
+    let context = Context::new().unwrap();
+    let mut atmosphere = Atmosphere::new(&context).unwrap();
+    atmosphere
+        .prepare(
+            Environment {
+                sun_direction: [0.6, 0.8, 0.0],
+                altitude_offset_meters: 300,
+                ..Default::default()
+            },
+            &camera(),
+            16.0 / 9.0,
+            0,
+            None,
+        )
+        .unwrap();
+    let scales = [0.25f32, 1.0, 2.0];
+    let input = [f32::NAN, 1e20]
+        .into_iter()
+        .flat_map(|poison| {
+            scales.into_iter().flat_map(move |scale| {
+                [scale, poison, 0.025, 400.0]
+                    .map(f32::to_le_bytes)
+                    .into_iter()
+                    .flatten()
+            })
+        })
+        .collect::<Vec<_>>();
+    let actual = execute(&atmosphere, 12, 6, &input);
+    let rows = actual.as_chunks::<48>().0;
+    let reference = &rows[1]; // Solar scale one, with the former sky lane poisoned by NaN.
+    let (source_rgb, _) = solar_source_reference();
+    for (index, row) in rows.iter().enumerate() {
+        let scale = f64::from(scales[index % 3]);
+        assert!(row.iter().all(|value| value.is_finite()));
+        for channel in 0..3 {
+            for field in [0, 1, 3, 4] {
+                assert_radiance_close(
+                    row[field * 4 + channel],
+                    f64::from(reference[field * 4 + channel]) * scale,
+                    "solar-scaled production consumer",
+                );
+            }
+            for field in [5, 6, 8, 9, 10, 11] {
+                assert_eq!(
+                    row[field * 4 + channel].to_bits(),
+                    reference[field * 4 + channel].to_bits(),
+                    "solar intensity changed an unscaled source, T, or star field"
+                );
+            }
+            let star = f64::from(row[6 * 4 + channel]);
+            let sky = f64::from(row[channel]);
+            assert_radiance_close(row[2 * 4 + channel], sky + star, "ReSTIR sky and stars");
+            assert_radiance_close(
+                row[7 * 4 + channel],
+                sky + star,
+                "Primary secondary sky and stars",
+            );
+            assert_radiance_close(
+                row[1 * 4 + channel],
+                f64::from(row[3 * 4 + channel]) + f64::from(row[8 * 4 + channel]) * scale,
+                "Primary Sun disk plus sky",
+            );
+            assert_radiance_close(
+                row[4 * 4 + channel],
+                f64::from(row[11 * 4 + channel]) * scale,
+                "actual realtime aerial composition",
+            );
+            assert_radiance_close(
+                row[6 * 4 + channel],
+                f64::from([0.8f32, 0.4, 0.2][channel]) * 0.025 * f64::from(row[9 * 4 + channel]),
+                "independent star map times distant transmittance",
+            );
+            assert_radiance_close(
+                row[10 * 4 + channel],
+                source_rgb[channel],
+                "source solar RGB",
+            );
+        }
+        if index >= 3 {
+            assert_eq!(
+                row,
+                &rows[index - 3],
+                "former sky lane affected actual consumer output"
+            );
+        }
+    }
+    for field in [0, 1, 3, 4, 6, 11] {
+        assert!(
+            reference[field * 4..field * 4 + 3]
+                .iter()
+                .all(|value| *value > 0.0)
+        );
+    }
+    eprintln!(
+        "actual Primary/ReSTIR/realtime aerial scale cases={scales:?}; former sky lane=NaN/1e20; T and stars bit-identical; base sky={:?}; aerialS={:?}; stars={:?}",
+        &reference[..3],
+        &reference[44..47],
+        &reference[24..27],
+    );
 }

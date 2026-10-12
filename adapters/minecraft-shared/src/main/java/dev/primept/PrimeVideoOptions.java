@@ -55,7 +55,7 @@ public final class PrimeVideoOptions {
                     if (toggle)
                         return Component.translatable(value == 0 ? "options.off" : "options.on");
                     String formatted = switch (control) {
-                        case SUN_EV, SKY_EV, BLOCK_EMISSION_EV, EXPOSURE_EV ->
+                        case SUN_EV, BLOCK_EMISSION_EV, EXPOSURE_EV ->
                             String.format(Locale.ROOT, "%+.2f EV", value / 4.0);
                         case LATITUDE, SOLAR_LONGITUDE -> value + "°";
                         case ATMOSPHERE_ALTITUDE_OFFSET -> value + " m";
@@ -147,7 +147,6 @@ public final class PrimeVideoOptions {
         list.addBig(controls.get(Control.TERRAIN_BATCHES_PER_FRAME));
         list.addHeader(Component.translatable("primept.settings.lighting"));
         list.addBig(controls.get(Control.SUN_EV));
-        list.addBig(controls.get(Control.SKY_EV));
         list.addBig(controls.get(Control.EMISSION_POWER_MIX));
         list.addBig(controls.get(Control.BLOCK_EMISSION_EV));
         list.addBig(controls.get(Control.STARS));
@@ -248,10 +247,9 @@ public final class PrimeVideoOptions {
                 !PrimeClient.settings().nativeNoisyOutput();
         list.findOption(dlssQuality).active = PrimeClient.controlsAvailable() && !frozen &&
                                               !PrimeClient.settings().nativeNoisyOutput();
-        for (var control :
-             List.of(Control.BOUNCES, Control.SUN_EV, Control.SKY_EV, Control.EMISSION_POWER_MIX,
-                     Control.BLOCK_EMISSION_EV, Control.STARS, Control.LATITUDE,
-                     Control.SOLAR_LONGITUDE, Control.ATMOSPHERE_ALTITUDE_OFFSET))
+        for (var control : List.of(Control.BOUNCES, Control.SUN_EV, Control.EMISSION_POWER_MIX,
+                                   Control.BLOCK_EMISSION_EV, Control.STARS, Control.LATITUDE,
+                                   Control.SOLAR_LONGITUDE, Control.ATMOSPHERE_ALTITUDE_OFFSET))
             list.findOption(controls.get(control)).active = !frozen;
         list.findOption(view).active = !frozen;
         list.findOption(controls.get(Control.DEPTH_RANGE)).active = !frozen;

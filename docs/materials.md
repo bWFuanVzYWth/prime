@@ -82,7 +82,7 @@ evaluate要求response/PDF有限非负，非法时整组清零；sample要求有
 
 ## 发光与介质
 
-Lab全源A=255与翻译后全源G=0均保留宿主发光。只有纹理发光时，真实强度为当前G/255乘1.5；只有方块发光时，沿用`1.5*(lightLevel/15)^2`与共享Color。两者都发光时，对纹理幅度应用`lerp(1, texture_gain, emissionMix)`。功率混合默认50%，0%服从纹理，100%服从方块提议的功率；独立的方块发光EV默认0，以`2^EV`统一缩放物理局部发光，不影响太阳、天空与unlit文字。改变设置只更新renderer lighting controls及输运历史，不重新编译来源或灯表。
+Lab全源A=255与翻译后全源G=0均保留宿主发光。材质发光基础幅度固定为1：只有纹理发光时，真实强度为当前G/255；只有方块发光时，使用`(lightLevel/15)^2`与共享Color。两者都发光时，对纹理幅度应用`lerp(1, texture_gain, emissionMix)`。功率混合默认50%，0%服从纹理，100%服从方块提议的功率；独立的方块发光EV默认0，以`2^EV`统一缩放物理局部发光，不影响太阳、天空与unlit文字。改变设置只更新renderer lighting controls及输运历史，不重新编译来源或灯表。
 
 `texture_gain`在资源代准备时根据sRGB解码后的共享Color亮度、G、coverage与完整声明动画时长建立固定参考。两轴均不超过64的源，面编译按实际两半三角形的UV及世界面积求`native*integral(Color)/integral(Color*G)`：常见矩形域以积分表O(1)求值，一般域裁切texel面积；高分辨率、越界/repeat与非定点的rank-one UV使用全sprite参考，避免大图积分缓存和逐面裁切成本。校准保留纹理亮暗图案，没有逐帧消除闪烁，也不截断亮像素。固定动画端点/时长与未染色Color是简单艺术参考，并不宣称任意插值相位、顶点tint或后续几何裁切下精确保持通量。没有方块提议、参考积分为零及动态raw只有纹理来源时不混合。
 

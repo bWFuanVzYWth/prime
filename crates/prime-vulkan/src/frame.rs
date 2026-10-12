@@ -662,7 +662,6 @@ impl Renderer {
         let transport_changed = !settings.transport_matches(self.settings);
         let lighting_changed = settings.astronomy != self.settings.astronomy
             || settings.sun != self.settings.sun
-            || settings.sky != self.settings.sky
             || settings.emission_power_mix != self.settings.emission_power_mix
             || settings.block_emission_ev != self.settings.block_emission_ev
             || settings.stars != self.settings.stars;
@@ -1477,7 +1476,7 @@ impl Renderer {
             camera.up[0],
             camera.up[1],
             camera.up[2],
-            self.settings.sky,
+            0.0, // Reserved former independent sky scale; sky consumes the solar lane.
         ];
         for (destination, value) in push[..64].as_chunks_mut::<4>().0.iter_mut().zip(values) {
             *destination = value.to_le_bytes();

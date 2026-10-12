@@ -735,7 +735,7 @@ mod tests {
                 .unwrap();
             assert_eq!(&*actual.pixels, &*data.mers.pixels);
             if channel == 1 {
-                let expected = 1.5 * context.catalog.sprites[&1].emission_maximum().unwrap();
+                let expected = context.catalog.sprites[&1].emission_maximum().unwrap();
                 let state = State {
                     id: 1,
                     model: 1,
@@ -943,7 +943,7 @@ mod tests {
                         6,
                         "{name} version{version} external={external_zero}"
                     );
-                    let expected = [1.5; 3];
+                    let expected = [1.; 3];
                     assert!(faces.iter().all(|face| face.emission.radiance == expected));
                     let mesh = prime_scene::surface::SurfaceMesh::from_resolved(1, faces).unwrap();
                     assert_eq!(mesh.lights.emitters.len(), 6);

@@ -296,7 +296,7 @@ impl Atmosphere {
             environment.sun_direction[0],
             environment.sun_direction[1],
             environment.sun_direction[2],
-            12.5,
+            0., // Reserved; the physical solar spectrum is fixed in photometry.slang.
             camera.position[0],
             camera.position[1],
             camera.position[2],

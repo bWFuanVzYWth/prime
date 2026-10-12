@@ -232,6 +232,13 @@ public float4 restirTransmitted(SurfaceHit hit) {
     // RA-011: physical thin inside follows the authored negative side, not maximum IOR.
     return hit.thin ? primeThinInsideMedium(hit) : hit.transmitted;
 }
+public float3 restirEnvironmentRadiance(RestirScene scene, uint type, float3 direction) {
+    return type == RESTIR_LIGHT_SUN
+                   ? (atmSunContains(scene.environment, direction)
+                              ? atmSunRadiance(scene.environment, direction) * scene.frame.right.w
+                              : float3(0))
+                   : atmSky(scene.environment, direction, scene.frame.right.w);
+}
 #if !defined(PRIME_RESTIR_MATERIAL_ONLY)
 public bool restirDirectLightSupported(SurfaceHit hit, float3 view, float3 direction) {
     if (hit.optical)
@@ -295,14 +302,6 @@ public float restirEnvironmentPdf(RestirScene scene, uint type, float3 direction
                    ? (1.0 - restirLocalSelectionProbability(scene)) * atmSunPdf()
                    : 0.0;
 }
-public float3 restirEnvironmentRadiance(RestirScene scene, uint type, float3 direction) {
-    return type == RESTIR_LIGHT_SUN
-                   ? (atmSunContains(scene.environment, direction)
-                              ? atmSunRadiance(scene.environment, direction) * scene.frame.right.w
-                              : float3(0))
-                   : atmSky(scene.environment, direction, scene.frame.up.w);
-}
-
 public struct RestirLightSample {
     public float3 direction;
     public float3 Le;

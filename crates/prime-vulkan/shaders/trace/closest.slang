@@ -276,7 +276,7 @@ float3 sourceEmissionResolved(TraceScene resources, SurfaceRecord record, Source
                              ? lerp(1.0, record.emission.a, resources.emissionSettings.x)
                              : 1.0;
         return decodeSrgb(saturate(source.color.rgb)) *
-               (1.5 * value * gain * resources.emissionSettings.y);
+               (value * gain * resources.emissionSettings.y);
     }
     return record.emission.rgb * resources.emissionSettings.y *
            ((record.identity.w & 16) != 0 ? decodeSrgb(saturate(source.color.rgb)) : float3(1));

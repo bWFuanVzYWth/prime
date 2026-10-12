@@ -98,7 +98,6 @@ fn gpu_restir_source_resource_reload_retains_history_and_withdraws_old_geometry(
         mode: RenderMode::Realtime,
         bounces: 2,
         sun: 1. / 256.,
-        sky: 1. / 256.,
         stars: 0.,
         auto_exposure_compensation: 0.,
         native_noisy_output: true,
@@ -210,7 +209,6 @@ fn gpu_restir_retains_history_without_a_proved_global_change() {
         mode: RenderMode::Realtime,
         bounces: 6,
         sun: 1. / 256.,
-        sky: 1. / 256.,
         stars: 0.,
         auto_exposure_compensation: 0.,
         native_noisy_output: true,
@@ -401,7 +399,6 @@ fn gpu_restir_temporal_update_replays_all_cached_suffix_cases() {
         mode: RenderMode::Offline,
         bounces: 6,
         sun: 1. / 256.,
-        sky: 1. / 256.,
         stars: 0.,
         native_noisy_output: true,
         opacity_micromap: false,
@@ -464,7 +461,7 @@ fn gpu_restir_temporal_update_replays_all_cached_suffix_cases() {
                         );
                     }
                     if row[15] == 0 {
-                        // Recorded sky endpoint: double sky exposure doubles the contribution.
+                        // Recorded sky endpoint: double solar intensity doubles the scattered-sky contribution.
                         let expected = actual * 2.;
                         let brighter = value[12 + channel];
                         let error = (expected - brighter).abs()
@@ -728,7 +725,6 @@ fn stable_quad_fixture(endpoint_only: bool) {
         mode: RenderMode::Realtime,
         bounces: 1,
         sun: 1. / 256.,
-        sky: 1. / 256.,
         stars: 0.,
         // Request the realtime linear intermediate read by snapshot().
         // The copied radiance is before display exposure adaptation.

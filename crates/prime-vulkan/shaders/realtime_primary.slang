@@ -23,7 +23,6 @@ import "realtime/primary_environment.slang";
                             instanceMaterials,
                             staticTrianglePages,
                             renderLightingControls.emission.xy};
-    PrimaryEnvironment environment = {atmosphereLighting(), parameters.right.w, parameters.up.w,
-                                      false};
+    PrimaryEnvironment environment = {atmosphereLighting(), parameters.right.w, false};
     primeTracePrimary(resources, environment, parameters, id.xy, NoPrimaryGuides());
 }

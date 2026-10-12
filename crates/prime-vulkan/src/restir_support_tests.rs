@@ -479,7 +479,6 @@ fn support_fixture() {
         light_sampling: prime_scene::settings::LightSampling::Tree,
         bounces: 1,
         sun: 1. / 256.,
-        sky: 1. / 256.,
         stars: 0.,
         auto_exposure_compensation: 0.1,
         native_noisy_output: true,

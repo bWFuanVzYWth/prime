@@ -164,7 +164,7 @@ impl PushInputs {
                 camera.up[0],
                 camera.up[1],
                 camera.up[2],
-                self.settings.sky,
+                0.0,
             ],
         );
         u32s(&mut push[64..80], &self.sampling());
@@ -201,10 +201,7 @@ impl PushInputs {
         } else {
             0.0
         };
-        f32s(
-            &mut push[32..48],
-            &[self.settings.sun, self.settings.sky, spread, 0.0],
-        );
+        f32s(&mut push[32..48], &[self.settings.sun, 0.0, spread, 0.0]);
         addresses(
             &mut push[48..],
             &[
@@ -357,6 +354,24 @@ mod tests {
         }
         .post();
         assert_eq!((word(&raw, 64), word(&raw, 68), word(&raw, 76)), (0, 0, 0));
+    }
+
+    #[test]
+    fn one_solar_scale_drives_all_stage_inputs_and_previous_sky_lanes_are_reserved() {
+        for solar in [0.25, 1.0, 2.0] {
+            let mut input = inputs();
+            input.settings.sun = solar;
+            let primary = input.primary();
+            let transport = input.transport(true);
+            let post = input.post();
+            assert_eq!((primary.len(), transport.len(), post.len()), (128, 80, 112));
+            assert_eq!(f32::from_bits(word(&primary, 44)), solar);
+            assert_eq!(word(&primary, 60), 0);
+            assert_eq!(f32::from_bits(word(&transport, 32)), solar);
+            assert_eq!(word(&transport, 36), 0);
+            assert_eq!(f32::from_bits(word(&post, 24)), solar);
+            assert_eq!(input.settings.stars, 1.0);
+        }
     }
 
     #[test]

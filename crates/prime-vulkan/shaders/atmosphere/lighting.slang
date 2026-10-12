@@ -3,6 +3,7 @@ module "atmosphere/lighting.slang";
 __exported import "atmosphere/view_types.slang";
 import "atmosphere/constants.slang";
 import "atmosphere/starmap.slang";
+import "atmosphere/photometry.slang";
 public struct AtmLighting {
     public StructuredBuffer<AtmFrame> frames;
     public Sampler2D<float4> sky;
@@ -58,8 +59,8 @@ public float3 atmStars(AtmLighting environment, float3 direction) {
     return environment.stars.SampleLevel(primeStarmapUv(frame, direction), 0).rgb *
            environment.starControls.z * transmittance;
 }
-public float3 atmSky(AtmLighting environment, float3 direction, float skyIntensity) {
-    return atmSkyWithoutStars(environment, direction) * skyIntensity +
+public float3 atmSky(AtmLighting environment, float3 direction, float solarIntensity) {
+    return atmSkyWithoutStars(environment, direction) * solarIntensity +
            atmStars(environment, direction);
 }
 public float3 atmSky(AtmLighting environment, float3 direction) {
@@ -85,6 +86,10 @@ public float3 atmSampleSun(AtmLighting environment, float2 sample) {
                      f.bitangent.xyz * (sine * sin(azimuth)) + f.sun.xyz * cosine);
 }
 public float3 atmSunRadiance(AtmLighting environment, float3 direction) {
-    return (ATM_SPACE_SUN_INTENSITY / atmSunSolidAngle()) *
+    // E_perpendicular = L * integral_disk(cos(theta) dOmega), while the sampling PDF
+    // continues to use the unprojected solid angle. The angular radius is fixed.
+    float sine = sin(ATM_SUN_ANGULAR_RADIUS_RADIANS);
+    float projectedSolidAngle = ATM_PI * sine * sine;
+    return (atmSolarIrradiance() / projectedSolidAngle) *
            atmDistantTransmittance(environment, direction);
 }

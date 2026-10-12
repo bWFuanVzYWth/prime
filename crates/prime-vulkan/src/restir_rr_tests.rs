@@ -183,7 +183,6 @@ impl Fixture {
             mode: RenderMode::Realtime,
             bounces: 6,
             sun: 1.0 / 256.0,
-            sky: 1.0 / 256.0,
             stars: 0.0,
             native_noisy_output: true,
             opacity_micromap: false,

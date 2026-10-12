@@ -1133,7 +1133,6 @@ mod abi_tests {
             compression_start: 0.5,
             view: 0,
             sun: 1.0,
-            sky: 1.0,
             depth_range: 128.0,
             seed: 0x13572468,
             latitude_degrees: 30,

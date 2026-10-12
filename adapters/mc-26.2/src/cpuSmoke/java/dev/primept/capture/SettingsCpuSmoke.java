@@ -467,6 +467,8 @@ public final class SettingsCpuSmoke {
                     assertRestirOptions(restirScreen, translations, false);
                     check(list.findOption(terrainBatches).active,
                           "Frozen terrain scheduling control stays available");
+                    check(!list.findOption(controls.get(RenderSettings.Control.SUN_EV)).active,
+                          "Frozen shared solar intensity stays fixed");
                     check(!list.findOption(controls.get(RenderSettings.Control.STARS)).active,
                           "Frozen star lighting control stays fixed");
                     for (var control : List.of(RenderSettings.Control.EMISSION_POWER_MIX,
@@ -542,6 +544,7 @@ public final class SettingsCpuSmoke {
                                       list.findOption(dlssQuality).active,
                               "Realtime reconstruction controls become available");
                         testEmissionSliders(list, controls, translations);
+                        testSolarSlider(list, controls, translations);
                         var originalSettings = PrimeClient.settings();
                         PrimeClient.updateSettings(
                                 originalSettings.withRenderer(RenderSettings.Renderer.RESTIR_PT));
@@ -643,6 +646,10 @@ public final class SettingsCpuSmoke {
                             for (var child : container.children())
                                 if (child instanceof AbstractWidget widget) {
                                     String label = widget.getMessage().getString();
+                                    check(!label.startsWith(locale.equals("en_us") ? "Sky Strength"
+                                                                                   : "天空强度"),
+                                          "Retired independent sky slider must be absent: " +
+                                                  label);
                                     check(!label.contains("primept.settings."),
                                           "Unresolved label " + label);
                                     if (widget instanceof net.minecraft.client.gui.components
@@ -726,8 +733,8 @@ public final class SettingsCpuSmoke {
                   "Prime reset commits pending vanilla slider changes before rebuilding");
             check(PrimeClient.settings().equals(RenderSettings.defaults()),
                   "Reset action restores defaults");
-            check(PrimeClient.settings().value(RenderSettings.Control.SATURATION) == 10,
-                  "Reset restores 10% saturation");
+            check(PrimeClient.settings().value(RenderSettings.Control.SATURATION) == 4,
+                  "Reset restores 4% saturation");
             assertVideoGroups(screen);
         }
     }
@@ -1037,10 +1044,8 @@ public final class SettingsCpuSmoke {
                 check(slider.getMessage().getString().endsWith(suffix),
                       "Actual emission slider presents its numeric units: " + suffix);
                 check(PrimeClient.settings().value(RenderSettings.Control.SUN_EV) ==
-                                      original.value(RenderSettings.Control.SUN_EV) &&
-                              PrimeClient.settings().value(RenderSettings.Control.SKY_EV) ==
-                                      original.value(RenderSettings.Control.SKY_EV),
-                      "Emission callbacks preserve the independent Sun and sky controls");
+                              original.value(RenderSettings.Control.SUN_EV),
+                      "Emission callbacks preserve the shared solar control");
                 check(SettingsFile.decode(SettingsFile.encode(PrimeClient.settings()))
                               .settings()
                               .equals(PrimeClient.settings()),
@@ -1052,6 +1057,47 @@ public final class SettingsCpuSmoke {
         }
         check(PrimeClient.settings().equals(original),
               "Emission sliders restore the exact settings");
+    }
+
+    private static void
+    testSolarSlider(OptionsList list,
+                    java.util.EnumMap<RenderSettings.Control, OptionInstance<Integer>> controls,
+                    HashMap<String, String> translations) throws Exception {
+        var original = PrimeClient.settings();
+        var control = RenderSettings.Control.SUN_EV;
+        var option = controls.get(control);
+        var slider = (AbstractSliderButton)list.findOption(option);
+        check(slider.active, "Realtime shared solar intensity is enabled");
+        check(!translations.containsKey("primept.settings.lighting.sky_ev_quarters") &&
+                      !translations.containsKey(
+                              "primept.settings.lighting.sky_ev_quarters.tooltip"),
+              "Fabric language resources remove the independent sky caption and tooltip");
+        var setValue = AbstractSliderButton.class.getDeclaredMethod("setValue", double.class);
+        setValue.setAccessible(true);
+        for (int value : new int[] {-32, -13, 0, 17, 32}) {
+            setValue.invoke(slider, (double)(value - control.minimum) /
+                                            (control.maximum - control.minimum));
+            list.applyUnsavedChanges();
+            check(option.get() == value && PrimeClient.settings().value(control) == value,
+                  "Actual solar slider applies and persists the exact EV callback");
+            assertSingleCaption(slider, translations.get("primept.settings." + control.key));
+            check(slider.getMessage().getString().endsWith(
+                          String.format(java.util.Locale.ROOT, "%+.2f EV", value / 4.0)),
+                  "Shared solar slider retains quarter-EV units and one title");
+            check(PrimeClient.settings().value(RenderSettings.Control.STARS) ==
+                                  original.value(RenderSettings.Control.STARS) &&
+                          PrimeClient.settings().value(RenderSettings.Control.BLOCK_EMISSION_EV) ==
+                                  original.value(RenderSettings.Control.BLOCK_EMISSION_EV),
+                  "Solar callbacks preserve independent star and block/material intensities");
+            var loaded = SettingsFile.decode(SettingsFile.encode(PrimeClient.settings()));
+            check(loaded.settings().equals(PrimeClient.settings()) &&
+                          !SettingsFile.encode(loaded.settings()).contains("lighting.sky_"),
+                  "Shared solar slider persists without a retired sky field");
+        }
+        setValue.invoke(slider, (double)(original.value(control) - control.minimum) /
+                                        (control.maximum - control.minimum));
+        list.applyUnsavedChanges();
+        check(PrimeClient.settings().equals(original), "Solar slider restores the exact settings");
     }
 
     private static void assertRootCaptions(PrimeVideoOptions owner, OptionsList list,

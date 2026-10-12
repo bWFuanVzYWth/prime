@@ -47,7 +47,7 @@ fn main() {
         &mut shaders,
         "tests/shaders/atmosphere.slang",
         "atmosphere_test",
-        &[],
+        &["PRIME_RESTIR_MATERIAL_ONLY"],
     );
     build_support::build(&shaders);
 }

@@ -33,7 +33,7 @@ RestirScene restirScene(bool previous = false) {
     // RA-011, docs/restir-adaptations.md: both directions use current-scene illumination;
     // camera, sampling identity and accepted jitter come from the previous frame.
     result.frame.right.w = parameters.frame.right.w;
-    result.frame.up.w = parameters.frame.up.w;
+    result.frame.up.w = 0.0;
     // RA-010, docs/restir-adaptations.md: offline per-sample offset enters here once.
     if (!previous)
         result.frame.target.y += pass.sampleOffset;

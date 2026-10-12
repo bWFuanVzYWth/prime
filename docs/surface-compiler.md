@@ -73,9 +73,9 @@ Java 转录真实 sprite 身份、atlas bounds、帧尺寸、原始帧序列/时
 
 有效`format=lab-pbr/1.3`的原图由Java读取，Rust转换成固定Color/MERS/Aux、生成mip和动画。Color/MERS/Aux每mip层内最近点、跨mip线性，近景保留像素边界；MERS各通道参与CPU mip平均和动画连续插值。Aux的CPU mip/动画按GGX moment准备，GPU跨mip插值沿用轻量RGBA近似；IOR固定当前帧mip0点采。命中与NEE/ReSTIR发光采用同一当前帧mip0 Color/G域，不随散射LOD改变。SSS按内部A/255消费，主/第二层分别使用完整来源的薄壁证明，厚体或未知回退常规opaque。AO、porosity、未使用height不保留；植物近似与闭包支持域见[材质合同](materials.md)。
 
-游戏发光使用实际 block/quad emission 的较大值，按旧校准 `1.5 * (level/15)^2` 变为线性 BT.709 RGB，再乘采样点的解码纹理×tint。岩浆进入相同路径。光源从最终面提取，每个物理 patch 只计一次；复合面 proposal 覆盖两侧/层的功率上界，实际采样按选侧/coverage 计算发光，涂层挡住的底层不泄漏。
+游戏发光使用实际 block/quad emission 的较大值，以基础幅度1的艺术提议 `(level/15)^2` 变为线性 BT.709 RGB，再乘采样点的解码纹理×tint；宿主light level是序数，不是实测光度单位。岩浆进入相同路径，原版最高级发光为`[1;3]`。有纹理发光时，CPU提议上界为`maxG*max(texture_gain,1)`，实际辐亮度消费当前G、功率混合和独立EV；整体基准同时缩放宿主和纹理，不改变功率校准比值。光源从最终面提取，每个物理 patch 只计一次；复合面 proposal 覆盖两侧/层的功率上界，实际采样按选侧/coverage 计算发光，涂层挡住的底层不泄漏。
 
-Lab源A在准备时转为内部MERS G，内嵌与外部Lab完整源G0均继承宿主发光；有正G时保留纹理亮暗图案。仅双方发光才应用可调功率混合，默认50%，独立EV统一缩放物理局部发光。CPU使用完整源幅度上界建立灯权重，命中/NEE使用当前mip0采样；校准参考、艺术近似与支持域由[材质契约](materials.md#发光与光学)维护。
+Lab源A在准备时转为内部MERS G，内嵌与外部Lab完整源G0均继承宿主发光；有正G时保留纹理亮暗图案。仅双方发光才应用可调功率混合，默认50%，独立EV统一缩放物理局部发光。CPU使用完整源幅度上界建立灯权重，命中/NEE使用当前mip0采样；校准参考、艺术近似与支持域由[材质契约](materials.md#发光与介质)维护。
 
 静水/流水主动排除内嵌PBR粗糙度与法线，保留原版Color/动画与水IOR/消光。稀疏发光的texel重要性提议和功率校准独立；前者改变采样方差，后者改变实际幅值，不能由提议权重推断照明增强。
 

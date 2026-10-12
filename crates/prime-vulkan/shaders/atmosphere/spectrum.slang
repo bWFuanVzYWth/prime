@@ -6,6 +6,7 @@ import "atmosphere/resources.slang";
 
 import "atmosphere/parameters.slang";
 import "atmosphere/sky.slang";
+__exported import "atmosphere/photometry.slang";
 
 public struct AtmMedium {
     public float4 extinction;
@@ -59,18 +60,9 @@ public float4 atmTabulatedPhase(AtmModel model, AtmPhaseStencil stencil, uint sp
     let offset = ATM_OFFSETS0.w + species * 1024u + stencil.index;
     return lerp(model.data[offset], model.data[offset + 1u], stencil.fraction);
 }
-public float3 atmLinearRec2020FromSpectral(float4 value) {
-    return value[0] * float3(5.8809709548950195, -7.0044331550598145, 90.48178100585938) +
-           value[1] * float3(-14.151336669921875, 54.43069839477539, 8.974457740783691) +
-           value[2] * float3(87.37126159667969, 58.01542282104492, -1.4691294431686401) +
-           value[3] * float3(31.710432052612305, -1.2180235385894775, 0.05091293156147003);
-}
-
-// Normalize the fitted solar spectrum to Prime's existing achromatic extraterrestrial sun.
-// Scaling after spectral transport preserves linearity of every scattering order.
+// Use the same scalar solar baseline as the disk, preserving relative spectral transport.
 public float3 atmRadiance(float4 value) {
-    return max(atmLinearRec2020FromSpectral(value), float3(0.0)) *
-           (ATM_SPACE_SUN_INTENSITY / atmLinearRec2020FromSpectral(ATM_SOLAR));
+    return max(atmLinearRec2020FromSpectral(value), float3(0.0)) * atmSolarSourceScale();
 }
 public float3 atmRec2020Transmittance(float4 value) {
     return clamp(atmLinearRec2020FromSpectral(value * ATM_SOLAR) /

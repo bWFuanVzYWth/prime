@@ -9,12 +9,11 @@ public interface IPrimaryEnvironment {
 public struct PrimaryEnvironment : IPrimaryEnvironment {
     public AtmLighting lighting;
     public float sunIntensity;
-    public float skyIntensity;
     public bool omitCameraStars;
     public float3 escape(float3 direction, bool initialCameraMiss) {
         float3 result = omitCameraStars && initialCameraMiss
-                                ? atmSkyWithoutStars(lighting, direction) * skyIntensity
-                                : atmSky(lighting, direction, skyIntensity);
+                                ? atmSkyWithoutStars(lighting, direction) * sunIntensity
+                                : atmSky(lighting, direction, sunIntensity);
         if (atmSunContains(lighting, direction))
             result += atmSunRadiance(lighting, direction) * sunIntensity;
         return result;

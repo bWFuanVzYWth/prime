@@ -96,7 +96,7 @@ void stableQuadProbe(RestirScene resources, uint index) {
             variantSource.reconnectionIncidentRadiance = float3(123.0, 321.0, 456.0);
             variantSource.lightPdf = 17.0;
         } else if (variant == 3) {
-            variantScene.frame.up.w *= 2.0;
+            variantScene.frame.right.w *= 2.0;
         }
         PrecomputedShiftData shifted =
                 restirShift(variantScene, primary, wo, variantSource, replay, variant != 0);

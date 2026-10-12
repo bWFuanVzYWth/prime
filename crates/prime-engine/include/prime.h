@@ -1,7 +1,7 @@
 #ifndef PRIME_PT_H
 #define PRIME_PT_H
 #include <stdint.h>
-#define PRIME_ABI_VERSION 20
+#define PRIME_ABI_VERSION 21
 #define PRIME_MAX_BATCH_BYTES 268435456
 #define PRIME_DIAGNOSTICS_ENABLED 1
 #define PRIME_DIAGNOSTICS_CAPTURE 2
@@ -76,11 +76,14 @@ typedef struct PrimeSettings {
     uint32_t offline_samples;
     float exposure;
     float hue;
+    /* primeDRT artistic saturation compensation; default 0.04, range 0..0.5.
+       Existing explicit saved values remain authoritative. */
     float saturation;
     float compression_start;
     uint32_t view;
+    /* Shared solar multiplier for direct sunlight and its scattered sky; default 1,
+       range 1/256..256. Stars remain independent. */
     float sun;
-    float sky;
     float depth_range;
     uint32_t seed;
     int32_t latitude_degrees;
